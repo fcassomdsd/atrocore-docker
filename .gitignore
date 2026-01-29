@@ -1,5 +1,5 @@
 .idea/
 data/
-
+web-data/
 .env
 docker-compose.override.yaml
