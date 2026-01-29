@@ -9,7 +9,11 @@ fi
 
 modify_container_files() {
     local domain=$1
+<<<<<<< HEAD
     local container_name="web"
+=======
+    local container_name="atro-web"
+>>>>>>> 856d61f (something)
 
     docker compose exec $container_name bash -c "tee \"/etc/apache2/sites-available/${domain}.conf\" > /dev/null << EOL
 <VirtualHost *:80>
@@ -39,4 +43,8 @@ if [ ! -z "$TESTING_DOMAIN" ]; then
 fi
 
 
+<<<<<<< HEAD
 docker compose exec web service apache2 reload
+=======
+docker compose exec atro-web service apache2 reload
+>>>>>>> 856d61f (something)

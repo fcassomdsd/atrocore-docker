@@ -3,7 +3,6 @@ services:
     build:
       context: .docker
       dockerfile: php/Dockerfile
-      target: ${BUILD_VARIANT:-base}
       args:
         SKELETON_VARIANT: ${SKELETON_VARIANT:-pim-no-demo}
         PRODUCTION_DOMAIN: ${PRODUCTION_DOMAIN:-localhost}
