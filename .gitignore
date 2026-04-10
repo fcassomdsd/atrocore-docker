@@ -1,10 +1,6 @@
 .idea/
 data/
 web-data/
-<<<<<<< HEAD
-=======
 db-data/
-
->>>>>>> 856d61f (something)
 .env
 docker-compose.override.yaml

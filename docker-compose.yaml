@@ -14,6 +14,9 @@ services:
         TESTING_DB: ${POSTGRES_PIM_DB_TEST}
         DB_USER: ${POSTGRES_PIM_USER}
         DB_PASSWORD: ${POSTGRES_PIM_PASSWORD}
+    environment:
+      PRODUCTION_DOMAIN: ${PRODUCTION_DOMAIN:-localhost}
+      TESTING_DOMAIN: ${TESTING_DOMAIN}
     ports:
       - 80:80
     volumes:

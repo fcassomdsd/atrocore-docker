@@ -1,0 +1,70 @@
+stages:
+  - validate
+
+default:
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+    SKELETON_VARIANT: atrocore
+    BUILD_VARIANT: base
+    PRODUCTION_DOMAIN: localhost
+    PRODUCTION_STABILITY: stable
+    TESTING_DOMAIN: ""
+    TESTING_STABILITY: rc
+    POSTGRES_PASSWORD: ci_postgres_password
+    POSTGRES_PIM_USER: ci_user
+    POSTGRES_PIM_PASSWORD: ci_password
+    POSTGRES_PIM_DB: atrocore
+    POSTGRES_PIM_DB_TEST: ""
+  before_script:
+    - docker version
+    - docker compose version
+    - |
+      cat > .env <<EOF
+      SKELETON_VARIANT=${SKELETON_VARIANT}
+      BUILD_VARIANT=${BUILD_VARIANT}
+      PRODUCTION_DOMAIN=${PRODUCTION_DOMAIN}
+      PRODUCTION_STABILITY=${PRODUCTION_STABILITY}
+      TESTING_DOMAIN=${TESTING_DOMAIN}
+      TESTING_STABILITY=${TESTING_STABILITY}
+      POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      POSTGRES_PIM_USER=${POSTGRES_PIM_USER}
+      POSTGRES_PIM_PASSWORD=${POSTGRES_PIM_PASSWORD}
+      POSTGRES_PIM_DB=${POSTGRES_PIM_DB}
+      POSTGRES_PIM_DB_TEST=${POSTGRES_PIM_DB_TEST}
+      EOF
+
+blank_instance_check:
+  stage: validate
+  script:
+    - rm -rf db-data web-data
+    - mkdir -p db-data web-data
+    - docker compose up -d --build db atro-web
+    - docker compose ps
+    - docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -c "SELECT 1;"
+    - ./scripts/backup-db.sh
+    - test -n "$(find db-dumps -maxdepth 1 -type f -name '*.dump' -size +0c | head -n 1)"
+  after_script:
+    - docker compose down -v || true
+
+demo_seed_check:
+  stage: validate
+  script:
+    - rm -rf db-data web-data
+    - mkdir -p db-data web-data
+    - docker compose up -d --build db atro-web
+    - ./scripts/seed-demo-db.sh --yes
+    - |
+      table_count=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -At -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';")
+      if [ "$table_count" -le 0 ]; then
+        echo "Expected demo seed to create public tables, found: $table_count"
+        exit 1
+      fi
+      echo "Demo seed check passed with $table_count public tables."
+  after_script:
+    - docker compose down -v || true
