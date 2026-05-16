@@ -1,26 +1,27 @@
 stages:
   - validate
 
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_DRIVER: overlay2
+  SKELETON_VARIANT: atrocore
+  BUILD_VARIANT: base
+  PRODUCTION_DOMAIN: localhost
+  PRODUCTION_STABILITY: stable
+  TESTING_DOMAIN: ""
+  TESTING_STABILITY: rc
+  POSTGRES_PASSWORD: ci_postgres_password
+  POSTGRES_PIM_USER: ci_user
+  POSTGRES_PIM_PASSWORD: ci_password
+  POSTGRES_PIM_DB: atrocore
+  POSTGRES_PIM_DB_TEST: ""
+
 default:
   image: docker:27
   services:
     - name: docker:27-dind
       command: ["--tls=false"]
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    DOCKER_DRIVER: overlay2
-    SKELETON_VARIANT: atrocore
-    BUILD_VARIANT: base
-    PRODUCTION_DOMAIN: localhost
-    PRODUCTION_STABILITY: stable
-    TESTING_DOMAIN: ""
-    TESTING_STABILITY: rc
-    POSTGRES_PASSWORD: ci_postgres_password
-    POSTGRES_PIM_USER: ci_user
-    POSTGRES_PIM_PASSWORD: ci_password
-    POSTGRES_PIM_DB: atrocore
-    POSTGRES_PIM_DB_TEST: ""
   before_script:
     - docker version
     - docker compose version
