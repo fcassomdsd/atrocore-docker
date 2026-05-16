@@ -49,6 +49,7 @@ docker compose exec -T db pg_restore \
   -d "${TARGET_DB}" \
   --clean \
   --if-exists \
-  --no-owner < "${DUMP_FILE}"
+  --no-owner \
+  --no-acl < "${DUMP_FILE}"
 
 echo "Restore completed."
