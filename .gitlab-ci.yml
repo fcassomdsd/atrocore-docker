@@ -46,6 +46,20 @@ blank_instance_check:
     - rm -rf db-data web-data
     - mkdir -p db-data web-data
     - docker compose up -d --build db atro-web
+    - |
+      for i in $(seq 1 60); do
+        if docker compose exec -T db pg_isready -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" >/dev/null 2>&1; then
+          echo "PostgreSQL is ready"
+          break
+        fi
+        if [ "$i" -eq 60 ]; then
+          echo "PostgreSQL did not become ready in time"
+          docker compose logs db || true
+          exit 1
+        fi
+        echo "Waiting for PostgreSQL to be ready... ($i/60)"
+        sleep 2
+      done
     - docker compose ps
     - docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -c "SELECT 1;"
     - ./scripts/backup-db.sh
@@ -59,6 +73,20 @@ demo_seed_check:
     - rm -rf db-data web-data
     - mkdir -p db-data web-data
     - docker compose up -d --build db atro-web
+    - |
+      for i in $(seq 1 60); do
+        if docker compose exec -T db pg_isready -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" >/dev/null 2>&1; then
+          echo "PostgreSQL is ready"
+          break
+        fi
+        if [ "$i" -eq 60 ]; then
+          echo "PostgreSQL did not become ready in time"
+          docker compose logs db || true
+          exit 1
+        fi
+        echo "Waiting for PostgreSQL to be ready... ($i/60)"
+        sleep 2
+      done
     - ./scripts/seed-demo-db.sh --yes
     - |
       table_count=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -At -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';")
