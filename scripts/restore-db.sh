@@ -48,6 +48,7 @@ docker compose exec -T db pg_restore \
   -U "${POSTGRES_PIM_USER}" \
   -d "${TARGET_DB}" \
   --clean \
-  --if-exists < "${DUMP_FILE}"
+  --if-exists \
+  --no-owner < "${DUMP_FILE}"
 
 echo "Restore completed."
