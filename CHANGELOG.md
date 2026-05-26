@@ -2,9 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
-The format is inspired by Keep a Changelog and this project uses date-based release entries.
+The format is inspired by Keep a Changelog and uses semantic versioning for release entries.
 
-## [2026-05-17]
+## [0.1.0] - 2026-05-26
+
+First development release. This version has not been deployed to production environments yet.
 
 ### Fixed
 
@@ -17,7 +19,3 @@ The format is inspired by Keep a Changelog and this project uses date-based rele
 ### Documentation
 
 - Update project documentation and add governance/compliance documents: `README.md`, `LICENSE`, `NOTICE`, `CONTRIBUTING.md`, and `CODE_OF_CONDUCT.md`. (`c8e385b`)
-
-### Merged
-
-- Merge branch `chore/review-readme` into `develop`. (`3484196`)
