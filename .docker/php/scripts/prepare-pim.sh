@@ -49,7 +49,9 @@ if [[ -d "$3" ]]; then
     exit 0;
 fi
 
-git clone "https://gitlab.atrocore.com/atrocore/skeleton-$1.git" "$3"
+#git clone "https://gitlab.atrocore.com/atrocore/skeleton-$1.git" "$3"
+git clone "https://github.com/atrocore/skeleton-$1.git" "$3"
+
 
 cd "/var/www/$3"
 
