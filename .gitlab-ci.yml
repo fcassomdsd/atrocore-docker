@@ -1,5 +1,6 @@
 stages:
   - validate
+  - release
 
 variables:
   DOCKER_HOST: tcp://docker:2375
@@ -98,3 +99,29 @@ demo_seed_check:
       echo "Demo seed check passed with $table_count public tables."
   after_script:
     - docker compose down -v || true
+
+compute_release_tag:
+  stage: release
+  image: alpine:latest
+  before_script: []
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - echo "RELEASE_TAG=$(date +%Y-%m-%d)" >> release.env
+  artifacts:
+    reports:
+      dotenv: release.env
+
+create_release:
+  stage: release
+  needs: ["compute_release_tag"]
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  before_script: []
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - echo "Creating release $RELEASE_TAG"
+  release:
+    tag_name: '$RELEASE_TAG'
+    description: "Release $RELEASE_TAG"
+    ref: '$CI_COMMIT_SHA'
