@@ -1,0 +1,51 @@
+[
+  {
+    "label": "Details",
+    "rows": [
+      [
+        {
+          "name": "name"
+        },
+        {
+          "name": "active"
+        }
+      ],
+      [
+        {
+          "name": "inspectedProvider"
+        },
+        {
+          "name": "specialty"
+        }
+      ],
+      [
+        {
+          "name": "location"
+        },
+        {
+          "name": "activityType"
+        }
+      ],
+      [
+        {
+          "name": "intervalMonths"
+        },
+        {
+          "name": "nextDueDate"
+        }
+      ],
+      [
+        {
+          "name": "lastScheduledDate"
+        },
+        false
+      ],
+      [
+        {
+          "name": "description"
+        },
+        false
+      ]
+    ]
+  }
+]

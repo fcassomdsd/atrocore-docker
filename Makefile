@@ -1,4 +1,4 @@
-.PHONY: help up down db-backup db-restore db-seed
+.PHONY: help up down db-backup db-restore db-seed metadata-install db-seed-nomenclatura
 
 help:
 	@echo "Available targets:"
@@ -9,6 +9,9 @@ help:
 	@echo "                                Restore dump into DB (destructive)"
 	@echo "  make db-seed [DUMP=atrocore.dump] [DB=...] YES=1"
 	@echo "                                Seed DB with demo data (destructive)"
+	@echo "  make metadata-install          Install tracked metadata/ into web-data/"
+	@echo "  make db-seed-nomenclatura [DB=...] YES=1"
+	@echo "                                Seed Specialty/ActivityType catalogs (destructive)"
 
 up:
 	docker compose up -d
@@ -28,6 +31,21 @@ db-restore:
 		./scripts/restore-db.sh "$(DUMP)" "$(DB)"; \
 	else \
 		./scripts/restore-db.sh "$(DUMP)"; \
+	fi
+
+metadata-install:
+	./scripts/install-metadata.sh
+
+db-seed-nomenclatura:
+	@if [ "$(YES)" != "1" ]; then \
+		echo "Refusing destructive seed without YES=1"; \
+		echo "Usage: make db-seed-nomenclatura [DB=target_db] YES=1"; \
+		exit 1; \
+	fi
+	@if [ -n "$(DB)" ]; then \
+		./scripts/seed-nomenclatura.sh "$(DB)" --yes; \
+	else \
+		./scripts/seed-nomenclatura.sh --yes; \
 	fi
 
 db-seed:
