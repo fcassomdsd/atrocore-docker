@@ -1,0 +1,161 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": true,
+            "trim": true
+        },
+        "description": {
+            "type": "text"
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "sortOrder": {
+            "type": "int",
+            "default": null,
+            "massUpdateDisabled": true,
+            "filterDisabled": true
+        },
+        "protocolQuestions": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "questionTopics": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "locationServices": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "inspectors": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "inspectedSpecialtys": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "code": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "isMultilang": false
+        },
+        "inspectionCadences": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "protocolQuestions": {
+            "type": "hasMany",
+            "foreign": "specialty",
+            "entity": "ProtocolQuestion"
+        },
+        "questionTopics": {
+            "type": "hasMany",
+            "foreign": "specialty",
+            "entity": "QuestionTopic"
+        },
+        "locationServices": {
+            "type": "hasMany",
+            "foreign": "specialty",
+            "relationName": "LocationServiceSpecialty",
+            "entity": "LocationService"
+        },
+        "inspectors": {
+            "type": "hasMany",
+            "foreign": "specialty",
+            "relationName": "InspectorSpecialty",
+            "entity": "Inspector"
+        },
+        "inspectedSpecialtys": {
+            "type": "hasMany",
+            "foreign": "specialty",
+            "entity": "InspectedSpecialty"
+        },
+        "inspectionCadences": {
+            "type": "hasMany",
+            "foreign": "specialty",
+            "entity": "InspectionCadence"
+        }
+    },
+    "indexes": {
+        "name": {
+            "columns": [
+                "name",
+                "deleted"
+            ]
+        },
+        "createdAt": {
+            "columns": [
+                "createdAt",
+                "deleted"
+            ]
+        },
+        "modifiedAt": {
+            "columns": [
+                "modifiedAt",
+                "deleted"
+            ]
+        }
+    },
+    "collection": {
+        "asc": true,
+        "sortBy": "sortOrder"
+    }
+}

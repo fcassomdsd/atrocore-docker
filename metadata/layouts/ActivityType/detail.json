@@ -1,0 +1,27 @@
+[
+  {
+    "label": "Details",
+    "rows": [
+      [
+        {
+          "name": "code"
+        },
+        {
+          "name": "name"
+        }
+      ],
+      [
+        {
+          "name": "sortOrder"
+        },
+        false
+      ],
+      [
+        {
+          "name": "description"
+        },
+        false
+      ]
+    ]
+  }
+]

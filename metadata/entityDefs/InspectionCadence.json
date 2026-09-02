@@ -1,0 +1,176 @@
+{
+  "fields": {
+    "name": {
+      "type": "varchar",
+      "required": true,
+      "trim": true
+    },
+    "description": {
+      "type": "text"
+    },
+    "createdAt": {
+      "type": "datetime",
+      "readOnly": true
+    },
+    "modifiedAt": {
+      "type": "datetime",
+      "readOnly": true
+    },
+    "createdBy": {
+      "type": "link",
+      "readOnly": true,
+      "view": "views/fields/user"
+    },
+    "modifiedBy": {
+      "type": "link",
+      "readOnly": true,
+      "view": "views/fields/user"
+    },
+    "inspectedProvider": {
+      "tooltip": false,
+      "type": "link",
+      "auditableEnabled": false,
+      "auditableDisabled": false,
+      "isCustom": true,
+      "modifiedExtendedDisabled": false,
+      "foreignName": "name",
+      "required": true,
+      "dropdown": false,
+      "readOnly": false
+    },
+    "specialty": {
+      "tooltip": false,
+      "type": "link",
+      "auditableEnabled": false,
+      "auditableDisabled": false,
+      "isCustom": true,
+      "modifiedExtendedDisabled": false,
+      "foreignName": "name",
+      "required": true,
+      "dropdown": false,
+      "readOnly": false
+    },
+    "location": {
+      "tooltip": false,
+      "type": "link",
+      "auditableEnabled": false,
+      "auditableDisabled": false,
+      "isCustom": true,
+      "modifiedExtendedDisabled": false,
+      "foreignName": "name",
+      "required": true,
+      "dropdown": false,
+      "readOnly": false
+    },
+    "intervalMonths": {
+      "tooltip": false,
+      "type": "int",
+      "auditableEnabled": false,
+      "auditableDisabled": false,
+      "isCustom": true,
+      "modifiedExtendedDisabled": false,
+      "required": true,
+      "notNull": false,
+      "defaultUnit": "",
+      "disableFormatting": false,
+      "readOnly": false,
+      "unique": false,
+      "index": false
+    },
+    "activityType": {
+      "tooltip": false,
+      "type": "link",
+      "auditableEnabled": false,
+      "auditableDisabled": false,
+      "isCustom": true,
+      "modifiedExtendedDisabled": false,
+      "foreignName": "name",
+      "required": true,
+      "dropdown": false,
+      "readOnly": false
+    },
+    "lastScheduledDate": {
+      "tooltip": false,
+      "type": "date",
+      "auditableEnabled": false,
+      "auditableDisabled": false,
+      "isCustom": true,
+      "modifiedExtendedDisabled": false,
+      "required": false,
+      "readOnly": false
+    },
+    "nextDueDate": {
+      "tooltip": false,
+      "type": "date",
+      "auditableEnabled": false,
+      "auditableDisabled": false,
+      "isCustom": true,
+      "modifiedExtendedDisabled": false,
+      "required": true,
+      "readOnly": false
+    },
+    "active": {
+      "tooltip": false,
+      "type": "bool",
+      "isCustom": true,
+      "notNull": false,
+      "required": false,
+      "default": true,
+      "readOnly": false,
+      "isMultilang": false
+    }
+  },
+  "links": {
+    "createdBy": {
+      "type": "belongsTo",
+      "entity": "User"
+    },
+    "modifiedBy": {
+      "type": "belongsTo",
+      "entity": "User"
+    },
+    "inspectedProvider": {
+      "type": "belongsTo",
+      "foreign": "inspectionCadences",
+      "entity": "InspectedProvider"
+    },
+    "specialty": {
+      "type": "belongsTo",
+      "foreign": "inspectionCadences",
+      "entity": "Specialty"
+    },
+    "location": {
+      "type": "belongsTo",
+      "foreign": "inspectionCadences",
+      "entity": "Location"
+    },
+    "activityType": {
+      "type": "belongsTo",
+      "foreign": "inspectionCadences",
+      "entity": "ActivityType"
+    }
+  },
+  "indexes": {
+    "name": {
+      "columns": [
+        "name",
+        "deleted"
+      ]
+    },
+    "createdAt": {
+      "columns": [
+        "createdAt",
+        "deleted"
+      ]
+    },
+    "modifiedAt": {
+      "columns": [
+        "modifiedAt",
+        "deleted"
+      ]
+    }
+  },
+  "collection": {
+    "asc": false
+  }
+}
