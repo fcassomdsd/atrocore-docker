@@ -1,0 +1,132 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": true,
+            "trim": true
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "pqCode": {
+            "type": "varchar",
+            "required": true,
+            "trim": true,
+            "pattern": "/^PQ [0-9]{1,2}\\.[0-9]{3}$/",
+            "tooltip": "Denormalized snapshot of the related PQ's code, for display/search without a join."
+        },
+        "usoapProtocolQuestion": {
+            "type": "link",
+            "required": true,
+            "foreignName": "code"
+        },
+        "artifactCategory": {
+            "type": "extensibleEnum",
+            "required": true,
+            "extensibleEnumId": "ext_usoap_artifact_cat",
+            "tooltip": "The sampled-population artifact type ICAO guidance expects examiners to sample from (checklist, inspection report, CAP/follow-up, manual, license, etc.)."
+        },
+        "sampleRequired": {
+            "type": "bool",
+            "default": true,
+            "tooltip": "True when the PQ's guidance asks for a sample across a population of this artifact type, rather than one specific identified document."
+        },
+        "criticalElement": {
+            "type": "extensibleEnum",
+            "required": false,
+            "extensibleEnumId": "a01m00yh7jtea18cz0dsbx3ed4g"
+        },
+        "areaCode": {
+            "type": "extensibleMultiEnum",
+            "required": false,
+            "extensibleEnumId": "a01m00yhhnweebvy2zphrbhwdc4"
+        },
+        "specialtyCode": {
+            "type": "varchar",
+            "required": false,
+            "trim": true,
+            "tooltip": "Optional narrowing to one or more Specialty codes (comma-separated), e.g. only AGA-specialty checklists."
+        },
+        "dateRangeHintMonths": {
+            "type": "int",
+            "required": false,
+            "tooltip": "How many months back a candidate-document query should look, if the guidance implies a window. Null means no date constraint."
+        },
+        "queryHint": {
+            "type": "text",
+            "required": false,
+            "tooltip": "Free-text operational note for whoever wires the Alfresco query for this category/PQ combination."
+        },
+        "guidanceExcerpt": {
+            "type": "text",
+            "required": false,
+            "tooltip": "Verbatim excerpt of the 'Orientación para el examen de pruebas' guidance that justified this row, for traceability back to the source USOAP PQ table."
+        },
+        "sourceFile": {
+            "type": "varchar",
+            "required": true,
+            "pattern": "/^(AGA|ANS)$/",
+            "tooltip": "Which root USOAP PQ table this expectation was backfilled from."
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "usoapProtocolQuestion": {
+            "type": "belongsTo",
+            "foreign": "evidenceExpectations",
+            "entity": "UsoapProtocolQuestion"
+        }
+    },
+    "indexes": {
+        "name": {
+            "columns": [
+                "name",
+                "deleted"
+            ]
+        },
+        "pqCode": {
+            "columns": [
+                "pqCode",
+                "deleted"
+            ]
+        },
+        "createdAt": {
+            "columns": [
+                "createdAt",
+                "deleted"
+            ]
+        },
+        "modifiedAt": {
+            "columns": [
+                "modifiedAt",
+                "deleted"
+            ]
+        }
+    },
+    "collection": {
+        "asc": true,
+        "sortBy": "pqCode"
+    }
+}
