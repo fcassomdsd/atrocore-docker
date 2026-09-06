@@ -38,6 +38,7 @@ docker compose exec atro-web php /var/www/localhost/console.php clear cache
 docker compose exec atro-web php /var/www/localhost/console.php sql diff --show   # review
 docker compose exec atro-web php /var/www/localhost/console.php sql diff --run    # apply
 ./scripts/seed-nomenclatura.sh --yes          # load the reference rows
+./scripts/seed-usoap-evidence-expectations.sh --yes   # load the USOAP evidence-expectation catalog
 ```
 
 `sql diff --show` prints the exact DDL AtroCore derives from these JSON files.
@@ -60,7 +61,12 @@ equivalent is `clear cache` followed by `sql diff --run`.
 | `clientDefs/ActivityType.json` | Plain record controller, mirroring `FindingSeverity`. |
 | `scopes/*.json` | `Specialty` demoted from `Hierarchy` to `Base`; `ActivityType` added as `Base`. |
 | `layouts/**` | List/detail layouts, `code` surfaced as the primary column. |
+| `entityDefs/UsoapProtocolQuestion.json`, `AcapiteOACI.json` | Back-ported from the admin-UI-only `web-data/` runtime tree so they survive a clean rebuild. `UsoapProtocolQuestion` also gains the new `evidenceExpectations` reverse link (see below); `AcapiteOACI` is otherwise unmodified. Only these two citation-chain entities were back-ported — `Normativa`, `DocumentoOACI`, and `ProtocolQuestion` remain admin-UI-only, a pre-existing gap out of scope here. |
+| `entityDefs/UsoapEvidenceExpectation.json` | New: one row per USOAP PQ whose evidence guidance asks for a sample across a population of artifacts (checklists, inspection/audit reports, CAP follow-ups, manuals, licenses, training/personnel records, aerodrome dossiers, oversight plans) rather than one specific checklist item. `belongsTo` `UsoapProtocolQuestion`; `artifactCategory` is a new extensible enum (`usoap_artifact_category`), `criticalElement`/`areaCode` reuse the existing USOAP extensible enums. Consumed by `compliance_cmis`'s `POST /api/usoap/ce-evidence-report` to resolve these PQs by live query instead of per-node tagging. |
+| `clientDefs/UsoapProtocolQuestion.json`, `AcapiteOACI.json`, `UsoapEvidenceExpectation.json` | Plain record controllers, mirroring `ActivityType`. |
 
 The row data for `Specialty` and `ActivityType` is seeded separately by
-`sql/seed-nomenclatura-catalog.sql`, because AtroCore metadata describes the
-schema only, never the records.
+`sql/seed-nomenclatura-catalog.sql`, and `UsoapEvidenceExpectation` by
+`sql/seed-usoap-evidence-expectations.sql` (48 rows backfilled from
+`tabla pqs AGA.csv` / `tabla pqs ANS.csv`), because AtroCore metadata
+describes the schema only, never the records.

@@ -1,0 +1,18 @@
+[
+  {
+    "name": "pqCode",
+    "link": true
+  },
+  {
+    "name": "artifactCategory"
+  },
+  {
+    "name": "criticalElement"
+  },
+  {
+    "name": "specialtyCode"
+  },
+  {
+    "name": "sourceFile"
+  }
+]

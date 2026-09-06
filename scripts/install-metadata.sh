@@ -146,9 +146,9 @@ remove_file "${DEST_ROOT}/layouts/Specialty/relationships.json"
 # Register new entities in config.php (tabList + quickCreateList).
 CONFIG_FILE="${DEST_ROOT}/config.php"
 if [[ -f "${CONFIG_FILE}" ]]; then
-  echo "config.php: registering ActivityType"
+  echo "config.php: registering ActivityType, UsoapEvidenceExpectation"
   if [[ "${DRY_RUN}" == "1" ]]; then
-    echo "  [dry-run] would append 'ActivityType' to tabList and quickCreateList"
+    echo "  [dry-run] would append 'ActivityType', 'UsoapEvidenceExpectation' to tabList and quickCreateList"
   else
     # config.php is owned by www-data, so edit a host-side temp copy and then
     # move it back through a root container (same reason as copy_file above).
@@ -161,7 +161,7 @@ if [[ -f "${CONFIG_FILE}" ]]; then
         cat "${CONFIG_FILE#"${ROOT_DIR}/"}" > "${TMP_CONFIG}"
     fi
 
-    python3 "${ROOT_DIR}/scripts/register-entity-tab.py" "${TMP_CONFIG}" ActivityType
+    python3 "${ROOT_DIR}/scripts/register-entity-tab.py" "${TMP_CONFIG}" ActivityType UsoapEvidenceExpectation
 
     if ! ( cat "${TMP_CONFIG}" > "${CONFIG_FILE}" ) 2>/dev/null; then
       docker run --rm \

@@ -1,0 +1,59 @@
+[
+  {
+    "label": "Details",
+    "rows": [
+      [
+        {
+          "name": "pqCode"
+        },
+        {
+          "name": "artifactCategory"
+        }
+      ],
+      [
+        {
+          "name": "usoapProtocolQuestion"
+        },
+        {
+          "name": "sampleRequired"
+        }
+      ],
+      [
+        {
+          "name": "criticalElement"
+        },
+        {
+          "name": "areaCode"
+        }
+      ],
+      [
+        {
+          "name": "specialtyCode"
+        },
+        {
+          "name": "dateRangeHintMonths"
+        }
+      ],
+      [
+        {
+          "name": "name"
+        },
+        false
+      ],
+      [
+        {
+          "name": "guidanceExcerpt"
+        },
+        false
+      ],
+      [
+        {
+          "name": "queryHint"
+        },
+        {
+          "name": "sourceFile"
+        }
+      ]
+    ]
+  }
+]
