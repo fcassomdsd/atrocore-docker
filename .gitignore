@@ -2,5 +2,6 @@
 data/
 web-data/
 db-data/
+db-dumps/
 .env
 docker-compose.override.yaml
