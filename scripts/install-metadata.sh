@@ -140,15 +140,31 @@ fi
 # Specialty is no longer a Hierarchy entity, so its hierarchy relationship
 # panel layout must go or the UI will try to render the removed `children`
 # link.
+#
+# ProtocolQuestion was renamed to ChecklistQuestion (2026-09): its old
+# runtime-only metadata (never tracked here) must be removed so `sql diff`
+# doesn't see two entity definitions pointing at the same physical table.
+# This must run in the same maintenance window as the DB rename migration
+# (see scripts/migrate-protocolquestion-to-checklistquestion.sh).
 echo "stale layouts:"
 remove_file "${DEST_ROOT}/layouts/Specialty/relationships.json"
+
+echo "stale metadata (ProtocolQuestion -> ChecklistQuestion rename):"
+remove_file "${DEST_ROOT}/metadata/entityDefs/ProtocolQuestion.json"
+remove_file "${DEST_ROOT}/metadata/clientDefs/ProtocolQuestion.json"
+remove_file "${DEST_ROOT}/metadata/scopes/ProtocolQuestion.json"
+for f in "${DEST_ROOT}/layouts/ProtocolQuestion"/*.json; do
+  [[ -e "$f" ]] || continue
+  remove_file "$f"
+done
 
 # Register new entities in config.php (tabList + quickCreateList).
 CONFIG_FILE="${DEST_ROOT}/config.php"
 if [[ -f "${CONFIG_FILE}" ]]; then
-  echo "config.php: registering ActivityType, UsoapEvidenceExpectation"
+  echo "config.php: registering ActivityType, UsoapEvidenceExpectation, ChecklistQuestion"
   if [[ "${DRY_RUN}" == "1" ]]; then
-    echo "  [dry-run] would append 'ActivityType', 'UsoapEvidenceExpectation' to tabList and quickCreateList"
+    echo "  [dry-run] would append 'ActivityType', 'UsoapEvidenceExpectation', 'ChecklistQuestion' to tabList and quickCreateList"
+    echo "  [dry-run] would remove 'ProtocolQuestion' from tabList and quickCreateList"
   else
     # config.php is owned by www-data, so edit a host-side temp copy and then
     # move it back through a root container (same reason as copy_file above).
@@ -161,7 +177,8 @@ if [[ -f "${CONFIG_FILE}" ]]; then
         cat "${CONFIG_FILE#"${ROOT_DIR}/"}" > "${TMP_CONFIG}"
     fi
 
-    python3 "${ROOT_DIR}/scripts/register-entity-tab.py" "${TMP_CONFIG}" ActivityType UsoapEvidenceExpectation
+    python3 "${ROOT_DIR}/scripts/register-entity-tab.py" "${TMP_CONFIG}" ActivityType UsoapEvidenceExpectation ChecklistQuestion
+    python3 "${ROOT_DIR}/scripts/register-entity-tab.py" --remove "${TMP_CONFIG}" ProtocolQuestion
 
     if ! ( cat "${TMP_CONFIG}" > "${CONFIG_FILE}" ) 2>/dev/null; then
       docker run --rm \

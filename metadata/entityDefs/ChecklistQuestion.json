@@ -1,0 +1,270 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": false,
+            "trim": true
+        },
+        "description": {
+            "type": "text"
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "texto": {
+            "tooltip": false,
+            "type": "text",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": true,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "seeMoreDisabled": false,
+            "rowsMin": 2,
+            "rowsMax": 10,
+            "lengthOfCut": 400,
+            "readOnly": false,
+            "useDisabledTextareaInViewMode": false,
+            "isMultilang": false
+        },
+        "activo": {
+            "tooltip": false,
+            "type": "bool",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "notNull": false,
+            "required": true,
+            "readOnly": false,
+            "isMultilang": false
+        },
+        "fechaVigencia": {
+            "tooltip": false,
+            "type": "date",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "useNumericFormat": false,
+            "readOnly": false,
+            "unique": false,
+            "index": false
+        },
+        "tags": {
+            "tooltip": false,
+            "type": "linkMultiple",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "foreignName": "name",
+            "required": false,
+            "dropdown": false,
+            "readOnly": false,
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true
+        },
+        "normativas": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "verification": {
+            "tooltip": false,
+            "type": "text",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": true,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "seeMoreDisabled": false,
+            "rowsMin": 2,
+            "rowsMax": 10,
+            "lengthOfCut": 400,
+            "readOnly": false,
+            "useDisabledTextareaInViewMode": false,
+            "isMultilang": false
+        },
+        "specialty": {
+            "tooltip": false,
+            "type": "link",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "foreignName": "name",
+            "required": true,
+            "dropdown": false,
+            "readOnly": false
+        },
+        "topic": {
+            "tooltip": false,
+            "type": "link",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "dropdown": false,
+            "readOnly": false
+        },
+        "sequence": {
+            "tooltip": false,
+            "type": "int",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "notNull": false,
+            "defaultUnit": "",
+            "disableFormatting": false,
+            "readOnly": false,
+            "unique": false,
+            "index": false
+        },
+        "inspectionQuestions": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true,
+            "foreignName": "code"
+        },
+        "references": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "isMultilang": false
+        },
+        "code": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": true,
+            "notNull": false,
+            "maxLength": 15,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "pattern": "/^[A-Z]{3,10}-[0-9]{4}$/",
+            "unique": true,
+            "index": false,
+            "isMultilang": false
+        },
+        "riskLevel": {
+            "tooltip": false,
+            "type": "extensibleEnum",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "readOnly": false,
+            "prohibitedEmptyValue": false,
+            "dropdown": false,
+            "extensibleEnumId": "a01kny6kktqe689xt03tsy539tj",
+            "allowedOptions": []
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "tags": {
+            "type": "hasMany",
+            "foreign": "checklistQuestions",
+            "relationName": "ChecklistQuestionTag",
+            "entity": "Tag"
+        },
+        "normativas": {
+            "type": "hasMany",
+            "foreign": "checklistQuestions",
+            "relationName": "NormativaChecklistQuestion",
+            "entity": "Normativa"
+        },
+        "specialty": {
+            "type": "belongsTo",
+            "foreign": "checklistQuestions",
+            "entity": "Specialty"
+        },
+        "topic": {
+            "type": "belongsTo",
+            "foreign": "checklistQuestions",
+            "entity": "QuestionTopic"
+        },
+        "inspectionQuestions": {
+            "type": "hasMany",
+            "foreign": "checklistQuestion",
+            "entity": "InspectionQuestion"
+        }
+    },
+    "indexes": {
+        "name": {
+            "columns": [
+                "name",
+                "deleted"
+            ]
+        },
+        "createdAt": {
+            "columns": [
+                "createdAt",
+                "deleted"
+            ]
+        },
+        "modifiedAt": {
+            "columns": [
+                "modifiedAt",
+                "deleted"
+            ]
+        }
+    },
+    "collection": {
+        "asc": true,
+        "sortBy": "code"
+    }
+}
