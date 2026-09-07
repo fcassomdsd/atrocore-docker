@@ -32,7 +32,7 @@
             "massUpdateDisabled": true,
             "filterDisabled": true
         },
-        "protocolQuestions": {
+        "checklistQuestions": {
             "type": "linkMultiple",
             "noLoad": true,
             "layoutDetailDisabled": true,
@@ -101,10 +101,10 @@
             "type": "belongsTo",
             "entity": "User"
         },
-        "protocolQuestions": {
+        "checklistQuestions": {
             "type": "hasMany",
             "foreign": "specialty",
-            "entity": "ProtocolQuestion"
+            "entity": "ChecklistQuestion"
         },
         "questionTopics": {
             "type": "hasMany",

@@ -1,0 +1,146 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": true,
+            "trim": true,
+            "defaultUnit": ""
+        },
+        "description": {
+            "type": "text"
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "texto": {
+            "tooltip": false,
+            "type": "text",
+            "isCustom": true,
+            "required": false,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "seeMoreDisabled": false,
+            "rowsMin": 2,
+            "rowsMax": 10,
+            "lengthOfCut": 400,
+            "readOnly": false,
+            "useDisabledTextareaInViewMode": false,
+            "isMultilang": false
+        },
+        "activo": {
+            "tooltip": false,
+            "type": "bool",
+            "isCustom": true,
+            "notNull": false,
+            "required": false,
+            "default": false,
+            "readOnly": false,
+            "isMultilang": false
+        },
+        "fechaVigencia": {
+            "tooltip": false,
+            "type": "date",
+            "isCustom": true,
+            "required": false,
+            "useNumericFormat": false,
+            "readOnly": false,
+            "unique": false,
+            "index": false
+        },
+        "reglamento": {
+            "type": "link"
+        },
+        "checklistQuestions": {
+            "tooltip": false,
+            "type": "linkMultiple",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "foreignName": "code",
+            "required": false,
+            "dropdown": false,
+            "readOnly": false,
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true
+        },
+        "acapitesOACI": {
+            "tooltip": false,
+            "type": "link",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "foreignName": "name",
+            "required": false,
+            "dropdown": false,
+            "readOnly": false
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "reglamento": {
+            "type": "belongsTo",
+            "foreign": "normativas",
+            "entity": "Reglamento"
+        },
+        "checklistQuestions": {
+            "type": "hasMany",
+            "foreign": "normativas",
+            "relationName": "NormativaChecklistQuestion",
+            "entity": "ChecklistQuestion"
+        },
+        "acapitesOACI": {
+            "type": "belongsTo",
+            "foreign": "normativas",
+            "entity": "AcapiteOACI"
+        }
+    },
+    "indexes": {
+        "name": {
+            "columns": [
+                "name",
+                "deleted"
+            ]
+        },
+        "createdAt": {
+            "columns": [
+                "createdAt",
+                "deleted"
+            ]
+        },
+        "modifiedAt": {
+            "columns": [
+                "modifiedAt",
+                "deleted"
+            ]
+        }
+    },
+    "collection": {
+        "asc": true,
+        "sortBy": "name"
+    }
+}
