@@ -42,6 +42,20 @@ default:
       POSTGRES_PIM_DB_TEST=${POSTGRES_PIM_DB_TEST}
       EOF
 
+# Fast, stack-free validation of the tracked metadata overlay. The smoke jobs
+# below boot containers and check a table count, which says nothing about the
+# team's actual deliverable (metadata/).
+validate:metadata:
+  stage: validate
+  image: python:3.12-alpine
+  before_script: []
+  script:
+    - python3 scripts/validate-metadata.py
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
 blank_instance_check:
   stage: validate
   script:
