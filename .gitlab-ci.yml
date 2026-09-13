@@ -89,6 +89,12 @@ demo_seed_check:
         echo "Waiting for PostgreSQL to be ready... ($i/60)"
         sleep 2
       done
+    - |
+      if [ ! -f atrocore.dump ]; then
+        echo "No demo seed dump provisioned: database dumps are not committed to this"
+        echo "repository. Skipping the demo seed check."
+        exit 0
+      fi
     - ./scripts/seed-demo-db.sh --yes
     - |
       table_count=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -At -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';")
