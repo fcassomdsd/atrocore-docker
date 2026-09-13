@@ -145,7 +145,7 @@ fi
 # runtime-only metadata (never tracked here) must be removed so `sql diff`
 # doesn't see two entity definitions pointing at the same physical table.
 # This must run in the same maintenance window as the DB rename migration
-# (see scripts/migrate-protocolquestion-to-checklistquestion.sh).
+# (see scripts/migrate-db.sh and sql/migrations/).
 echo "stale layouts:"
 remove_file "${DEST_ROOT}/layouts/Specialty/relationships.json"
 

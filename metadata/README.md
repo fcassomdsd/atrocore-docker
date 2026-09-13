@@ -48,6 +48,26 @@ change will do to the database, including any `DROP`.
 Note that this AtroCore build has **no `rebuild` console command** — the
 equivalent is `clear cache` followed by `sql diff --run`.
 
+### Migration convention
+
+Two kinds of change, two mechanisms — do not mix them:
+
+| Change | Where it lives | How it is applied |
+|---|---|---|
+| Entity model (fields, links, layouts, scopes) | `metadata/**` (tracked) | `./scripts/install-metadata.sh`, then `clear cache` + `sql diff --show` / `--run` |
+| Raw DDL the model cannot express (renames, data backfills, indexes on existing tables) | `sql/migrations/NNNN_short_description.sql` | `./scripts/migrate-db.sh --yes` |
+| Reference rows | `sql/seed-*.sql` + `scripts/seed-*.sh` | the matching seed script |
+
+Rules for migrations:
+
+- One change per file, numbered `NNNN_short_description.sql`, applied in filename order.
+- Applied files are recorded in `schema_migrations` and never re-run; every file still has to be safe to run against an already-migrated database.
+- Take a fresh backup first (`./scripts/backup-db.sh`); `./scripts/migrate-db.sh --status` lists what is pending without touching the database.
+- A migration that renames entities the tracked metadata refers to must run **before** `install-metadata.sh` in the same maintenance window (see the ChecklistQuestion row in [Contents](#contents)).
+
+Never ship a schema change as a database dump: dumps are gitignored precisely
+because they carry live data.
+
 ## Contents
 
 | File | Purpose |
@@ -64,7 +84,7 @@ equivalent is `clear cache` followed by `sql diff --run`.
 | `entityDefs/UsoapProtocolQuestion.json`, `AcapiteOACI.json` | Back-ported from the admin-UI-only `web-data/` runtime tree so they survive a clean rebuild. `UsoapProtocolQuestion` also gains the new `evidenceExpectations` reverse link (see below); `AcapiteOACI` is otherwise unmodified. `DocumentoOACI` remains admin-UI-only, a pre-existing gap out of scope here. |
 | `entityDefs/UsoapEvidenceExpectation.json` | New: one row per USOAP PQ whose evidence guidance asks for a sample across a population of artifacts (checklists, inspection/audit reports, CAP follow-ups, manuals, licenses, training/personnel records, aerodrome dossiers, oversight plans) rather than one specific checklist item. `belongsTo` `UsoapProtocolQuestion`; `artifactCategory` is a new extensible enum (`usoap_artifact_category`), `criticalElement`/`areaCode` reuse the existing USOAP extensible enums. Consumed by `compliance_cmis`'s `POST /api/usoap/ce-evidence-report` to resolve these PQs by live query instead of per-node tagging. |
 | `clientDefs/UsoapProtocolQuestion.json`, `AcapiteOACI.json`, `UsoapEvidenceExpectation.json` | Plain record controllers, mirroring `ActivityType`. |
-| `entityDefs/ChecklistQuestion.json` | Renamed from the admin-UI-only `ProtocolQuestion` (2026-09) to disambiguate it from `UsoapProtocolQuestion` — this is the checklist-question catalog (code, text, verification criteria, risk level), unrelated to the ICAO PQ entity. Back-ported into git as part of the rename, closing the gap `ProtocolQuestion` previously had. `entityDefs/Normativa.json`, `QuestionTopic.json`, `InspectionQuestion.json`, `Tag.json` were newly back-ported alongside it since each holds a reverse link that had to be updated (`protocolQuestions`/`protocolQuestion` → `checklistQuestions`/`checklistQuestion`); `Specialty.json`'s existing `protocolQuestions` link was updated the same way. Relation names `ProtocolQuestionTag` → `ChecklistQuestionTag` and `NormativaProtocolQuestion` → `NormativaChecklistQuestion`. The DB-side rename (table/column/index renames, no data loss) lives in `sql/rename-protocolquestion-to-checklistquestion.sql`, applied via `scripts/migrate-protocolquestion-to-checklistquestion.sh --yes` before this metadata is installed. |
+| `entityDefs/ChecklistQuestion.json` | Renamed from the admin-UI-only `ProtocolQuestion` (2026-09) to disambiguate it from `UsoapProtocolQuestion` — this is the checklist-question catalog (code, text, verification criteria, risk level), unrelated to the ICAO PQ entity. Back-ported into git as part of the rename, closing the gap `ProtocolQuestion` previously had. `entityDefs/Normativa.json`, `QuestionTopic.json`, `InspectionQuestion.json`, `Tag.json` were newly back-ported alongside it since each holds a reverse link that had to be updated (`protocolQuestions`/`protocolQuestion` → `checklistQuestions`/`checklistQuestion`); `Specialty.json`'s existing `protocolQuestions` link was updated the same way. Relation names `ProtocolQuestionTag` → `ChecklistQuestionTag` and `NormativaProtocolQuestion` → `NormativaChecklistQuestion`. The DB-side rename (table/column/index renames, no data loss) lives in `sql/migrations/0001_rename_protocolquestion_to_checklistquestion.sql`, applied via `scripts/migrate-db.sh --yes` before this metadata is installed. |
 | `clientDefs/ChecklistQuestion.json`, `scopes/ChecklistQuestion.json`, `layouts/ChecklistQuestion/*` | Plain record controller/scope/layouts, copied unmodified from the old `ProtocolQuestion` runtime definitions (generic, no entity-name-baked strings). |
 
 The row data for `Specialty` and `ActivityType` is seeded separately by
