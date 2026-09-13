@@ -3,5 +3,6 @@ data/
 web-data/
 db-data/
 db-dumps/
+*.dump
 .env
 docker-compose.override.yaml

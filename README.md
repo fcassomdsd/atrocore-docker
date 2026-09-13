@@ -158,7 +158,11 @@ Important:
 
 ## Demo Data Seeding
 
-Seed the default database from `atrocore.dump`:
+> Database dumps are **not** committed to this repository — the previously tracked
+> dumps contained live credential material (user password hashes and session
+> tokens). Provision a seed dump from the release artifact store before seeding.
+
+Seed the default database from a provisioned `atrocore.dump`:
 
 ```bash
 ./scripts/seed-demo-db.sh --yes
@@ -282,7 +286,7 @@ Common CI variables you can override:
 - `scripts/` - Backup, restore, demo seed, metadata install, and catalog seed helpers
 - `metadata/` - Version-controlled AtroCore entity metadata (installed into `web-data/`)
 - `sql/` - Reference-catalog seed scripts
-- `db-dumps/` - Generated dump files
+- `db-dumps/` - Generated dump files (gitignored, never committed)
 - `db-data/` - PostgreSQL persistent data
 - `web-data/` - AtroCore web and application data
 
