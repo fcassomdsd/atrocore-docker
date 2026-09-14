@@ -239,10 +239,10 @@ Notes:
 
 This repository includes examples for Traefik in:
 
-- `docker-compose.override.yaml.old`
-- `traefik.yml.old`
+- `traefik/docker-compose.override.yaml.example`
+- `traefik/traefik.yml.example`
 
-If you want HTTPS and host-based routing, adapt these files to your setup and enable the related environment variables in `.env` (for example `LETS_ENCRYPT_EMAIL` and router names).
+If you want HTTPS and host-based routing, copy these files into the repository root (without the `.example` suffix), adapt them to your setup, and enable the related environment variables in `.env` (for example `LETS_ENCRYPT_EMAIL` and router names).
 
 ## Makefile Targets
 
