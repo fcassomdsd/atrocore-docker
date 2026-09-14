@@ -2,7 +2,7 @@
 
 Docker Compose setup for running AtroCore/AtroPIM locally with:
 
-- Apache + PHP 8.2 (`atro-web` service)
+- Apache + PHP 8.4 (`atro-web` service, see `.docker/php/Dockerfile`)
 - PostgreSQL 15 (`db` service)
 - Optional Traefik reverse proxy (via the provided example override file)
 
@@ -17,7 +17,7 @@ Use this checklist if you are running the project for the first time:
 1. Copy `.env.example` to `.env`.
 2. Fill in database credentials in `.env`.
 3. Start containers with `docker compose up -d --build`.
-4. Wait until `db` and `atro-web` are healthy/running in `docker compose ps`.
+4. Wait until `db` and `atro-web` are `running` in `docker compose ps` (the compose services define no healthcheck, so they never report `healthy`).
 5. Open http://localhost.
 
 ### 1. Prerequisites
