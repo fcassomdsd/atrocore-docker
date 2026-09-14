@@ -120,14 +120,26 @@ demo_seed_check:
   after_script:
     - docker compose down -v || true
 
+# Releases are CalVer-tagged from CHANGELOG.md and gated on a prepared release
+# entry: the tag is the date of the newest "## [YYYY-MM-DD]" section, the
+# pipeline fails when that section is missing, when CHANGELOG.md is unchanged
+# since the previous release, or when the tag already exists. The CHANGELOG is
+# the release trigger: a merge to the default branch that does not touch
+# CHANGELOG.md produces no release. See scripts/release-tag.sh and
+# CONTRIBUTING.md ("Versioning and releases").
 compute_release_tag:
   stage: release
-  image: alpine:latest
+  image: alpine/git:v2.54.0
   before_script: []
+  variables:
+    GIT_DEPTH: "0"
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - CHANGELOG.md
   script:
-    - echo "RELEASE_TAG=$(date +%Y-%m-%d)" >> release.env
+    - sh scripts/release-tag.test.sh
+    - sh scripts/release-tag.sh --env-file release.env
   artifacts:
     reports:
       dotenv: release.env
@@ -138,10 +150,12 @@ create_release:
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   before_script: []
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - CHANGELOG.md
   script:
     - echo "Creating release $RELEASE_TAG"
   release:
     tag_name: '$RELEASE_TAG'
-    description: "Release $RELEASE_TAG"
     ref: '$CI_COMMIT_SHA'
+    description: 'See CHANGELOG.md for the changes in $RELEASE_TAG'

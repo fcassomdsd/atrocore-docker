@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-The format is inspired by Keep a Changelog and uses semantic versioning for release entries.
+The format is inspired by Keep a Changelog and releases are dated — see CONTRIBUTING.md, "Versioning and releases".
 
 ## [Unreleased]
 
@@ -17,6 +17,7 @@ The format is inspired by Keep a Changelog and uses semantic versioning for rele
 
 - Replaced the `Specialty` catalog with the client's flat 16-code standard (APR, AVIS, FAU, PAV, SSEI, AIM, ATS, COM, ECNS, EMET, FIS, MET, NAV, SAR, SUR, DPR).
 - `Inspection.inspectionType` and `InspectionCadence.inspectionType` are now `activityType` links to `ActivityType` instead of free-text varchars, so the single-letter code embedded in generated document IDs comes from a controlled vocabulary.
+- **Versioning and tagging standardised across the platform.** Releases are tagged `YYYY-MM-DD` (CalVer) after the date of the newest `## [YYYY-MM-DD]` CHANGELOG section, with `YYYY-MM-DD.2` for a second release on the same day. The release jobs now run `scripts/release-tag.sh`, which fails when that section is missing, when `CHANGELOG.md` is unchanged since the previous release, or when the tag already exists; `scripts/release-tag.test.sh` is its self-test. See CONTRIBUTING.md, "Versioning and releases".
 
 ### Removed
 

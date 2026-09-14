@@ -163,3 +163,23 @@ When reporting a bug, include:
 - Expected behavior
 - Actual behavior
 - Environment details (OS, runtime and tool versions)
+
+---
+
+## 10. Versioning and releases
+
+Every repository in this platform versions and tags its releases the same way.
+
+- **Scheme — CalVer.** A release is tagged with the date of its CHANGELOG section: `YYYY-MM-DD`. A second release on the same day is `YYYY-MM-DD.2`, then `.3`, and so on. Tags are created by CI, never by hand.
+- **`CHANGELOG.md` is the release trigger.** A merge to `main` that changes `CHANGELOG.md` runs the `compute_release_tag` and `create_release` jobs. A merge that does not touch `CHANGELOG.md` produces no release.
+- **No release without a CHANGELOG entry.** `scripts/release-tag.sh` fails — and with it the pipeline — unless:
+  - `CHANGELOG.md` carries a dated release section (`## [YYYY-MM-DD]`) as its newest release section, directly under `## [Unreleased]` when that heading is present;
+  - `CHANGELOG.md` changed since the previous release tag;
+  - the resulting tag is new, and is not older than the previous release tag.
+- **Preparing a release:** move the `Unreleased` entries under a new dated heading (for example `## [2026-09-14]` — using the date you are releasing on), push, and merge to `main`. CI then creates the tag and the GitLab Release. Older sections written in other formats (for example `## [0.5.0] - 2026-09-06` or `## 2026-09-05 (Release 1.2.0-alpha)`) are history and are ignored by the script; semver tags such as `0.1.0` or `1.0.0-pre` are historical too and are never created again.
+- **Verify locally:**
+  ```bash
+  sh scripts/release-tag.sh            # prints the tag it would create, or fails with the reason
+  sh scripts/release-tag.test.sh       # self-test of the checks above
+  ```
+- `scripts/release-tag.sh` and `scripts/release-tag.test.sh` are **byte-identical in every repository in this platform**. If you change one, change all six.
