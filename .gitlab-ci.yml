@@ -129,8 +129,9 @@ demo_seed_check:
 # CONTRIBUTING.md ("Versioning and releases").
 compute_release_tag:
   stage: release
-  image: alpine/git:v2.54.0
-  before_script: []
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache git
   variables:
     GIT_DEPTH: "0"
   rules:
