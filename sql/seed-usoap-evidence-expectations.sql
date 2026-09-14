@@ -3,11 +3,11 @@
 --
 -- Populates the new `UsoapEvidenceExpectation` entity: one row per USOAP
 -- Protocol Question whose "Orientación para el examen de pruebas" guidance
--- (in the root-level `tabla pqs AGA.csv` / `tabla pqs ANS.csv` source tables)
--- asks an examiner to sample or review a whole artifact/population -- a
--- checklist, an inspection/audit report, a CAP follow-up, a manual, a
--- license, a training/personnel record, an aerodrome dossier, or an
--- oversight plan -- rather than one specific checklist item.
+-- (originally backfilled from the unversioned `tabla pqs AGA.csv` /
+-- `tabla pqs ANS.csv` source tables) asks an examiner to sample or review a
+-- whole artifact/population -- a checklist, an inspection/audit report, a CAP
+-- follow-up, a manual, a license, a training/personnel record, an aerodrome
+-- dossier, or an oversight plan -- rather than one specific checklist item.
 --
 -- This is what `POST /api/usoap/ce-evidence-report` (compliance_cmis) uses
 -- to resolve "Type-2" PQs by running a live query against a document
@@ -134,8 +134,9 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
--- Evidence-expectation rows, backfilled from tabla pqs AGA.csv / tabla pqs
--- ANS.csv. `usoap_protocol_question_id` is resolved by `code` at insert time
+-- Evidence-expectation rows, originally backfilled from the (unversioned)
+-- `tabla pqs AGA.csv` / `tabla pqs ANS.csv` source tables.
+-- `usoap_protocol_question_id` is resolved by `code` at insert time
 -- rather than hard-coded, since PQ ids are AtroCore-generated (not ours to
 -- fix); a NULL here means the PQ catalog hasn't been imported yet for that
 -- code and the row is skipped from the WHERE-matched insert (see the

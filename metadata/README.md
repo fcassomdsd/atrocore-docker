@@ -89,6 +89,7 @@ because they carry live data.
 
 The row data for `Specialty` and `ActivityType` is seeded separately by
 `sql/seed-nomenclatura-catalog.sql`, and `UsoapEvidenceExpectation` by
-`sql/seed-usoap-evidence-expectations.sql` (48 rows backfilled from
-`tabla pqs AGA.csv` / `tabla pqs ANS.csv`), because AtroCore metadata
-describes the schema only, never the records.
+`sql/seed-usoap-evidence-expectations.sql` (48 rows, originally backfilled
+from the unversioned `tabla pqs AGA.csv` / `tabla pqs ANS.csv` source
+tables), because AtroCore metadata describes the schema only, never the
+records.
