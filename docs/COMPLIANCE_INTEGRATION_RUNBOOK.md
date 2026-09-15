@@ -17,8 +17,36 @@ Use this runbook to:
 - verify network connectivity and endpoint readiness
 - run a minimal cross-system smoke test
 - identify where failures likely belong
+- go from a clean clone to a demonstrable system (§7)
 
-Assumed host OS: Linux with Docker Compose v2.
+### 1.1 Repository layout and host prerequisites
+
+The six repositories are **independent clones that must sit side by side** under one
+directory. Several scripts reach into their siblings by relative path, so the layout is
+load-bearing rather than cosmetic — `atrocore-docker/scripts/demo-quickstart.sh`, for
+example, reads `../compliance_flow/.env` and `../compliance_import/example data/`, and
+`compliance_cmis/scripts/seed-demo-identities.sh` falls back to `../compliance_flow/.env`:
+
+    <workspace>/
+    ├── atrocore-docker/       # run the integration scripts from here
+    ├── compliance_cmis/
+    ├── compliance_flow/
+    ├── compliance_import/
+    ├── compliance_web/
+    └── compliance_checklist/
+
+Run the commands in this document from the repository directory they name.
+
+Host requirements beyond Docker:
+
+- Docker Engine with Compose v2 (`docker compose …`)
+- `bash` and `curl` — every script and every check below uses them
+- `node` — `scripts/demo-quickstart.sh` parses JSON responses with it, and the
+  `compliance_flow` smoke harnesses are Node scripts
+- `jq` — only for the by-hand recipes that pipe a response (e.g. §7.4's ticket); the
+  quickstart script uses `node` instead
+
+Assumed host OS: Linux.
 
 ## 2. High-Level Dependency Order
 
@@ -126,6 +154,19 @@ Quick check:
 
     curl -f http://localhost || echo "AtroCore web not ready yet"
 
+**Then install the application and its metadata — this is not optional on a clean clone.**
+`./web-data` is bind-mounted over `/var/www/`, and a bind mount does not inherit the
+image's contents, so the AtroCore app that `prepare-pim.sh` installed during the build is
+invisible. `install-metadata.sh` calls `bootstrap-web-data.sh` when `web-data/<domain>/`
+is missing, which copies the app out of the image; then the schema is created:
+
+    ./scripts/install-metadata.sh          # bootstraps web-data/ when empty, then copies metadata/
+    docker compose exec atro-web php /var/www/localhost/console.php clear cache
+    docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+
+Without this, `http://localhost` has no DocumentRoot and every seed fails on missing
+tables. §7.2 repeats it in the demo context.
+
 ### 5.2 Start CMIS/Alfresco
 
     cd ../compliance_cmis
@@ -162,16 +203,25 @@ If `API_KEY` is configured:
 
 ### 5.5 Start Compliance Web (optional)
 
-Development profile:
+The base compose file **publishes no ports**, and the UI service only exists under the
+`dev` profile. You need both the dev override (for the `:4000` auth backend) and the
+profile (for the `:3000` Vite UI):
 
     cd ../compliance_web
-    docker compose --profile dev up -d --build
-    docker compose ps
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev up -d --build
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev ps
 
 Check frontend and backend path:
 
     curl -f http://localhost:3000 || echo "frontend-dev not ready"
     curl -i http://localhost:4000/api/auth/diagnostics
+
+`docs/shared/operations/DOCKER_SETUP.md` is the canonical guide for both profiles (the
+`prod` profile runs nginx and proxies `/api/`, and is selected with `--profile prod`).
+
+Either half alone is a trap: `--profile dev` without the override leaves `:4000`
+unpublished (so the second `curl` above fails), and the override without the profile
+starts the backend but no UI.
 
 ## 6. Core Smoke Test Matrix (15-Minute Pass)
 
@@ -221,8 +271,10 @@ Expected: health-like auth/session diagnostics output.
 
 Verified end to end on 2026-09-15 against the running stack. This is the concrete version
 of the generic flow below it: every command here has been executed, and the intermediate
-results quoted are the ones actually observed. Prerequisites are §3 (shared networks) and
-§4 (the five `.env` files); nothing here replaces them.
+results quoted are the ones actually observed. Prerequisites are §3 (shared networks),
+§4 (the `.env` files — four in practice; `compliance_cmis` runs on its defaults), the
+side-by-side layout in §1.1, and a stack started per §5 (which includes §5.1's
+application/metadata install).
 
 The demo dataset is synthetic and additive — every row it writes has a `demo-` id, so it
 can be removed with `seed-demo-dataset.sh --remove` without touching other records. The
@@ -230,33 +282,58 @@ airport is ICAO `ZZZZ` (ICAO's own "unknown aerodrome" placeholder), which makes
 generated document code (`V-ZZZZ-<year>-01`, `AV-ZZZZ-A-0001`) obviously synthetic.
 
 The executable form of this section is `scripts/demo-quickstart.sh` in this repository:
-run it from the repository root with `--yes` once the stack is up, and it performs §7.2,
-§7.3 (identities), §7.4 and §7.6 in one pass, then prints the closure-review calls for
-§7.5. Read on when something fails — §7.7 lists the traps.
+run it from the repository root with `--yes` once the stack is up, and it performs §7.2's
+app bootstrap, metadata install and seeding, §7.3 (identities), §7.4 and §7.6 in one pass,
+then prints the closure-review calls for §7.5. Step 0b bootstraps `web-data/` when it is
+empty — necessary for a clean clone, but not sufficient: §7.2's note on the provisioned
+`atrocore.dump` still applies. Read on when something fails — §7.7 lists the traps.
 
 ### 7.1 Start the stack
 
 Per §5, with one trap: **`compliance_web`'s base compose file publishes no ports.** The dev
-override is what exposes the auth backend on `:4000`:
+override is what exposes the auth backend on `:4000`, and the `dev` profile is what starts
+the UI on `:3000` — a full demo needs both:
 
     cd compliance_web
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d    # dev
-    docker compose --profile prod up --build                                # prod (nginx proxies /api/)
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev up -d --build   # dev (API + UI)
+    docker compose --profile prod up --build                                                     # prod (nginx proxies /api/)
 
 Without the override the backend is healthy and listening *inside* the container but
 unreachable from the host, so every `localhost:4000` call fails with a connection error
-rather than an HTTP status. `docs/shared/operations/DOCKER_SETUP.md` is the canonical
-guide for both profiles.
+rather than an HTTP status; without the profile there is no UI. `docs/shared/operations/DOCKER_SETUP.md`
+is the canonical guide for both profiles.
 
 ### 7.2 Metadata and demo data (`atrocore-docker`)
 
-    ./scripts/install-metadata.sh
+    ./scripts/install-metadata.sh                # bootstraps web-data/ first when it is empty
     docker compose exec atro-web php /var/www/localhost/console.php clear cache
     docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
     ./scripts/seed-usoap-vocabularies.sh --yes   # required: the enums the catalog points at
     ./scripts/seed-nomenclatura.sh --yes         # spec_* / atype_* reference rows
     ./scripts/seed-demo-dataset.sh --yes         # the demo dataset
-    # or: make db-seed-vocabularies YES=1 / db-seed-nomenclatura YES=1 / db-seed-demo YES=1
+    # or: make bootstrap / make metadata-install / make db-seed-vocabularies YES=1 …
+
+On a **clean clone the first command is doing two jobs.** `./web-data` is bind-mounted over
+`/var/www/`, and a bind mount does not inherit the image's contents, so the AtroCore app
+installed at image-build time is hidden: `atro-web` serves nothing and this script used to
+abort with "start the stack first so AtroCore creates web-data/", which the stack cannot do.
+`install-metadata.sh` now detects the missing `web-data/<domain>/` and calls
+`scripts/bootstrap-web-data.sh`, which copies the app out of the image; `sql diff --run`
+then creates the schema. Run `make bootstrap` (or the script directly) if you want that step
+on its own.
+
+> **A clean clone still needs a provisioned `atrocore.dump` before the seeds will run.**
+> The tracked `metadata/` tree is a **partial overlay** — 13 entity definitions against the
+> 32 a provisioned instance carries — because, by design, "only the files this project
+> actually customises are tracked here" (`metadata/README.md`). The operational entities the
+> demo writes to (`Location`, `ServiceProvider`, `SiteVisit`, `Inspector`, `ServiceArea`,
+> `Finding`, the `CorrectiveAction*` family, …) are therefore **not** created by
+> `sql diff --run`: on a genuinely empty database step 1 fails with
+> `relation "public.service_area" does not exist`, and the vocabulary seed fails with
+> `column "multilingual" of relation "extensible_enum" does not exist` because the skeleton's
+> core schema is older than the dump's. Restore the dump first (README, "Restoring a real
+> dataset") — it is deliberately not committed, and is provisioned from the release artifact
+> store. Tracked in `TECHNICAL_DEBT_ANALYSIS.md`.
 
 `seed-usoap-vocabularies.sh` is not optional and not demo data: the tracked entity
 definitions reference the risk-level and USOAP extensible enums by hard-coded id, and
@@ -352,7 +429,17 @@ payload re-supplies the evidence.
 
 ### 7.5 Walk the closure review (`compliance_web`)
 
-Login returns a `csrfToken` that must be sent as `X-CSRF-Token` with the session cookie:
+Two ways to walk it: the browser, or the two curl calls below. The `closure_reviewer` role
+was extended (2026-09-15) to read findings — list, detail, follow-ups and evidence content —
+precisely so the browser path works; before that the role could decide a closure but got
+`403 AUTH_FORBIDDEN` on every read, so only the curl path worked.
+
+**Browser:** open http://localhost:3000 (see §5.5 for the command that publishes it), log in
+as `closure.reviewer` / the demo password from §7.3, open **Findings**, and pick
+`H-ZZZZA0001-ATS-001` (status `Pending Closure Approval`) to get the closure-review panel:
+a reason field and Apply Decision, which is the `reject`/`approve` call below.
+
+**API:** login returns a `csrfToken` that must be sent as `X-CSRF-Token` with the session cookie:
 
     curl -c jar -X POST http://127.0.0.1:4000/api/auth/login \
       -H 'Content-Type: application/json' \
@@ -365,10 +452,16 @@ Login returns a `csrfToken` that must be sent as `X-CSRF-Token` with the session
       -d '{"decision":"reject","reason":"Closure evidence is undated"}'
     # => 200, finding back to "In Progress", vso:closureRejectionReason set
 
-    # approve: closes it
+    # approve: closes it — but only while the finding is still Pending Closure Approval
     curl -b jar -X PATCH "http://127.0.0.1:4000/api/findings/H-ZZZZA0001-ATS-001/closure-review" \
       -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" -d '{"decision":"approve"}'
     # => 200, "Closed", vso:findingClosureDate set, rejection reason cleared
+
+**Reject and approve are alternatives, not a sequence.** A rejection moves the finding back to
+`In Progress`, and the next `approve` in that state answers `409 FINDING_NOT_REVIEWABLE`
+("Only findings in Pending Closure Approval status can be reviewed"). To demonstrate the
+approve path after a rejection, re-declare the closure first — re-run §7.4 steps 3 and 4 —
+then approve.
 
 The route requires the `closure_reviewer` role (`admin` is break-glass), refuses a reviewer
 who is the recorded declarer (`403 CLOSURE_REVIEW_SELF`), and refuses a finding whose
@@ -393,6 +486,12 @@ unattributable approval.
   `followup-reports.json` **and** `prior-findings.json` (both bare arrays) plus a
   `FollowUpEvidence/` folder — not `Evidence/`, which is the inspection-import folder name.
 - Application role ≠ Alfresco permission (§7.3).
+- **A bind mount hides the image's contents.** `./web-data:/var/www/` shadows the AtroCore
+  app the image was built with, so a clean clone starts with an empty `/var/www`, no
+  DocumentRoot, and a metadata install that fails with advice the stack cannot satisfy.
+  `scripts/bootstrap-web-data.sh` (run for you by `install-metadata.sh`, or `make bootstrap`)
+  copies the app out of the image; this was a named volume until commit `25affed`, which
+  Docker *does* populate from the image. (§5.1, §7.2.)
 - `/findings/open` is **search-backed** (AFTS/Solr), so it lags a few seconds behind a status
   change. Re-query before concluding a transition did not happen: the quickstart's final count read
   `0` immediately after a finding had moved to `Pending Closure Approval`, and `1` a moment later.

@@ -6,3 +6,4 @@ db-dumps/
 *.dump
 .env
 docker-compose.override.yaml
+.config.php.*
