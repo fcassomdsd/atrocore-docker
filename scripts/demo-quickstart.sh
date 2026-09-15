@@ -23,8 +23,9 @@
 # "Only the files this project actually customises are tracked here"). The operational
 # entities the demo seeds write to — Location, ServiceProvider, SiteVisit, Inspector,
 # ServiceArea, Finding … — come from a provisioned `atrocore.dump`, not from this
-# repository. Provision that dump first (README, "Restoring a real dataset"), or step 1
-# will fail with `relation "public.service_area" does not exist`.
+# repository. The preflight below therefore stops before step 0b unless
+# `public.service_area` exists, and prints the restore command; set
+# SCHEMA_PROBE_TABLE to another table to exercise that failure path deliberately.
 #
 # Step 1b seeds the demo identities (compliance_cmis/scripts/seed-demo-identities.sh):
 # the closure review needs the `closure_reviewer` role, and — because an application
@@ -101,6 +102,32 @@ probe "Alfresco"        "http://localhost:8080/alfresco/api/-default-/public/alf
 probe "Node-RED"        "http://localhost:1880/specialties" "200"
 probe "import service"  "http://127.0.0.1:8000/health" "200"
 probe "web backend"     "http://127.0.0.1:4000/health" "200"
+
+# The operational schema is NOT built from this repository: the tracked metadata/ tree
+# is a partial overlay (13 of the 32 entity definitions a provisioned instance carries —
+# see metadata/README.md), so Location / ServiceProvider / SiteVisit / ServiceArea / …
+# only exist after a provisioned `atrocore.dump` is restored. Fail here, with the remedy,
+# rather than four steps later inside the seed scripts.
+# SCHEMA_PROBE_TABLE is overridable so the failure path can be exercised deliberately.
+SCHEMA_PROBE_TABLE="${SCHEMA_PROBE_TABLE:-service_area}"
+schema_ready() {
+  local user db
+  user="$(grep -E '^POSTGRES_PIM_USER=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+  db="$(grep -E '^POSTGRES_PIM_DB=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+  [[ -n "${user}" && -n "${db}" ]] || return 1
+  ( cd "${REPO_DIR}" && docker compose exec -T db psql -U "${user}" -d "${db}" -tAc \
+      "select to_regclass('public.${SCHEMA_PROBE_TABLE}') is not null" 2>/dev/null ) \
+    | tr -d '[:space:]' | grep -q '^t$'
+}
+if schema_ready; then
+  ok "operational schema present (public.${SCHEMA_PROBE_TABLE})"
+else
+  die "the AtroCore database has no operational schema (public.${SCHEMA_PROBE_TABLE} is missing).
+         The tracked metadata/ tree is a partial overlay, so a clean clone must first restore a
+         provisioned atrocore.dump: ./scripts/seed-demo-db.sh <dump-file> --yes
+         (see README 'Restoring a real dataset' and runbook §7.2). If the stack is still
+         starting, wait for PostgreSQL and re-run."
+fi
 
 set -a
 # shellcheck disable=SC1091
