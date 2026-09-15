@@ -201,6 +201,22 @@ USOAP Critical Element / area to nothing. The seed recreates 5 enums and their 4
 (`INSERT ... ON CONFLICT DO NOTHING`, so customised vocabularies are never overwritten) and is deliberately
 **not** removed by `--remove`.
 
+### End-to-end demo quickstart (whole platform)
+
+`scripts/demo-quickstart.sh` drives the rest of the platform from a stack that is
+already running: it seeds the USOAP vocabularies, the Nomenclatura catalogs and
+the demo dataset, imports the demo checklist, canonical documents and follow-up
+payloads, then runs the read-only smoke harness and the error-envelope audit.
+
+```bash
+./scripts/demo-quickstart.sh --yes
+```
+
+It is additive and idempotent, and it assumes the stack is up (runbook §3–§5) and
+the `.env` files from §4 exist. It seeds the demo identities as well, and finishes
+by printing the closure-review calls that it deliberately does not walk for you.
+The step-by-step version is §7 of `docs/COMPLIANCE_INTEGRATION_RUNBOOK.md`.
+
 ### Restoring a real dataset
 
 > Database dumps are **not** committed to this repository — the previously tracked
