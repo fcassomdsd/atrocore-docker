@@ -101,7 +101,7 @@ validate:seed:
   image: python:3.12-alpine
   before_script: []
   script:
-    - python3 scripts/validate-demo-seed.py
+    - python3 scripts/validate-seeds.py
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "develop"'

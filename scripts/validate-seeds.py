@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the committed demo dataset without needing a database.
+"""Validate the committed seed datasets without needing a database.
 
 `sql/seed-demo-dataset.sql` is applied to a *live* AtroCore database, which CI
 cannot currently provide: the `atro-web` image built in this pipeline starts
@@ -26,11 +26,12 @@ database would only catch late:
 The live apply is verified by hand against a running stack (see the CHANGELOG
 entry) and documented in the README quickstart.
 
-Usage: python3 scripts/validate-demo-seed.py
+Usage: python3 scripts/validate-seeds.py
 """
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -115,14 +116,74 @@ for pattern, why in (
     if re.search(pattern, sql, re.IGNORECASE):
         problems.append(f"the seed {why}")
 
+
+# ---------------------------------------------------------------------------
+# The USOAP / risk vocabulary seed must define exactly the extensible enums the
+# tracked entity definitions reference by id. AtroCore's extensible enums have
+# no home in metadata/, so this id contract is the only thing tying the two
+# together — if someone re-creates an enum through the UI, or edits an
+# entityDef, this catches the mismatch instead of leaving the catalog resolving
+# its labels to nothing on a fresh install.
+# ---------------------------------------------------------------------------
+VOCAB_FILE = ROOT / "sql" / "seed-usoap-vocabularies.sql"
+ENTITY_DEFS = ROOT / "metadata" / "entityDefs"
+EXPECTED_VOCAB_OPTIONS = {
+    "riskLevel": 4,
+    "usoapCriticalElement": 8,
+    "usoapAreaCode": 17,
+    "usoapArtifactCategory": 10,
+    "compliance": 3,
+}
+
+if not VOCAB_FILE.is_file():
+    problems.append(f"{VOCAB_FILE.name} is missing")
+else:
+    vocab = VOCAB_FILE.read_text(encoding="utf-8")
+
+    referenced: dict[str, str] = {}
+    for entity_def in sorted(ENTITY_DEFS.glob("*.json")):
+        definition = json.loads(entity_def.read_text(encoding="utf-8"))
+        for field, spec in (definition.get("fields") or {}).items():
+            if isinstance(spec, dict) and spec.get("type") in ("extensibleEnum", "extensibleMultiEnum"):
+                enum_id = spec.get("extensibleEnumId")
+                if enum_id:
+                    referenced[enum_id] = f"{entity_def.stem}.{field}"
+
+    # Rows look like ('<id>', '<name>', '<code>', ...) for both the enum rows
+    # and the option rows; ids are either 26-char generated ids or readable
+    # ones like `ext_usoap_artifact_cat`.
+    seeded_enums = dict(re.findall(r"\(\s*'([\w-]+)',\s*'[^']*',\s*'([A-Za-z][\w]*)'", vocab))
+
+    for enum_id, owner in referenced.items():
+        if enum_id not in seeded_enums:
+            problems.append(
+                f"{owner} references extensible enum {enum_id}, which "
+                f"{VOCAB_FILE.name} does not create"
+            )
+
+    for code, expected in EXPECTED_VOCAB_OPTIONS.items():
+        enum_id = next((i for i, c in seeded_enums.items() if c == code), None)
+        if enum_id is None:
+            problems.append(f"{VOCAB_FILE.name} does not define the '{code}' extensible enum")
+            continue
+        # every option bound to this enum in the same file
+        bound = re.findall(rf"'vocab-link-[^']*',\s*'{enum_id}'", vocab)
+        if len(bound) != expected:
+            problems.append(
+                f"'{code}' should bind {expected} options, found {len(bound)}"
+            )
+
+    if re.search(r"TRUNCATE|DELETE\s+FROM", vocab, re.IGNORECASE):
+        problems.append(f"{VOCAB_FILE.name} must be additive (it is required infrastructure)")
+
 if problems:
-    print(f"FAIL: {len(problems)} problem(s) in the demo seed:")
+    print(f"FAIL: {len(problems)} problem(s) in the seed datasets:")
     for problem in problems:
         print(f"  - {problem}")
     sys.exit(1)
 
 print(
-    f"OK: demo seed is additive and consistent — {len(row_ids)} rows across "
+    f"OK: seeds valid — demo dataset: {len(row_ids)} rows across "
     f"{len(insert_tables)} tables, every DELETE scoped to demo- rows, "
     f"--remove covers every table."
 )
