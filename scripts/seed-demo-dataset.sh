@@ -72,6 +72,16 @@ fi
 # Child rows first so the order stays correct even if AtroCore ever starts
 # declaring database-level foreign keys.
 DEMO_TABLES=(
+  inspection_question
+  usoap_protocol_question_acapite_o_a_c_i
+  normativa_checklist_question
+  usoap_protocol_question
+  normativa
+  reglamento
+  acapite_o_a_c_i
+  documento_o_a_c_i
+  checklist_question
+  question_topic
   inspection_schedule
   inspected_specialty_inspector
   inspected_specialty
