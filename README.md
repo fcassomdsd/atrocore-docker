@@ -18,7 +18,14 @@ Use this checklist if you are running the project for the first time:
 2. Fill in database credentials in `.env`.
 3. Start containers with `docker compose up -d --build`.
 4. Wait until `db` and `atro-web` are `running` in `docker compose ps` (the compose services define no healthcheck, so they never report `healthy`).
-5. Install the tracked metadata — **on a clean clone this is what first puts the application into `web-data/`** (that directory is bind-mounted over `/var/www`, so the copy baked into the image is hidden until it is copied out):
+5. **Restore the provisioned seed dump — required on a fresh database.** The tracked `metadata/` tree is a *partial overlay* (see "Entity Metadata and Reference Catalogs" below), so the operational tables (`location`, `service_provider`, `site_visit`, `service_area`, `finding`, …) are **not** created from the repository; they come from `atrocore.dump`. Dumps are deliberately not committed — provision one from the release artifact store first.
+
+   ```bash
+   ./scripts/seed-demo-db.sh <dump-file> --yes     # destructive: replaces the target database
+   # or: make db-seed DUMP=<dump-file> YES=1
+   ```
+
+6. Install the tracked metadata — **on a clean clone this is also what first puts the application into `web-data/`** (that directory is bind-mounted over `/var/www`, so the copy baked into the image is hidden until it is copied out):
 
    ```bash
    ./scripts/install-metadata.sh          # bootstraps web-data/ when empty, then copies metadata/
@@ -26,7 +33,9 @@ Use this checklist if you are running the project for the first time:
    docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
    ```
 
-6. Open http://localhost.
+7. Open http://localhost.
+
+The synthetic demo dataset (next section) is additive and can be loaded on top of either a restored dump or a real dataset.
 
 ### 1. Prerequisites
 
@@ -166,15 +175,16 @@ Important:
 
 ## Demo Data Seeding
 
-### Synthetic demo dataset (use this on a fresh install)
+### Synthetic demo dataset (load it on top of a provisioned instance)
 
-Nothing operational is committed as a dump, so a fresh clone comes up with
-**empty** tables — after the one-time bootstrap in the First 5 Minutes Checklist
-(`install-metadata.sh` + `sql diff --run`), which installs the app and creates the
-schema. The synthetic dataset closes the remaining gap: it is version-controlled,
-contains no secrets, is **additive** (it only ever writes rows whose `id` starts
-with `demo-`) and is re-runnable, so it is safe to run against a database that
-already holds real records.
+No dump is committed, and the tracked `metadata/` tree is only a partial overlay, so a
+fresh clone has no operational schema until step 5's dump restore. **Once that is done**,
+this dataset fills the instance with a demo scenario: it is version-controlled, contains
+no secrets, is **additive** (it only ever writes rows whose `id` starts with `demo-`) and
+is re-runnable, so it is safe to run against a database that already holds real records.
+On an instance that never had the dump restored it fails fast with
+`relation "public.service_area" does not exist` — `demo-quickstart.sh` checks for that
+before it starts.
 
 ```bash
 ./scripts/seed-usoap-vocabularies.sh --yes  # risk / USOAP extensible enums (required)
