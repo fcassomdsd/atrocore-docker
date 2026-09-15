@@ -167,8 +167,9 @@ ever writes rows whose `id` starts with `demo-`) and is re-runnable, so it is
 safe to run against a database that already holds real records.
 
 ```bash
-./scripts/seed-nomenclatura.sh --yes      # spec_* / atype_* reference rows (run first)
-./scripts/seed-demo-dataset.sh --yes      # the demo dataset
+./scripts/seed-usoap-vocabularies.sh --yes  # risk / USOAP extensible enums (required)
+./scripts/seed-nomenclatura.sh --yes        # spec_* / atype_* reference rows
+./scripts/seed-demo-dataset.sh --yes        # the demo dataset
 # or: make db-seed-demo YES=1
 
 ./scripts/seed-demo-dataset.sh --remove --yes   # delete every demo- row
@@ -186,6 +187,15 @@ is seeded as `Planned`, because `/siteVisits` hides visits that are still
 
 `sql/seed-demo-dataset.sql` carries the full rationale. **Never put a real
 authority's data in it** — see the P0 finding in `TECHNICAL_DEBT_ANALYSIS.md`.
+
+**Required before the demo dataset: `scripts/seed-usoap-vocabularies.sh`.** `ChecklistQuestion.riskLevel`,
+`UsoapProtocolQuestion.criticalElement`/`areaCode` and `InspectionQuestion.compliance` are `extensibleEnum`
+fields whose vocabularies the tracked entity definitions reference **by hard-coded id**, and AtroCore's
+extensible enums have no home in `metadata/` (`install-metadata.sh` syncs entityDefs/clientDefs/scopes/layouts
+only). They therefore existed only in the database: without them a fresh install resolves every risk level and
+USOAP Critical Element / area to nothing. The seed recreates 5 enums and their 42 option bindings, is additive
+(`INSERT ... ON CONFLICT DO NOTHING`, so customised vocabularies are never overwritten) and is deliberately
+**not** removed by `--remove`.
 
 ### Restoring a real dataset
 
@@ -285,6 +295,7 @@ Main targets:
 - `make down` - Stop containers
 - `make db-backup` - Create database backup
 - `make db-restore DUMP=... [DB=...]` - Restore dump into DB
+- `make db-seed-vocabularies [DB=...] YES=1` - Seed the risk/USOAP extensible enums (required, additive)
 - `make db-seed-demo [DB=...] YES=1` - Seed the synthetic demo dataset (additive; safe)
 - `make db-seed-demo-remove [DB=...] YES=1` - Delete every `demo-` row
 - `make db-seed [DUMP=atrocore.dump] [DB=...] YES=1` - Restore a real dump instead (destructive)
@@ -296,7 +307,7 @@ Main targets:
 The CI pipeline (`.gitlab-ci.yml`) includes three validation jobs:
 
 - `validate:metadata`: runs `scripts/validate-metadata.py` over the tracked `metadata/` tree (no containers needed).
-- `validate:seed`: runs `scripts/validate-demo-seed.py`, which checks the demo dataset is additive-only (every `DELETE` scoped to `demo-` rows), has no `TRUNCATE`, namespaces every row id, still totals the documented 38 rows, and that `--remove` covers every table the seed writes. Also fast and container-free.
+- `validate:seed`: runs `scripts/validate-seeds.py`, which checks the demo dataset is additive-only (every `DELETE` scoped to `demo-` rows), has no `TRUNCATE`, namespaces every row id, still totals the documented 38 rows, and that `--remove` covers every table the seed writes. It also cross-checks `sql/seed-usoap-vocabularies.sql` against the extensible-enum ids the tracked entity definitions reference — AtroCore's enums have no home in `metadata/`, so that id contract is the only thing tying them together. Fast and container-free.
 - `blank_instance_check`: starts services, verifies DB access, and validates backup creation.
 
 > The demo seed is **applied** locally and in the quickstart, not in CI: the `atro-web` image built by this pipeline starts Apache with a DocumentRoot that does not exist (the AtroCore application is never installed), so its schema never appears and there is nothing to seed. That is why the old `demo_seed_check` job skipped itself on every run.
@@ -321,7 +332,7 @@ Common CI variables you can override:
 
 - `scripts/` - Backup, restore, demo seed, metadata install, and catalog seed helpers
 - `metadata/` - Version-controlled AtroCore entity metadata (installed into `web-data/`)
-- `sql/` - Reference-catalog and demo-dataset seed scripts (`seed-nomenclatura-catalog.sql`, `seed-demo-dataset.sql`, `seed-usoap-evidence-expectations.sql`)
+- `sql/` - Reference-catalog, vocabulary and demo-dataset seed scripts (`seed-nomenclatura-catalog.sql`, `seed-usoap-vocabularies.sql`, `seed-demo-dataset.sql`, `seed-usoap-evidence-expectations.sql`)
 - `db-dumps/` - Generated dump files (gitignored, never committed)
 - `db-data/` - PostgreSQL persistent data
 - `web-data/` - AtroCore web and application data
