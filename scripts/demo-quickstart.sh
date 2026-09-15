@@ -5,12 +5,26 @@
 #
 # This is the executable form of docs/COMPLIANCE_INTEGRATION_RUNBOOK.md §7 in this repo. Every step
 # here has been run by hand and verified; the script exists so it does not have to
-# be rediscovered. It assumes the stack is already up (runbook §3–§5) and that the
-# five .env files from §4 exist.
+# be rediscovered. It assumes the stack is already up (runbook §3–§5), that the
+# .env files from §4 exist, and that the six repositories are checked out side by
+# side (it reaches into ../compliance_cmis, ../compliance_flow and ../compliance_import).
 #
 # It is ADDITIVE and idempotent: the seed scripts only ever write rows whose id
 # starts with `demo-`, and each import re-supplies its own payload. Re-running it
 # is safe; it will create a new follow-up version rather than mutating anything.
+#
+# Step 0b bootstraps the application into web-data/ and syncs the schema — without it
+# a clean clone serves nothing at all (web-data/ is bind-mounted, so the app baked into
+# the image is hidden) and the seeds fail on missing tables. Skipping it is only correct
+# when the app and the custom tables are already there (`--skip-metadata`).
+#
+# NOTE for a truly clean clone: the tracked metadata/ tree is a *partial overlay*
+# (13 of the 32 entity definitions the running instance has — see metadata/README.md,
+# "Only the files this project actually customises are tracked here"). The operational
+# entities the demo seeds write to — Location, ServiceProvider, SiteVisit, Inspector,
+# ServiceArea, Finding … — come from a provisioned `atrocore.dump`, not from this
+# repository. Provision that dump first (README, "Restoring a real dataset"), or step 1
+# will fail with `relation "public.service_area" does not exist`.
 #
 # Step 1b seeds the demo identities (compliance_cmis/scripts/seed-demo-identities.sh):
 # the closure review needs the `closure_reviewer` role, and — because an application
@@ -20,20 +34,28 @@
 # It does NOT walk the closure review itself: that is a UI/API decision by a human,
 # so the last thing it prints is the two curl calls that exercise it.
 #
-# Usage: demo-quickstart.sh --yes [--skip-seed] [--skip-import]
+# Usage: demo-quickstart.sh --yes [--skip-metadata] [--skip-seed] [--skip-import]
 
 set -euo pipefail
 
 # This script lives in atrocore-docker/scripts; the platform is the parent directory.
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${REPO_DIR}/.." && pwd)"
+
+# AtroCore serves the app under PRODUCTION_DOMAIN (default localhost); both the
+# console path and the web-data/ layout follow it.
+ATROCORE_DOMAIN="$(grep -E '^PRODUCTION_DOMAIN=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'" || true)"
+ATROCORE_DOMAIN="${ATROCORE_DOMAIN:-localhost}"
+
 CONFIRMED=0
+SKIP_METADATA=0
 SKIP_SEED=0
 SKIP_IMPORT=0
 
 for arg in "$@"; do
   case "${arg}" in
     --yes) CONFIRMED=1 ;;
+    --skip-metadata) SKIP_METADATA=1 ;;
     --skip-seed) SKIP_SEED=1 ;;
     --skip-import) SKIP_IMPORT=1 ;;
     *) echo "Unknown argument: ${arg}"; exit 2 ;;
@@ -43,13 +65,14 @@ done
 if [[ "${CONFIRMED}" != "1" ]]; then
   cat <<'USAGE'
 This will:
+  0b. bootstrap the AtroCore app into web-data/ and install the metadata (atrocore-docker)
   1. seed the USOAP vocabularies, the Nomenclatura catalogs and the demo dataset (atrocore-docker)
   1b. seed the demo identities closure.reviewer / demo.inspector1 (compliance_cmis)
   2. import the demo checklist/findings payload, the canonical documents and the follow-up
   3. run the read-only smoke harness and the error-envelope audit
 
 It is additive and idempotent. Run again with --yes to continue.
-Usage: demo-quickstart.sh --yes [--skip-seed] [--skip-import]
+Usage: demo-quickstart.sh --yes [--skip-metadata] [--skip-seed] [--skip-import]
 USAGE
   exit 1
 fi
@@ -93,6 +116,24 @@ ticket() {
 }
 
 # ---------------------------------------------------------------------------
+if [[ "${SKIP_METADATA}" == "0" ]]; then
+  step "0b. Metadata — bootstrap the app into web-data/ and sync the schema (atrocore-docker)"
+  # On a clean clone web-data/ is empty and the compose bind mount hides the app
+  # the image was built with, so this is what makes a fresh install demonstrable.
+  # Re-runnable: the copy is skipped when web-data/ already exists, and `sql diff
+  # --run` only applies what is missing.
+  ( cd "${REPO_DIR}" \
+    && ./scripts/bootstrap-web-data.sh \
+    && ./scripts/install-metadata.sh >/dev/null \
+    && docker compose exec -T atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" clear cache >/dev/null \
+    && docker compose exec -T atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" sql diff --run >/dev/null ) \
+    || die "metadata install failed (see docs/COMPLIANCE_INTEGRATION_RUNBOOK.md §7.2)"
+  ok "metadata installed into web-data/, cache cleared, schema synced"
+else
+  step "0b. Metadata install skipped"
+fi
+
+# ---------------------------------------------------------------------------
 if [[ "${SKIP_SEED}" == "0" ]]; then
   step "1. Seed the reference catalogs and the demo dataset (atrocore-docker)"
   ( cd "${REPO_DIR}" \
@@ -100,7 +141,7 @@ if [[ "${SKIP_SEED}" == "0" ]]; then
     && ./scripts/seed-nomenclatura.sh --yes >/dev/null \
     && ./scripts/seed-demo-dataset.sh --yes >/dev/null ) \
     || die "seeding failed"
-  ( cd "${REPO_DIR}" && docker compose exec -T atro-web php /var/www/localhost/console.php clear cache >/dev/null 2>&1 ) || true
+  ( cd "${REPO_DIR}" && docker compose exec -T atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" clear cache >/dev/null 2>&1 ) || true
   ok "82 demo rows across 25 tables (airport ZZZZ, 2 providers, 3 inspectors, 2 inspections, 9 questions + USOAP chain)"
 else
   step "1. Seeding skipped"

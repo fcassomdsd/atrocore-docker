@@ -1,4 +1,4 @@
-.PHONY: help up down db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies metadata-install db-seed-nomenclatura
+.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies metadata-install db-seed-nomenclatura
 
 help:
 	@echo "Available targets:"
@@ -16,17 +16,23 @@ help:
 	@echo "  make db-seed [DUMP=atrocore.dump] [DB=...] YES=1"
 	@echo "                                Restore a real pg_dump instead (destructive;"
 	@echo "                                the dump is not in git — use db-seed-demo normally)"
+	@echo "  make bootstrap                 Copy the AtroCore app out of the image into"
+	@echo "                                web-data/ (first run on a clean clone; idempotent)"
 	@echo "  make metadata-install          Install tracked metadata/ into web-data/"
 	@echo "  make db-seed-nomenclatura [DB=...] YES=1"
 	@echo "                                Seed Specialty/ActivityType catalogs (destructive)"
 	@echo ""
 	@echo "Quickstart order: up -> metadata-install -> db-seed-vocabularies -> db-seed-nomenclatura -> db-seed-demo"
+	@echo "(metadata-install bootstraps web-data/ itself when it is empty)"
 
 up:
 	docker compose up -d
 
 down:
 	docker compose down
+
+bootstrap:
+	./scripts/bootstrap-web-data.sh
 
 db-backup:
 	./scripts/backup-db.sh

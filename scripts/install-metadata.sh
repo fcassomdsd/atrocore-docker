@@ -64,8 +64,16 @@ fi
 DEST_ROOT="${ROOT_DIR}/web-data/${DOMAIN}/data"
 
 if [[ ! -d "${DEST_ROOT}" ]]; then
-  echo "Error: ${DEST_ROOT} not found."
-  echo "Start the stack first (docker compose up -d --build) so AtroCore creates web-data/."
+  # A clean clone has no web-data/ at all: the compose bind mount hides the
+  # AtroCore app the image was built with (see bootstrap-web-data.sh). Populate it
+  # once, then re-check, so `up -> metadata-install` works as documented.
+  echo "web-data/${DOMAIN} is missing — bootstrapping the AtroCore application from the image …"
+  "${ROOT_DIR}/scripts/bootstrap-web-data.sh"
+fi
+
+if [[ ! -d "${DEST_ROOT}" ]]; then
+  echo "Error: ${DEST_ROOT} not found." >&2
+  echo "Run ./scripts/bootstrap-web-data.sh (it copies the app out of the atro-web image)." >&2
   exit 1
 fi
 
@@ -168,7 +176,15 @@ if [[ -f "${CONFIG_FILE}" ]]; then
   else
     # config.php is owned by www-data, so edit a host-side temp copy and then
     # move it back through a root container (same reason as copy_file above).
-    TMP_CONFIG="$(mktemp)"
+    #
+    # The temp copy is staged in the repository root — a place the host user can
+    # write *and* the Docker daemon can see — rather than /tmp: on Docker
+    # Desktop/Colima-style setups /tmp is not one of the shared paths, so
+    # bind-mounting a file from there hands the container an empty *directory* and
+    # `cp` fails with "can't stat '.../config.php/config.php': Not a directory".
+    # (web-data/ cannot be used for this: it belongs to uid 33, so mktemp there is
+    # Permission denied.) The trap removes it; .gitignore covers a crash.
+    TMP_CONFIG="$(mktemp "${ROOT_DIR}/.config.php.XXXXXX")"
     trap 'rm -f "${TMP_CONFIG}"' EXIT
 
     # Read through a root container if the host user cannot read the file.
@@ -183,10 +199,9 @@ if [[ -f "${CONFIG_FILE}" ]]; then
     if ! ( cat "${TMP_CONFIG}" > "${CONFIG_FILE}" ) 2>/dev/null; then
       docker run --rm \
         -v "${ROOT_DIR}:/repo" \
-        -v "${TMP_CONFIG}:/tmp/config.php:ro" \
         -w /repo \
         alpine:3 \
-        sh -c "cp /tmp/config.php '${CONFIG_FILE#"${ROOT_DIR}/"}' && chown 33:33 '${CONFIG_FILE#"${ROOT_DIR}/"}' && chmod 664 '${CONFIG_FILE#"${ROOT_DIR}/"}'"
+        sh -c "cp '${TMP_CONFIG#"${ROOT_DIR}/"}' '${CONFIG_FILE#"${ROOT_DIR}/"}' && chown 33:33 '${CONFIG_FILE#"${ROOT_DIR}/"}' && chmod 664 '${CONFIG_FILE#"${ROOT_DIR}/"}'"
       echo "  config.php written (via container, root)"
     fi
   fi
