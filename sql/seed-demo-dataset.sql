@@ -12,9 +12,14 @@
 -- compose up` gives an app with nothing to show and nothing to click.
 --
 -- This script fills that gap with a small, wholly synthetic dataset: enough for
--- one complete vertical slice of the platform (a site visit, two providers, two
--- inspections, three inspectors, their services and specialties, and the
--- interview schedule the plan generator needs).
+-- one complete vertical slice of the platform — a site visit, two providers, two
+-- inspections, three inspectors, their services and specialties, the interview
+-- schedule the plan generator needs, and a checklist catalog (three topics, nine
+-- questions) with its USOAP citation chain
+-- (ChecklistQuestion -> Normativa -> AcapiteOACI -> UsoapProtocolQuestion).
+--
+-- It depends on sql/seed-usoap-vocabularies.sql for the risk-level and USOAP
+-- extensible enums the questions and PQs point at.
 --
 -- WHY A SCRIPT AND NOT A DUMP
 -- ---------------------------
@@ -253,5 +258,140 @@ INSERT INTO public.inspection_schedule (id, name, start_date_time, end_date_time
     ('demo-sched-ans-close', 'Closing Meeting', (CURRENT_DATE + 22) + TIME '15:00', (CURRENT_DATE + 22) + TIME '16:00', 'demo-insp-ans-01', 'demo-area-movement', 'Demo International Airport - conference room', false, NOW(), NOW(), '1', '1'),
     ('demo-sched-met-open',  'Opening Meeting', (CURRENT_DATE + 21) + TIME '09:00', (CURRENT_DATE + 21) + TIME '09:30', 'demo-insp-met-01', 'demo-area-ats', 'Demo International Airport - meteorological office', false, NOW(), NOW(), '1', '1'),
     ('demo-sched-met-close', 'Closing Meeting', (CURRENT_DATE + 22) + TIME '13:00', (CURRENT_DATE + 22) + TIME '14:00', 'demo-insp-met-01', 'demo-area-ats', 'Demo International Airport - meteorological office', false, NOW(), NOW(), '1', '1');
+
+-- ---------------------------------------------------------------------------
+-- 12. Checklist catalog: topics and questions
+--
+-- Three topics with three questions each, one topic per demo specialty. Codes
+-- follow the existing catalog's `<SPECIALTY>-<NNNN>` convention, `sequence`
+-- orders them within a topic, and `risk_level` points at the risk-level
+-- vocabulary seeded by sql/seed-usoap-vocabularies.sql. `references` is the
+-- free-text "guidance" shown next to the normativa citation (see the flow's
+-- "Convert to checklist format": `reference.normativa` comes from the chain
+-- below, `reference.guidance` from this column).
+--
+-- `fecha_vigencia` is relative for the same reason the site visit is: a
+-- committed catalog with fixed validity dates looks expired within a year.
+-- ---------------------------------------------------------------------------
+DELETE FROM public.question_topic WHERE id LIKE 'demo-%';
+
+INSERT INTO public.question_topic (id, name, specialty_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-topic-ats', 'Air traffic services operations',      'spec_ats', false, NOW(), NOW(), '1', '1'),
+    ('demo-topic-nav', 'Radio navigation aids',                'spec_nav', false, NOW(), NOW(), '1', '1'),
+    ('demo-topic-met', 'Aeronautical meteorological service',  'spec_met', false, NOW(), NOW(), '1', '1');
+
+DELETE FROM public.checklist_question WHERE id LIKE 'demo-%';
+
+INSERT INTO public.checklist_question (id, texto, activo, fecha_vigencia, verification, specialty_id, topic_id, sequence, "references", code, risk_level, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-q-ats-01', 'Does the provider maintain a current operations manual that describes the air traffic services it provides, and is it available to the staff on duty?', true, CURRENT_DATE + 365, 'Verify that the manual is current, approved and available at the operational position.', 'spec_ats', 'demo-topic-ats', 10, 'Confirm the revision status and that the staff on duty know where to find it.', 'ATS-9001', 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1'),
+    ('demo-q-ats-02', 'Are shift handovers recorded, and do the records show that operational information is passed on completely?', true, CURRENT_DATE + 365, 'Sample the handover records for the last three months and confirm they are complete and signed.', 'spec_ats', 'demo-topic-ats', 20, 'Sample at least ten consecutive days.', 'ATS-9002', 'a01kny6my3bebmsk16tftcpgqgy', false, NOW(), NOW(), '1', '1'),
+    ('demo-q-ats-03', 'Does the provider analyse its own safety occurrences and feed the conclusions back into its procedures?', true, CURRENT_DATE + 365, 'Review the occurrence register and the resulting changes to procedures.', 'spec_ats', 'demo-topic-ats', 30, 'Look for at least one closed occurrence with a documented procedural change.', 'ATS-9003', 'a01kny6p20qecjt1srcbvq1v99j', false, NOW(), NOW(), '1', '1'),
+
+    ('demo-q-nav-01', 'Is the operational status of each radio navigation aid monitored continuously, and are outages notified to users without delay?', true, CURRENT_DATE + 365, 'Check the monitoring records and the notification log for the last six months.', 'spec_nav', 'demo-topic-nav', 10, 'Confirm the notification path to the users is documented.', 'NAV-9001', 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1'),
+    ('demo-q-nav-02', 'Are flight checks of the navigation aids carried out at the interval required by the provider''s maintenance programme?', true, CURRENT_DATE + 365, 'Verify that the last flight-check report is within the required interval and that any findings were closed.', 'spec_nav', 'demo-topic-nav', 20, 'The interval is defined in the maintenance programme, not in this checklist.', 'NAV-9002', 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1'),
+    ('demo-q-nav-03', 'Is the calibration and maintenance of navigation equipment performed by competent personnel with access to the required test equipment?', true, CURRENT_DATE + 365, 'Review the competence records and the calibration status of the test equipment.', 'spec_nav', 'demo-topic-nav', 30, 'Check that test equipment calibration certificates are in date.', 'NAV-9003', 'a01kny6my3bebmsk16tftcpgqgy', false, NOW(), NOW(), '1', '1'),
+
+    ('demo-q-met-01', 'Does the provider issue the aeronautical meteorological reports and forecasts for which it is designated, within the required timeframes?', true, CURRENT_DATE + 365, 'Sample the issued reports against the designation list and the required times of issue.', 'spec_met', 'demo-topic-met', 10, 'Sample at least one full day of observations.', 'MET-9001', 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1'),
+    ('demo-q-met-02', 'Are the meteorological instruments calibrated at the required interval, and are the calibration records retained?', true, CURRENT_DATE + 365, 'Inspect the calibration register and verify that every instrument in operational use is in date.', 'spec_met', 'demo-topic-met', 20, 'Follow one instrument from the register to its physical location.', 'MET-9002', 'a01kny6my3bebmsk16tftcpgqgy', false, NOW(), NOW(), '1', '1'),
+    ('demo-q-met-03', 'Are meteorological personnel trained and assessed on the equipment and procedures in operational use at this location?', true, CURRENT_DATE + 365, 'Review training records and the competency assessment for the personnel on the roster.', 'spec_met', 'demo-topic-met', 30, 'Confirm the roster matches the personnel assessed.', 'MET-9003', 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1');
+
+-- ---------------------------------------------------------------------------
+-- 13. USOAP citation chain
+--
+-- ChecklistQuestion -> Normativa -> AcapiteOACI -> UsoapProtocolQuestion, which
+-- is exactly the chain compliance_flow's "getChecklistQuestion" walks: it
+-- embeds `normativas` on each question, then resolves
+-- AcapiteOACI.usoapProtocolQuestions and merges the PQ code / Critical Element /
+-- area into `reference.normativa.usoapPqReference`.
+--
+-- Codes are deliberately synthetic. `UsoapProtocolQuestion.code` must satisfy
+-- the entity's own pattern `/^PQ [0-9]{1,2}\.[0-9]{3}$/`, so these use the 99.x
+-- range, which ICAO does not assign — the same "format-valid but obviously not
+-- real" rule as the ZZZZ location. The ICAO Annex itself (Anexo 10 Volumen III)
+-- is a public international standard, so citing it is fine; the national
+-- regulation is the invented "Demo Civil Aviation Regulation".
+-- ---------------------------------------------------------------------------
+DELETE FROM public.documento_o_a_c_i WHERE id LIKE 'demo-%';
+DELETE FROM public.acapite_o_a_c_i WHERE id LIKE 'demo-%';
+DELETE FROM public.reglamento WHERE id LIKE 'demo-%';
+DELETE FROM public.normativa WHERE id LIKE 'demo-%';
+DELETE FROM public.usoap_protocol_question WHERE id LIKE 'demo-%';
+DELETE FROM public.normativa_checklist_question WHERE id LIKE 'demo-%';
+DELETE FROM public.usoap_protocol_question_acapite_o_a_c_i WHERE id LIKE 'demo-%';
+
+INSERT INTO public.documento_o_a_c_i (id, name, codigo, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-doc-a10v3', 'Anexo 10 Volumen III', 'A10V3', false, NOW(), NOW(), '1', '1');
+
+INSERT INTO public.acapite_o_a_c_i (id, name, documento_o_a_c_i_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-acapite-ats', 'A10 V3 3.1 (demo)', 'demo-doc-a10v3', false, NOW(), NOW(), '1', '1'),
+    ('demo-acapite-nav', 'A10 V3 3.2 (demo)', 'demo-doc-a10v3', false, NOW(), NOW(), '1', '1'),
+    ('demo-acapite-met', 'A10 V3 4.1 (demo)', 'demo-doc-a10v3', false, NOW(), NOW(), '1', '1');
+
+INSERT INTO public.reglamento (id, name, codigo, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-reglamento-rad', 'Demo Civil Aviation Regulation', 'RAD-DEMO', false, NOW(), NOW(), '1', '1');
+
+INSERT INTO public.normativa (id, name, texto, activo, fecha_vigencia, reglamento_id, acapites_o_a_c_i_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-norm-ats', 'Article 10.11 (demo)',
+     'The air navigation service provider shall maintain an operations manual describing the services provided and the procedures to be followed by operational personnel, and shall keep it available at each operational position.',
+     true, CURRENT_DATE + 365, 'demo-reglamento-rad', 'demo-acapite-ats', false, NOW(), NOW(), '1', '1'),
+    ('demo-norm-nav', 'Article 10.12 (demo)',
+     'The air navigation service provider shall monitor the operational status of radio navigation aids, notify users without delay of any interruption of service, and carry out periodic flight checks in accordance with its maintenance programme.',
+     true, CURRENT_DATE + 365, 'demo-reglamento-rad', 'demo-acapite-nav', false, NOW(), NOW(), '1', '1'),
+    ('demo-norm-met', 'Article 11.4 (demo)',
+     'The meteorological service provider shall issue the aeronautical meteorological reports and forecasts for which it has been designated within the required timeframes, and shall ensure that its instruments and personnel remain competent for the service provided.',
+     true, CURRENT_DATE + 365, 'demo-reglamento-rad', 'demo-acapite-met', false, NOW(), NOW(), '1', '1');
+
+INSERT INTO public.normativa_checklist_question (id, normativa_id, checklist_question_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-link-ats-01', 'demo-norm-ats', 'demo-q-ats-01', false, NOW(), NOW(), '1', '1'),
+    ('demo-link-ats-02', 'demo-norm-ats', 'demo-q-ats-02', false, NOW(), NOW(), '1', '1'),
+    ('demo-link-ats-03', 'demo-norm-ats', 'demo-q-ats-03', false, NOW(), NOW(), '1', '1'),
+    ('demo-link-nav-01', 'demo-norm-nav', 'demo-q-nav-01', false, NOW(), NOW(), '1', '1'),
+    ('demo-link-nav-02', 'demo-norm-nav', 'demo-q-nav-02', false, NOW(), NOW(), '1', '1'),
+    ('demo-link-nav-03', 'demo-norm-nav', 'demo-q-nav-03', false, NOW(), NOW(), '1', '1'),
+    ('demo-link-met-01', 'demo-norm-met', 'demo-q-met-01', false, NOW(), NOW(), '1', '1'),
+    ('demo-link-met-02', 'demo-norm-met', 'demo-q-met-02', false, NOW(), NOW(), '1', '1'),
+    ('demo-link-met-03', 'demo-norm-met', 'demo-q-met-03', false, NOW(), NOW(), '1', '1');
+
+INSERT INTO public.usoap_protocol_question (id, code, texto, critical_element, area_code, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-pq-ats', 'PQ 99.001',
+     'Has the State established and implemented procedures to ensure that air navigation service providers maintain operations manuals and record shift handovers?',
+     'a01m00yj3d9e9fb7j59wynx6239', '["a01m00yjbqpeett9fgd5pjz2c63"]', false, NOW(), NOW(), '1', '1'),
+    ('demo-pq-nav', 'PQ 99.002',
+     'Has the State established and implemented procedures to ensure that radio navigation aids are monitored, that interruptions are notified, and that flight checks are carried out?',
+     'a01m00yj3qke5b92tesb8vrcc71', '["a01m00yjc10ea3vyn35gvx1ta0g"]', false, NOW(), NOW(), '1', '1'),
+    ('demo-pq-met', 'PQ 99.003',
+     'Has the State established and implemented procedures to ensure that designated aeronautical meteorological services are provided within the required timeframes by competent personnel and calibrated equipment?',
+     'a01m00yj2eye3xrkgj0e4yy3400', '["a01m00yjd6be3rbx3y13yjhxhes"]', false, NOW(), NOW(), '1', '1');
+
+INSERT INTO public.usoap_protocol_question_acapite_o_a_c_i (id, acapite_o_a_c_i_id, usoap_protocol_question_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-pq-acapite-ats', 'demo-acapite-ats', 'demo-pq-ats', false, NOW(), NOW(), '1', '1'),
+    ('demo-pq-acapite-nav', 'demo-acapite-nav', 'demo-pq-nav', false, NOW(), NOW(), '1', '1'),
+    ('demo-pq-acapite-met', 'demo-acapite-met', 'demo-pq-met', false, NOW(), NOW(), '1', '1');
+
+-- ---------------------------------------------------------------------------
+-- 14. Per-inspection checklist selections
+--
+-- /checklist does NOT read the master catalog: the flow resolves
+-- Specialty(code) -> InspectedSpecialty(inspectionId, specialtyId) and then
+-- queries InspectionQuestion by inspectedSpecialtyId, embedding the catalog
+-- question through checklist_question_id. So the catalog above is invisible to
+-- the app until an inspection selects it — this is the "Checklist Manager"
+-- step, seeded here so the demo inspection has a checklist to fill in.
+--
+-- `compliance` and `comments` are left empty on purpose: nothing has been
+-- executed yet, which is the state a fresh inspection should be in.
+-- ---------------------------------------------------------------------------
+DELETE FROM public.inspection_question WHERE id LIKE 'demo-%';
+
+INSERT INTO public.inspection_question (id, inspected_specialty_id, checklist_question_id, code, sequence, risk_level, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('demo-iq-ats-01', 'demo-ispec-ans-ats', 'demo-q-ats-01', 'ATS-9001', 10, 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1'),
+    ('demo-iq-ats-02', 'demo-ispec-ans-ats', 'demo-q-ats-02', 'ATS-9002', 20, 'a01kny6my3bebmsk16tftcpgqgy', false, NOW(), NOW(), '1', '1'),
+    ('demo-iq-ats-03', 'demo-ispec-ans-ats', 'demo-q-ats-03', 'ATS-9003', 30, 'a01kny6p20qecjt1srcbvq1v99j', false, NOW(), NOW(), '1', '1'),
+    ('demo-iq-nav-01', 'demo-ispec-ans-nav', 'demo-q-nav-01', 'NAV-9001', 10, 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1'),
+    ('demo-iq-nav-02', 'demo-ispec-ans-nav', 'demo-q-nav-02', 'NAV-9002', 20, 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1'),
+    ('demo-iq-nav-03', 'demo-ispec-ans-nav', 'demo-q-nav-03', 'NAV-9003', 30, 'a01kny6my3bebmsk16tftcpgqgy', false, NOW(), NOW(), '1', '1'),
+    ('demo-iq-met-01', 'demo-ispec-met-met', 'demo-q-met-01', 'MET-9001', 10, 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1'),
+    ('demo-iq-met-02', 'demo-ispec-met-met', 'demo-q-met-02', 'MET-9002', 20, 'a01kny6my3bebmsk16tftcpgqgy', false, NOW(), NOW(), '1', '1'),
+    ('demo-iq-met-03', 'demo-ispec-met-met', 'demo-q-met-03', 'MET-9003', 30, 'a01kny6nptsedzrrvt4yh1wwkz8', false, NOW(), NOW(), '1', '1');
 
 COMMIT;

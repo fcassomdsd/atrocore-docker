@@ -179,7 +179,11 @@ safe to run against a database that already holds real records.
 It creates one fictional airport (ICAO `ZZZZ` — ICAO's own "unknown aerodrome"
 placeholder), two service providers, three inspectors, their services and
 specialties, a site visit **three weeks ahead of the day you seed**, two
-inspections and the interview schedules the plan generator needs. Document codes
+inspections, the interview schedules the plan generator needs, and a checklist
+catalog (three topics, nine questions) with its USOAP citation chain
+(`ChecklistQuestion → Normativa → AcapiteOACI → UsoapProtocolQuestion`) plus the
+per-inspection selections `/checklist` actually reads. Question codes use the
+reserved `9xxx` range and PQ codes the unassigned `PQ 99.x` range. Document codes
 carry the current year (`V-ZZZZ-2026-01`, `AV-ZZZZ-A-0001`); reference the
 stable `id`s (`demo-sv-01`, `demo-insp-ans-01`) from scripts and docs. The visit
 is seeded as `Planned`, because `/siteVisits` hides visits that are still
@@ -307,7 +311,7 @@ Main targets:
 The CI pipeline (`.gitlab-ci.yml`) includes three validation jobs:
 
 - `validate:metadata`: runs `scripts/validate-metadata.py` over the tracked `metadata/` tree (no containers needed).
-- `validate:seed`: runs `scripts/validate-seeds.py`, which checks the demo dataset is additive-only (every `DELETE` scoped to `demo-` rows), has no `TRUNCATE`, namespaces every row id, still totals the documented 38 rows, and that `--remove` covers every table the seed writes. It also cross-checks `sql/seed-usoap-vocabularies.sql` against the extensible-enum ids the tracked entity definitions reference — AtroCore's enums have no home in `metadata/`, so that id contract is the only thing tying them together. Fast and container-free.
+- `validate:seed`: runs `scripts/validate-seeds.py`, which checks the demo dataset is additive-only (every `DELETE` scoped to `demo-` rows), has no `TRUNCATE`, namespaces every row id, still totals the documented 73 rows, and that `--remove` covers every table the seed writes. It also cross-checks `sql/seed-usoap-vocabularies.sql` against the extensible-enum ids the tracked entity definitions reference — AtroCore's enums have no home in `metadata/`, so that id contract is the only thing tying them together. Fast and container-free.
 - `blank_instance_check`: starts services, verifies DB access, and validates backup creation.
 
 > The demo seed is **applied** locally and in the quickstart, not in CI: the `atro-web` image built by this pipeline starts Apache with a DocumentRoot that does not exist (the AtroCore application is never installed), so its schema never appears and there is nothing to seed. That is why the old `demo_seed_check` job skipped itself on every run.

@@ -41,7 +41,7 @@ SQL_FILE = ROOT / "sql" / "seed-demo-dataset.sql"
 SH_FILE = ROOT / "scripts" / "seed-demo-dataset.sh"
 
 # Documented in the SQL header, the README and the MR description.
-EXPECTED_DEMO_ROWS = 38
+EXPECTED_DEMO_ROWS = 82
 
 problems: list[str] = []
 
