@@ -1,0 +1,444 @@
+# Compliance Integration Runbook
+
+This runbook describes how to bring up and validate the integrated compliance platform across:
+
+- `atrocore-docker` (foundational AtroCore backend)
+- `compliance_cmis` (Alfresco + custom CMIS web scripts)
+- `compliance_import` (ZIP ingestion service)
+- `compliance_flow` (Node-RED middleware)
+- `compliance_web` (web UI + auth/session backend)
+- `compliance_checklist` (offline Electron field app)
+
+## 1. Purpose and Scope
+
+Use this runbook to:
+
+- start the stack in the correct order
+- verify network connectivity and endpoint readiness
+- run a minimal cross-system smoke test
+- identify where failures likely belong
+
+Assumed host OS: Linux with Docker Compose v2.
+
+## 2. High-Level Dependency Order
+
+Start services in this order:
+
+1. AtroCore backend (`atrocore-docker`)
+2. Alfresco/CMIS backend (`compliance_cmis`)
+3. Import service (`compliance_import`)
+4. Node-RED middleware (`compliance_flow`)
+5. Web app backend/frontend (`compliance_web`, optional for API-only tests)
+6. Checklist desktop app (`compliance_checklist`, optional for API-only tests)
+
+Why this order:
+
+- Node-RED depends on external Docker networks and reachable AtroCore/Alfresco/import targets.
+- Import service needs reachable Alfresco.
+- Client apps depend on middleware/backend endpoints being live.
+
+## 3. One-Time Host Preparation
+
+### 3.1 Create shared Docker networks
+
+Run once on the Docker host:
+
+    docker network create backend_net || true
+    docker network create alfresco_backend || true
+    docker network create import-backend || true
+
+### 3.2 Verify expected network names exist
+
+    docker network ls | grep -E "backend_net|alfresco_backend|import-backend"
+
+Expected result: all three names are present.
+
+## 4. Environment Files and Secrets
+
+### 4.1 AtroCore (`atrocore-docker`)
+
+    cd atrocore-docker
+    cp .env.example .env
+
+Set at minimum:
+
+- `POSTGRES_PASSWORD`
+- `POSTGRES_PIM_USER`
+- `POSTGRES_PIM_PASSWORD`
+- `POSTGRES_PIM_DB`
+
+Validate compose:
+
+    docker compose config >/dev/null && echo "atrocore compose valid"
+
+### 4.2 CMIS (`compliance_cmis`)
+
+    cd ../compliance_cmis
+    cp .env.example .env
+
+Set non-default secrets for any non-local usage:
+
+- DB password
+- Solr secret
+- keystore credentials
+
+### 4.3 Import service (`compliance_import`)
+
+    cd ../compliance_import
+    cp .env.docker.example .env
+    cp docker/secrets/alfresco_username.txt.example docker/secrets/alfresco_username.txt
+    cp docker/secrets/alfresco_password.txt.example docker/secrets/alfresco_password.txt
+
+Edit files with real credentials.
+
+### 4.4 Node-RED middleware (`compliance_flow`)
+
+    cd ../compliance_flow
+    cp .env.example .env
+
+Set at minimum:
+
+- `ADMIN_PASSWORD_HASH`
+- optional `API_KEY` for endpoint protection
+- `NODE_RED_CREDENTIAL_SECRET`
+- AtroCore and Alfresco credentials if you are not forwarding user tickets
+
+### 4.5 Compliance Web (`compliance_web`)
+
+    cd ../compliance_web
+    cp .env.example .env
+
+Set at minimum:
+
+- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
+- `ALFRESCO_BASE_URL` (default points to `http://proxy:8080` in compose)
+- `AUTH_TICKET_ENCRYPTION_KEY`
+
+## 5. Startup Procedure
+
+### 5.1 Start AtroCore
+
+    cd ../atrocore-docker
+    docker compose up -d --build
+    docker compose ps
+
+Quick check:
+
+    curl -f http://localhost || echo "AtroCore web not ready yet"
+
+### 5.2 Start CMIS/Alfresco
+
+    cd ../compliance_cmis
+    docker compose up -d
+    docker compose ps
+
+Readiness check:
+
+    curl -f http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-
+
+### 5.3 Start Import service
+
+    cd ../compliance_import
+    docker compose up -d --build
+    docker compose ps
+
+Health check:
+
+    curl -f http://localhost:8000/health
+
+### 5.4 Start Node-RED middleware
+
+    cd ../compliance_flow
+    docker compose up -d
+    docker compose ps
+
+Basic endpoint check (example):
+
+    curl -i http://localhost:1880/specialties
+
+If `API_KEY` is configured:
+
+    curl -i -H "X-API-Key: <your-key>" http://localhost:1880/specialties
+
+### 5.5 Start Compliance Web (optional)
+
+Development profile:
+
+    cd ../compliance_web
+    docker compose --profile dev up -d --build
+    docker compose ps
+
+Check frontend and backend path:
+
+    curl -f http://localhost:3000 || echo "frontend-dev not ready"
+    curl -i http://localhost:4000/api/auth/diagnostics
+
+## 6. Core Smoke Test Matrix (15-Minute Pass)
+
+Run in order and stop at first hard failure.
+
+### 6.1 CMIS endpoint smoke
+
+    curl -u admin:admin -X POST \
+      -H "Content-Type: application/json" \
+      --data @example/get-open-findings.sample.json \
+      "http://localhost:8080/alfresco/s/api/findings/open/query"
+
+Expected: JSON response with findings query output (possibly empty list, but valid structure).
+
+### 6.2 Import service health and upload contract
+
+Health:
+
+    curl -f http://localhost:8000/health
+
+Inspection import (replace with a real sample zip path):
+
+    curl -X POST "http://localhost:8000/inspection-import" \
+      -F "file=@/absolute/path/to/inspection_payload.zip"
+
+Expected: JSON includes `status: imported` and counts.
+
+### 6.3 Node-RED checklist retrieval
+
+    curl -i http://localhost:1880/checklist
+
+Expected: HTTP 200 and checklist payload for valid query parameters.
+
+### 6.4 Node-RED findings proxy to Alfresco
+
+    curl -i http://localhost:1880/findings/open
+
+Expected: HTTP 200 with findings list; verifies middleware to CMIS path.
+
+### 6.5 Web auth diagnostics (if web stack started)
+
+    curl -i http://localhost:4000/api/auth/diagnostics
+
+Expected: health-like auth/session diagnostics output.
+
+## 7. Demo Quickstart — clean clone to a demonstrable system
+
+Verified end to end on 2026-09-15 against the running stack. This is the concrete version
+of the generic flow below it: every command here has been executed, and the intermediate
+results quoted are the ones actually observed. Prerequisites are §3 (shared networks) and
+§4 (the five `.env` files); nothing here replaces them.
+
+The demo dataset is synthetic and additive — every row it writes has a `demo-` id, so it
+can be removed with `seed-demo-dataset.sh --remove` without touching other records. The
+airport is ICAO `ZZZZ` (ICAO's own "unknown aerodrome" placeholder), which makes every
+generated document code (`V-ZZZZ-<year>-01`, `AV-ZZZZ-A-0001`) obviously synthetic.
+
+The executable form of this section is `scripts/demo-quickstart.sh` in this repository:
+run it from the repository root with `--yes` once the stack is up, and it performs §7.2,
+§7.3 (identities), §7.4 and §7.6 in one pass, then prints the closure-review calls for
+§7.5. Read on when something fails — §7.7 lists the traps.
+
+### 7.1 Start the stack
+
+Per §5, with one trap: **`compliance_web`'s base compose file publishes no ports.** The dev
+override is what exposes the auth backend on `:4000`:
+
+    cd compliance_web
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d    # dev
+    docker compose --profile prod up --build                                # prod (nginx proxies /api/)
+
+Without the override the backend is healthy and listening *inside* the container but
+unreachable from the host, so every `localhost:4000` call fails with a connection error
+rather than an HTTP status. `docs/shared/operations/DOCKER_SETUP.md` is the canonical
+guide for both profiles.
+
+### 7.2 Metadata and demo data (`atrocore-docker`)
+
+    ./scripts/install-metadata.sh
+    docker compose exec atro-web php /var/www/localhost/console.php clear cache
+    docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+    ./scripts/seed-usoap-vocabularies.sh --yes   # required: the enums the catalog points at
+    ./scripts/seed-nomenclatura.sh --yes         # spec_* / atype_* reference rows
+    ./scripts/seed-demo-dataset.sh --yes         # the demo dataset
+    # or: make db-seed-vocabularies YES=1 / db-seed-nomenclatura YES=1 / db-seed-demo YES=1
+
+`seed-usoap-vocabularies.sh` is not optional and not demo data: the tracked entity
+definitions reference the risk-level and USOAP extensible enums by hard-coded id, and
+AtroCore's extensible enums have no home in `metadata/`. Without it a fresh install
+resolves every risk level and USOAP Critical Element / area to nothing.
+
+Result: **82 rows across 25 tables** — one fictional airport, two service providers, three
+inspectors, a site visit three weeks ahead, two inspections, the interview schedules the
+plan generator needs, a checklist catalog (three topics, nine questions) with its USOAP
+citation chain, and the per-inspection selections `/checklist` actually reads.
+
+### 7.3 Demo identities (`compliance_cmis`)
+
+One command, idempotent:
+
+    cd compliance_cmis
+    ./scripts/seed-demo-identities.sh --yes     # --remove deletes them again
+
+It creates the `U-VSO-IN_ClosureReviewer` and `U-VSO-IN_Inspector` groups, the users
+`closure.reviewer` and `demo.inspector1` — the latter matching `external_user_i_d` on the
+demo inspector record, which is how an Alfresco login is linked to an inspector — their
+group memberships, and repository access on `vigilancia-de-la-so`. The `closure_reviewer`
+**role** comes from migration `0002_closure_reviewer_role.sql`, so **a new migration needs
+a rebuilt image**: migrations are `COPY`d into `Dockerfile.backend`, and `docker compose up`
+alone re-runs the old ones.
+
+Two things here are easy to miss and both cost a round trip:
+
+- **An application role does not grant an Alfresco permission.** The server authorises by
+  role but performs the repository call with the user's own ticket, so an account that has
+  a role and no repository access passes the role gate and then fails the write with `403`
+  from Alfresco — which surfaces as `502` from the API.
+- Repository access is granted at **site and folder level in Share**, and a *group* can hold it:
+  `GROUP_U-VSO-IN_Inspector` is a **SiteConsumer** of `vigilancia-de-la-so` with **Contributor** on
+  `Datos de campo` and `Hallazgos` — the two folders the ingestion path writes to. That is the
+  pattern to follow: Consumer at the site, Contributor only where the role must write.
+- The identity seed grants access **per user** because no *API* path for a group-level grant works
+  in this deployment: the v1 site-members endpoint returns `404` for a group id (it accepts a
+  person, `201`), the v1 node-permissions API returns `404` for `/nodes/{id}/permissions`, and the
+  legacy `/alfresco/service/api/sites/{site}/memberships` webscript returns `500` for a `groupId`
+  — and `400 "person or group has not been set"` when the body is JSON rather than form-encoded.
+  Until the reviewer group is granted in Share, `seed-demo-identities.sh` gives each demo user
+  membership directly, which is broader than the folder-scoped group grant above. Tracked in
+  `TECHNICAL_DEBT_ANALYSIS.md`.
+
+### 7.4 Populate the work products (`compliance_import` + `compliance_cmis`)
+
+Both import endpoints require an operator ticket, and the canonical import takes
+`?alf_ticket=`:
+
+    TICKET=$(curl -s -X POST \
+      "http://localhost:8080/alfresco/api/-default-/public/authentication/versions/1/tickets" \
+      -H 'Content-Type: application/json' \
+      -d "{\"userId\":\"$ALFRESCO_USERNAME\",\"password\":\"$ALFRESCO_PASSWORD\"}" | jq -r .entry.id)
+
+    # 1. the checklist + findings (bare-array findings.json, Evidence/ folder)
+    curl -X POST http://127.0.0.1:8000/inspection-import -H "X-Alfresco-Ticket: $TICKET" \
+      -F "file=@example data/demo_inspection_payload.zip"
+    # => {"status":"imported","findingsImported":2,"evidenceImported":3}
+
+    # 2. canonical import (the QUERY-PARAM form: no follow-up context, imports the documents)
+    curl -X POST "http://localhost:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=$TICKET" \
+      -H 'Content-Type: application/json' \
+      -d '{"inspectionCode":"AV-ZZZZ-A-0001","specialtyName":"Servicio de tránsito aéreo"}'
+    # => {"success":true,"summary":{"created":13,"findingsImported":2,...}}
+
+    # 3. the follow-up (followup-reports.json + prior-findings.json + FollowUpEvidence/)
+    curl -X POST http://127.0.0.1:8000/followup-import -H "X-Alfresco-Ticket: $TICKET" \
+      -F "file=@example data/demo_followup_payload.zip"
+    # => {"status":"imported","followUpReportsImported":1,"followUpEvidenceImported":1,
+    #     "followUpFilenames":["FollowUp H-ZZZZA0001-ATS-001 01.json"]}
+
+    # 4. process that follow-up: this is what moves the finding
+    curl -X POST "http://localhost:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=$TICKET" \
+      -H 'Content-Type: application/json' \
+      -d '{"inspectionCode":"AV-ZZZZ-A-0001","specialtyName":"Servicio de tránsito aéreo",
+           "followUpFiles":["FollowUp H-ZZZZA0001-ATS-001 01.json"]}'
+    # => {"success":true,"summary":{"processed":1,"pendingClosureApprovals":1,...}}
+    #    and the finding moves to "Pending Closure Approval"
+
+**Step 4 is not optional and not the same as step 2.** The query-param form carries no
+follow-up context, so `closurePolicy.shouldClose` never runs and the summary reports
+`processed: 0, pendingClosureApprovals: 0` while the finding stays open. Only the
+`followUpFiles` form processes a follow-up, and the filename is the one the follow-up
+import reported in `followUpFilenames`.
+
+A valid `Closure Verification` follow-up only makes a finding **eligible** for closure. It
+never closes it. That is the two-step gate.
+
+Known rough edge: re-processing a follow-up whose evidence has already been moved into the
+finding folder fails with `404 Evidence source file not found`. Re-run step 3 first — the
+payload re-supplies the evidence.
+
+### 7.5 Walk the closure review (`compliance_web`)
+
+Login returns a `csrfToken` that must be sent as `X-CSRF-Token` with the session cookie:
+
+    curl -c jar -X POST http://127.0.0.1:4000/api/auth/login \
+      -H 'Content-Type: application/json' \
+      -d '{"username":"closure.reviewer","password":"<pw>"}'
+    # => {"authenticated":true,"roles":["closure_reviewer"],"csrfToken":"..."}
+
+    # reject: a reason is required, and is stored on the finding
+    curl -b jar -X PATCH "http://127.0.0.1:4000/api/findings/H-ZZZZA0001-ATS-001/closure-review" \
+      -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" \
+      -d '{"decision":"reject","reason":"Closure evidence is undated"}'
+    # => 200, finding back to "In Progress", vso:closureRejectionReason set
+
+    # approve: closes it
+    curl -b jar -X PATCH "http://127.0.0.1:4000/api/findings/H-ZZZZA0001-ATS-001/closure-review" \
+      -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" -d '{"decision":"approve"}'
+    # => 200, "Closed", vso:findingClosureDate set, rejection reason cleared
+
+The route requires the `closure_reviewer` role (`admin` is break-glass), refuses a reviewer
+who is the recorded declarer (`403 CLOSURE_REVIEW_SELF`), and refuses a finding whose
+declarer was never recorded (`409 CLOSURE_DECLARER_UNKNOWN`) rather than allowing an
+unattributable approval.
+
+### 7.6 Verify
+
+    node compliance_flow/scripts/smoke-flows.mjs            # 15 passed, 0 failed, 10 skipped
+    node compliance_flow/scripts/audit-error-envelope.mjs --enforce   # 5 pass, 0 fail
+    curl "http://localhost:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS"
+    # => 0 open once both demo findings are closed; each finding carries its status
+
+### 7.7 Traps encountered while building this (all cost a round trip)
+
+- `compliance_web` base compose publishes no ports → use the dev override (§7.1).
+- Dev image rebuilds need `COMPOSE_BAKE=false DOCKER_BUILDKIT=0` where buildx is absent;
+  otherwise `docker compose build` fails on a read-only `~/.docker/buildx`.
+- Migrations are baked into the backend image → rebuild for a new one (§7.3).
+- The two `import-canonical` forms are not interchangeable (§7.4).
+- Payload shapes: `findings.json` is a **bare array**; a follow-up ZIP needs
+  `followup-reports.json` **and** `prior-findings.json` (both bare arrays) plus a
+  `FollowUpEvidence/` folder — not `Evidence/`, which is the inspection-import folder name.
+- Application role ≠ Alfresco permission (§7.3).
+- `/findings/open` is **search-backed** (AFTS/Solr), so it lags a few seconds behind a status
+  change. Re-query before concluding a transition did not happen: the quickstart's final count read
+  `0` immediately after a finding had moved to `Pending Closure Approval`, and `1` a moment later.
+
+### 7.8 Generic lifecycle (for reference)
+
+## 8. Failure Isolation Guide
+
+Use these quick cues:
+
+- `localhost:8080` CMIS ready probe fails:
+  - likely Alfresco stack boot/resource/config issue (`compliance_cmis`).
+- `localhost:8000/health` fails while Alfresco is up:
+  - likely import container or secret/env misconfiguration (`compliance_import`).
+- Node-RED endpoint returns auth/network errors:
+  - check external network attachment and upstream URLs in flows (`compliance_flow`).
+- Web login/session errors:
+  - verify PostgreSQL schema initialization and `AUTH_TICKET_ENCRYPTION_KEY` (`compliance_web`).
+- API returns `502` whose message is an inner `403` from Alfresco:
+  - the caller's *role* was authorized but the account has no **repository permission**;
+    an application role does not grant an Alfresco ACL (§7.3).
+- Web/API calls to `localhost:4000` fail with a connection error, not an HTTP status:
+  - the backend is up but its port is unpublished; start it with the dev override (§7.1).
+
+For logs:
+
+    docker compose logs -f <service>
+
+Run from each repository directory with the relevant service name.
+
+## 9. Shutdown Procedure
+
+Recommended order for clean stop:
+
+1. `compliance_web`
+2. `compliance_flow`
+3. `compliance_import`
+4. `compliance_cmis`
+5. `atrocore-docker`
+
+Command pattern:
+
+    docker compose down
+
+## 10. Operational Notes
+
+- For production-like usage, replace all development defaults for credentials and secrets.
+- Keep shared network names stable across all repos.
+- Maintain one source of truth for endpoint/auth policy to avoid drift between web app, checklist app, and middleware.
