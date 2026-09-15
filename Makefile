@@ -1,4 +1,4 @@
-.PHONY: help up down db-backup db-restore db-seed metadata-install db-seed-nomenclatura
+.PHONY: help up down db-backup db-restore db-seed db-seed-demo db-seed-demo-remove metadata-install db-seed-nomenclatura
 
 help:
 	@echo "Available targets:"
@@ -7,11 +7,18 @@ help:
 	@echo "  make db-backup                 Create timestamped DB dump"
 	@echo "  make db-restore DUMP=... [DB=...]"
 	@echo "                                Restore dump into DB (destructive)"
+	@echo "  make db-seed-demo [DB=...] YES=1"
+	@echo "                                Seed the synthetic demo dataset (additive, safe)"
+	@echo "  make db-seed-demo-remove [DB=...] YES=1"
+	@echo "                                Delete every demo- row"
 	@echo "  make db-seed [DUMP=atrocore.dump] [DB=...] YES=1"
-	@echo "                                Seed DB with demo data (destructive)"
+	@echo "                                Restore a real pg_dump instead (destructive;"
+	@echo "                                the dump is not in git — use db-seed-demo normally)"
 	@echo "  make metadata-install          Install tracked metadata/ into web-data/"
 	@echo "  make db-seed-nomenclatura [DB=...] YES=1"
 	@echo "                                Seed Specialty/ActivityType catalogs (destructive)"
+	@echo ""
+	@echo "Quickstart order: up -> metadata-install -> db-seed-nomenclatura -> db-seed-demo"
 
 up:
 	docker compose up -d
@@ -46,6 +53,29 @@ db-seed-nomenclatura:
 		./scripts/seed-nomenclatura.sh "$(DB)" --yes; \
 	else \
 		./scripts/seed-nomenclatura.sh --yes; \
+	fi
+
+db-seed-demo:
+	@if [ "$(YES)" != "1" ]; then \
+		echo "Usage: make db-seed-demo [DB=target_db] YES=1"; \
+		echo "(additive seed: only rows with a demo- id are written)"; \
+		exit 1; \
+	fi
+	@if [ -n "$(DB)" ]; then \
+		./scripts/seed-demo-dataset.sh "$(DB)" --yes; \
+	else \
+		./scripts/seed-demo-dataset.sh --yes; \
+	fi
+
+db-seed-demo-remove:
+	@if [ "$(YES)" != "1" ]; then \
+		echo "Usage: make db-seed-demo-remove [DB=target_db] YES=1"; \
+		exit 1; \
+	fi
+	@if [ -n "$(DB)" ]; then \
+		./scripts/seed-demo-dataset.sh "$(DB)" --remove --yes; \
+	else \
+		./scripts/seed-demo-dataset.sh --remove --yes; \
 	fi
 
 db-seed:

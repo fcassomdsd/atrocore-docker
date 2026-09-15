@@ -158,6 +158,37 @@ Important:
 
 ## Demo Data Seeding
 
+### Synthetic demo dataset (use this on a fresh install)
+
+Nothing operational is committed as a dump, so a fresh clone comes up with
+structurally complete but **empty** tables. The synthetic dataset closes that
+gap: it is version-controlled, contains no secrets, is **additive** (it only
+ever writes rows whose `id` starts with `demo-`) and is re-runnable, so it is
+safe to run against a database that already holds real records.
+
+```bash
+./scripts/seed-nomenclatura.sh --yes      # spec_* / atype_* reference rows (run first)
+./scripts/seed-demo-dataset.sh --yes      # the demo dataset
+# or: make db-seed-demo YES=1
+
+./scripts/seed-demo-dataset.sh --remove --yes   # delete every demo- row
+# or: make db-seed-demo-remove YES=1
+```
+
+It creates one fictional airport (ICAO `ZZZZ` — ICAO's own "unknown aerodrome"
+placeholder), two service providers, three inspectors, their services and
+specialties, a site visit **three weeks ahead of the day you seed**, two
+inspections and the interview schedules the plan generator needs. Document codes
+carry the current year (`V-ZZZZ-2026-01`, `AV-ZZZZ-A-0001`); reference the
+stable `id`s (`demo-sv-01`, `demo-insp-ans-01`) from scripts and docs. The visit
+is seeded as `Planned`, because `/siteVisits` hides visits that are still
+`Created` — a seed that stopped at `Created` would look like an empty database.
+
+`sql/seed-demo-dataset.sql` carries the full rationale. **Never put a real
+authority's data in it** — see the P0 finding in `TECHNICAL_DEBT_ANALYSIS.md`.
+
+### Restoring a real dataset
+
 > Database dumps are **not** committed to this repository — the previously tracked
 > dumps contained live credential material (user password hashes and session
 > tokens). Provision a seed dump from the release artifact store before seeding.
@@ -254,16 +285,21 @@ Main targets:
 - `make down` - Stop containers
 - `make db-backup` - Create database backup
 - `make db-restore DUMP=... [DB=...]` - Restore dump into DB
-- `make db-seed [DUMP=atrocore.dump] [DB=...] YES=1` - Seed demo data
+- `make db-seed-demo [DB=...] YES=1` - Seed the synthetic demo dataset (additive; safe)
+- `make db-seed-demo-remove [DB=...] YES=1` - Delete every `demo-` row
+- `make db-seed [DUMP=atrocore.dump] [DB=...] YES=1` - Restore a real dump instead (destructive)
 - `make metadata-install` - Install tracked `metadata/` into `web-data/`
 - `make db-seed-nomenclatura [DB=...] YES=1` - Seed Specialty/ActivityType catalogs
 
 ## CI Validation (GitLab)
 
-The CI pipeline (`.gitlab-ci.yml`) includes two validation jobs:
+The CI pipeline (`.gitlab-ci.yml`) includes three validation jobs:
 
+- `validate:metadata`: runs `scripts/validate-metadata.py` over the tracked `metadata/` tree (no containers needed).
+- `validate:seed`: runs `scripts/validate-demo-seed.py`, which checks the demo dataset is additive-only (every `DELETE` scoped to `demo-` rows), has no `TRUNCATE`, namespaces every row id, still totals the documented 38 rows, and that `--remove` covers every table the seed writes. Also fast and container-free.
 - `blank_instance_check`: starts services, verifies DB access, and validates backup creation.
-- `demo_seed_check`: starts services, seeds demo data, and verifies that public tables exist.
+
+> The demo seed is **applied** locally and in the quickstart, not in CI: the `atro-web` image built by this pipeline starts Apache with a DocumentRoot that does not exist (the AtroCore application is never installed), so its schema never appears and there is nothing to seed. That is why the old `demo_seed_check` job skipped itself on every run.
 
 Common CI variables you can override:
 
@@ -285,7 +321,7 @@ Common CI variables you can override:
 
 - `scripts/` - Backup, restore, demo seed, metadata install, and catalog seed helpers
 - `metadata/` - Version-controlled AtroCore entity metadata (installed into `web-data/`)
-- `sql/` - Reference-catalog seed scripts
+- `sql/` - Reference-catalog and demo-dataset seed scripts (`seed-nomenclatura-catalog.sql`, `seed-demo-dataset.sql`, `seed-usoap-evidence-expectations.sql`)
 - `db-dumps/` - Generated dump files (gitignored, never committed)
 - `db-data/` - PostgreSQL persistent data
 - `web-data/` - AtroCore web and application data

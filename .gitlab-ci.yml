@@ -83,42 +83,29 @@ blank_instance_check:
   after_script:
     - docker compose down -v || true
 
-demo_seed_check:
+# `sql/seed-demo-dataset.sql` is applied to a live database locally and in the
+# quickstart; this pipeline cannot do that. The `atro-web` image built here
+# starts Apache with a DocumentRoot that does not exist — the AtroCore
+# application is never installed, so its schema never appears and there is
+# nothing to seed. (The previous `demo_seed_check` job worked around that by
+# skipping itself whenever `atrocore.dump` was absent, which — since dumps are
+# gitignored — was every run; it then asserted only that some public tables
+# existed, which was already true against an empty database.)
+#
+# So validate the seed's invariants instead: additive-only (every DELETE scoped
+# to demo- rows), no TRUNCATE, every row id namespaced, the row count matching
+# its documentation, and --remove covering every table the seed writes. Fast,
+# no containers, and it always runs.
+validate:seed:
   stage: validate
+  image: python:3.12-alpine
+  before_script: []
   script:
-    - rm -rf db-data web-data
-    - mkdir -p db-data web-data
-    - docker compose up -d --build db atro-web
-    - |
-      for i in $(seq 1 60); do
-        if docker compose exec -T db pg_isready -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" >/dev/null 2>&1; then
-          echo "PostgreSQL is ready"
-          break
-        fi
-        if [ "$i" -eq 60 ]; then
-          echo "PostgreSQL did not become ready in time"
-          docker compose logs db || true
-          exit 1
-        fi
-        echo "Waiting for PostgreSQL to be ready... ($i/60)"
-        sleep 2
-      done
-    - |
-      if [ ! -f atrocore.dump ]; then
-        echo "No demo seed dump provisioned: database dumps are not committed to this"
-        echo "repository. Skipping the demo seed check."
-        exit 0
-      fi
-    - ./scripts/seed-demo-db.sh --yes
-    - |
-      table_count=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -At -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';")
-      if [ "$table_count" -le 0 ]; then
-        echo "Expected demo seed to create public tables, found: $table_count"
-        exit 1
-      fi
-      echo "Demo seed check passed with $table_count public tables."
-  after_script:
-    - docker compose down -v || true
+    - python3 scripts/validate-demo-seed.py
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
 # Releases are CalVer-tagged from CHANGELOG.md and gated on a prepared release
 # entry: the tag is the date of the newest "## [YYYY-MM-DD]" section, the
