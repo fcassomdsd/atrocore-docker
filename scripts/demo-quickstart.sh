@@ -434,8 +434,10 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   VISIT_PAST="V-ZZZZ-$(date +%Y)-01"
   VISIT_FUTURE="V-ZZZZ-$(date +%Y)-02"
 
-  # The transform service is cold for the first call or two after a repository restart
-  # ("PDF transformation failed"), so retry instead of reporting a false failure.
+  # The transform service is cold until LibreOffice has started inside it, and the first document
+  # generation after that answers "PDF transformation failed" → `HTTP 500`. On a fresh CI runner
+  # that takes far longer than on a development machine that has already generated something, so
+  # the retry window is generous and the caller prints the response when it gives up.
   retry_json() { # retry_json <attempts> <url>
     local attempt response=""
     for attempt in $(seq 1 "$1"); do
@@ -443,9 +445,18 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
       case "${response}" in
         *'"status": "success"'*|*'"status":"success"'*) printf '%s' "${response}"; return 0 ;;
       esac
-      [ "${attempt}" -lt "$1" ] && sleep 10
+      printf '    attempt %s/%s: %s\n' "${attempt}" "$1" "$(printf '%s' "${response}" | head -c 120)" >&2
+      [ "${attempt}" -lt "$1" ] && sleep 15
     done
     printf '%s' "${response}"
+  }
+
+  # A generation that keeps failing says only "HTTP 500" through the flow. The reason is in the
+  # repository log, so print the lines that explain it before giving up.
+  generation_diagnostics() {
+    ( cd "${WORKSPACE_ROOT}/compliance_cmis" \
+      && docker compose logs --tail 120 alfresco 2>/dev/null \
+        | grep -iE "generate-inspection|transform|template|error|exception" | tail -12 | sed 's/^/    alfresco | /' ) >&2 || true
   }
 
   # JSON arrives on stdin: the inspection report answers with ~1 MB (it echoes its input and
@@ -470,16 +481,16 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
 
   # 7a. Plan, on the visit that has not happened yet. This is also what moves the inspection
   #     from Assigned to Planned, which the last line of this step asserts.
-  PLAN=$(retry_json 4 "http://${DEMO_HOST}:1880/inspectionPlan?siteVisit=${VISIT_FUTURE}&provider=demo-iprov-ans-02&locale=es")
+  PLAN=$(retry_json 10 "http://${DEMO_HOST}:1880/inspectionPlan?siteVisit=${VISIT_FUTURE}&provider=demo-iprov-ans-02&locale=es")
   PLAN_PATH=$(printf '%s' "${PLAN}" | json_field 'j.generatedFile.path')
-  [ -n "${PLAN_PATH}" ] || die "inspectionPlan failed: $(printf '%s' "${PLAN}" | head -c 200)"
+  [ -n "${PLAN_PATH}" ] || { generation_diagnostics; die "inspectionPlan failed: $(printf '%s' "${PLAN}" | head -c 200)"; }
   [ -n "$(alfresco_node "${PLAN_PATH}")" ] || die "the plan was reported at ${PLAN_PATH} but no such document exists"
   ok "plan filed: ${PLAN_PATH}"
 
   # 7b. Inspection report, on the visit that has happened.
-  REPORT=$(retry_json 4 "http://${DEMO_HOST}:1880/inspectionReport?siteVisit=${VISIT_PAST}&provider=demo-prov-ans&locale=es")
+  REPORT=$(retry_json 10 "http://${DEMO_HOST}:1880/inspectionReport?siteVisit=${VISIT_PAST}&provider=demo-prov-ans&locale=es")
   REPORT_PATH=$(printf '%s' "${REPORT}" | json_field 'j.generatedFile.path')
-  [ -n "${REPORT_PATH}" ] || die "inspectionReport failed: $(printf '%s' "${REPORT}" | head -c 200)"
+  [ -n "${REPORT_PATH}" ] || { generation_diagnostics; die "inspectionReport failed: $(printf '%s' "${REPORT}" | head -c 200)"; }
   [ -n "$(alfresco_node "${REPORT_PATH}")" ] || die "the report was reported at ${REPORT_PATH} but no such document exists"
   ok "inspection report filed: ${REPORT_PATH}"
 
