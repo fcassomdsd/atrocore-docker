@@ -45,6 +45,9 @@ Host requirements beyond Docker:
   `compliance_flow` smoke harnesses are Node scripts
 - `jq` — only for the by-hand recipes that pipe a response (e.g. §7.4's ticket); the
   quickstart script uses `node` instead
+- `python3` — `scripts/install-metadata.sh` registers entity tabs with it, and the quickstart
+  stamps the demo payloads with the seeded site visit's window through it
+  (`compliance_import/scripts/stamp-payload-window.py`)
 
 Assumed host OS: Linux.
 
@@ -394,9 +397,31 @@ Both import endpoints require an operator ticket, and the canonical import takes
       -H 'Content-Type: application/json' \
       -d "{\"userId\":\"$ALFRESCO_USERNAME\",\"password\":\"$ALFRESCO_PASSWORD\"}" | jq -r .entry.id)
 
+**Stamp the payloads with the seeded window first.** The seed dates the site visit relative to
+the day it runs (`CURRENT_DATE + 21`/`+ 22`, §7.3), while the ZIPs committed to
+`compliance_import` freeze their dates the day they are written — and the payload's window is
+what the canonical import copies onto the Alfresco inspection folder, so importing a stale ZIP
+dates the inspection into the wrong week. The quickstart does this for you; by hand it is one
+step per payload, with the window read back from the seed:
+
+    # the window the seed computed for demo-sv-01
+    WINDOW=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -tAc \
+      "select to_char(start_date,'YYYY-MM-DD') || ' ' || to_char(end_date,'YYYY-MM-DD')
+         from public.site_visit where id = 'demo-sv-01'")
+    python3 ../compliance_import/scripts/stamp-payload-window.py \
+      "../compliance_import/example data/demo_inspection_payload.zip" /tmp/demo_inspection_payload.zip \
+      --start "${WINDOW%% *}" --end "${WINDOW##* }"
+
+The tracked ZIP is never modified: the stamp writes a copy whose `checklist.startDate`/`endDate`
+are the window's first/last day, shifts every other date by the same delta as the window's last
+day (a finding issued on the inspection's last day stays there), and dates a follow-up payload's
+`followUpDate` 13 days after the window ends (it belongs to an inspection in another ZIP, so it
+has no window of its own). The commands below import the *stamped* copies — `/tmp/…` — rather
+than the tracked files:
+
     # 1. the checklist + findings (bare-array findings.json, Evidence/ folder)
     curl -X POST http://127.0.0.1:8000/inspection-import -H "X-Alfresco-Ticket: $TICKET" \
-      -F "file=@example data/demo_inspection_payload.zip"
+      -F "file=@/tmp/demo_inspection_payload.zip"
     # => {"status":"imported","findingsImported":2,"evidenceImported":3}
 
     # 2. canonical import (the QUERY-PARAM form: no follow-up context, imports the documents)
@@ -407,7 +432,7 @@ Both import endpoints require an operator ticket, and the canonical import takes
 
     # 3. the follow-up (followup-reports.json + prior-findings.json + FollowUpEvidence/)
     curl -X POST http://127.0.0.1:8000/followup-import -H "X-Alfresco-Ticket: $TICKET" \
-      -F "file=@example data/demo_followup_payload.zip"
+      -F "file=@/tmp/demo_followup_payload.zip"
     # => {"status":"imported","followUpReportsImported":1,"followUpEvidenceImported":1,
     #     "followUpFilenames":["FollowUp H-ZZZZA0001-ATS-001 01.json"]}
 
@@ -427,14 +452,15 @@ seeded inspection with no payload cannot be dated, so its items drop out of the 
 provider-history report. Run the same pair as steps 1 and 2 for MET:
 
     curl -X POST http://127.0.0.1:8000/inspection-import -H "X-Alfresco-Ticket: $TICKET" \
-      -F "file=@example data/demo_met_inspection_payload.zip"
+      -F "file=@/tmp/demo_met_inspection_payload.zip"
     # => {"status":"imported","inspectionId":"demo-insp-met-01","evidenceImported":3}
 
     curl -X POST "http://localhost:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=$TICKET" \
       -H 'Content-Type: application/json' \
       -d '{"inspectionCode":"AV-ZZZZ-I-0001","specialtyName":"Meteorología aeronáutica"}'
 
-Step 6 below fails if either inspection ends up without a window.
+Step 6 below fails if either inspection ends up without a window, or with one that is not the
+seeded site visit's.
 
 **Step 4 is not optional and not the same as step 2.** The query-param form carries no
 follow-up context, so `closurePolicy.shouldClose` never runs and the summary reports
@@ -496,6 +522,10 @@ unattributable approval.
     node compliance_flow/scripts/audit-error-envelope.mjs --enforce   # 5 pass, 0 fail
     curl "http://localhost:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS"
     # => 0 open once both demo findings are closed; each finding carries its status
+
+`scripts/demo-quickstart.sh` also reads both inspection folders back and asserts each carries
+exactly the seeded site visit's window (§7.4), because a checklist item is dated by its nearest
+inspection ancestor and an item outside the period a report filters on simply disappears from it.
 
 ### 7.7 Traps encountered while building this (all cost a round trip)
 
