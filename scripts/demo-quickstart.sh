@@ -358,10 +358,22 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   ok "follow-up document: ${FOLLOW_UP_FILE}"
 
   step "5. Process the follow-up — this is what moves the finding (NOT step 3's form)"
-  RESP=$(curl -s -m 240 -X POST \
-    "http://${DEMO_HOST}:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
-    -H 'Content-Type: application/json' \
-    -d "{\"inspectionCode\":\"AV-ZZZZ-A-0001\",\"specialtyName\":\"Servicio de tránsito aéreo\",\"followUpFiles\":[\"${FOLLOW_UP_FILE}\"]}")
+  # Retried, because the canonical import resolves the finding it is attaching the follow-up to
+  # through the *search index* (`findFindingNodesById`), and on a fresh instance the finding was
+  # created seconds ago in step 3 and is not indexed yet — the import then answers
+  # `processed: 0, finding-not-found` and the finding never reaches Pending Closure Approval. It is
+  # the same lag the runbook documents for `/findings/open`. The call is an upsert, so repeating it
+  # is safe; a later attempt sees the finding and processes the follow-up.
+  PENDING=0
+  for attempt in 1 2 3 4 5 6; do
+    RESP=$(curl -s -m 240 -X POST \
+      "http://${DEMO_HOST}:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
+      -H 'Content-Type: application/json' \
+      -d "{\"inspectionCode\":\"AV-ZZZZ-A-0001\",\"specialtyName\":\"Servicio de tránsito aéreo\",\"followUpFiles\":[\"${FOLLOW_UP_FILE}\"]}")
+    PENDING=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).summary||{}).pendingClosureApprovals||0)}catch(e){console.log(0)}})')
+    [ "${PENDING}" = "1" ] && break
+    [ "${attempt}" -lt 6 ] && sleep 10
+  done
   echo "    ${RESP}" | head -c 260; echo
   PENDING=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).summary||{}).pendingClosureApprovals||0)}catch(e){console.log(0)}})')
   if [[ "${PENDING}" != "1" ]]; then
