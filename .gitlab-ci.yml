@@ -163,6 +163,43 @@ validate:seed:
 # the release trigger: a merge to the default branch that does not touch
 # CHANGELOG.md produces no release. See scripts/release-tag.sh and
 # CONTRIBUTING.md ("Versioning and releases").
+# The whole-stack demo. `validate:fresh-install` covers AtroCore and the three seeds; everything
+# after that — the identities, the imports, the closure walkthrough and the oversight artifacts —
+# needs the other five repositories side by side, which a single-repo checkout does not have. This
+# job assembles that layout (`scripts/demo-verify-ci.sh` clones the siblings; all six projects are
+# public and cloned over HTTPS at `develop`), brings the stack up and runs the demo quickstart.
+#
+# It is deliberately NOT a merge-request gate. It builds five projects and boots Alfresco, Solr,
+# ActiveMQ, the transform service, Node-RED and two Node services, so it takes on the order of
+# twenty minutes and needs a runner with memory to match; the per-repo pipelines stay the gate.
+# Run it on a schedule (`CI_PIPELINE_SOURCE == "schedule"`) or by hand from the pipeline UI — a
+# schedule is the only way the demo is checked without someone remembering to press the button.
+#
+# `SIBLING_REF` is what makes it a *demo* guard rather than a per-branch one: it clones every
+# sibling at `develop`, so it answers "does the demo work on today's integration branches?".
+# Point it at a branch to check a matching set of changes before they are merged.
+demo:verify:
+  stage: validate
+  variables:
+    SIBLING_REF: develop
+  script:
+    # `git` for the sibling clones and `python3` for the .env merge; bash and curl come from the
+    # default before_script, which also writes this project's .env from the pipeline variables.
+    - apk add --no-cache python3 curl git
+    - ./scripts/demo-verify-ci.sh
+  after_script:
+    # Runs even when the demo fails, so a failed job does not leave five stacks and their volumes
+    # behind on the runner.
+    - ./scripts/demo-verify-ci.sh --teardown || true
+  rules:
+    # Scheduled: it runs unattended.
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    # Everywhere else it is offered as a manual button, never a gate — `allow_failure` keeps a
+    # failed demo run from blocking a pipeline it was not asked to gate, and being manual means
+    # no pipeline pays for it unless somebody presses it (or a schedule fires).
+    - when: manual
+      allow_failure: true
+
 compute_release_tag:
   stage: release
   image: alpine:latest
