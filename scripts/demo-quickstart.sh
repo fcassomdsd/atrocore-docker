@@ -128,10 +128,21 @@ probe "Node-RED"        "http://${DEMO_HOST}:1880/" "200 401"
 probe "import service"  "http://${DEMO_HOST}:8000/health" "200"
 probe "web backend"     "http://${DEMO_HOST}:4000/health" "200"
 
+# compliance_flow/.env holds the *in-network* AtroCore address (`http://atro-web/api/v1`), which is
+# right for Node-RED and wrong for anything this script runs against the published port — the
+# install wizard in particular, which would then be told to reach a host it cannot resolve
+# (`http://atro-web/api/v1 did not answer; is the stack up?` on a stack that is up). A caller's
+# ATROCORE_BASE_URL is therefore preserved across the sourcing below.
+CALLER_ATROCORE_BASE_URL="${ATROCORE_BASE_URL:-}"
+
 set -a
 # shellcheck disable=SC1091
 . "${WORKSPACE_ROOT}/compliance_flow/.env"
 set +a
+
+if [[ -n "${CALLER_ATROCORE_BASE_URL}" ]]; then
+  export ATROCORE_BASE_URL="${CALLER_ATROCORE_BASE_URL}"
+fi
 
 ticket() {
   curl -s -m 30 -X POST \
