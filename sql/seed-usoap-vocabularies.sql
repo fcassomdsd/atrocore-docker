@@ -201,12 +201,16 @@ ON CONFLICT DO NOTHING;
 -- ---------------------------------------------------------------------------
 -- 8. Options — Inspector Roles (3), referenced by ActingInspector.role
 --
--- `multilingual`, so the Spanish label lives in `name_es_do` rather than `name`.
+-- The enum is `multilingual`, but no translations are seeded: AtroCore adds the
+-- language columns (`name_es_do`, …) to `extensible_enum_option` only once that
+-- language is configured, so setting them here fails on a fresh install with
+-- `column "name_es_do" … does not exist`. A fresh instance is single-language
+-- until an administrator adds one, exactly as it was designed to be.
 -- ---------------------------------------------------------------------------
-INSERT INTO public.extensible_enum_option (id, name, code, sort_order, deleted, created_at, modified_at, created_by_id, modified_by_id, name_es_do) VALUES
-    ('a01k60s4sstea0awdgtgaq3gnrz', 'Main Inspector',      'MAIN',        85606557, false, NOW(), NOW(), '1', '1', 'Inspector Principal'),
-    ('a01k60s618se9mth8aq77qvzxcg', 'Secondary Inspector', 'SECONDARY',   85606578, false, NOW(), NOW(), '1', '1', 'Inspector Secundario'),
-    ('a01k60s6v3xe2hag3whymmafze3', 'Team Member',         'TEAM_MEMBER', 86284346, false, NOW(), NOW(), '1', '1', 'Miembro de Equipo')
+INSERT INTO public.extensible_enum_option (id, name, code, sort_order, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('a01k60s4sstea0awdgtgaq3gnrz', 'Main Inspector',      'MAIN',        85606557, false, NOW(), NOW(), '1', '1'),
+    ('a01k60s618se9mth8aq77qvzxcg', 'Secondary Inspector', 'SECONDARY',   85606578, false, NOW(), NOW(), '1', '1'),
+    ('a01k60s6v3xe2hag3whymmafze3', 'Team Member',         'TEAM_MEMBER', 86284346, false, NOW(), NOW(), '1', '1')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.extensible_enum_extensible_enum_option (id, extensible_enum_id, extensible_enum_option_id, sorting, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
@@ -218,9 +222,9 @@ ON CONFLICT DO NOTHING;
 -- ---------------------------------------------------------------------------
 -- 9. Options — Finding Class (2), referenced by Finding.class
 -- ---------------------------------------------------------------------------
-INSERT INTO public.extensible_enum_option (id, name, code, sort_order, deleted, created_at, modified_at, created_by_id, modified_by_id, name_es_do) VALUES
-    ('a01k5cjtbw2ecvv5pdhwr767caw', 'Category A', 'A', 85606557, false, NOW(), NOW(), '1', '1', 'Categoría A'),
-    ('a01k5cjtzxde8kt2vzkzkss45f1', 'Category B', 'B', 85606578, false, NOW(), NOW(), '1', '1', 'Categoría B')
+INSERT INTO public.extensible_enum_option (id, name, code, sort_order, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('a01k5cjtbw2ecvv5pdhwr767caw', 'Category A', 'A', 85606557, false, NOW(), NOW(), '1', '1'),
+    ('a01k5cjtzxde8kt2vzkzkss45f1', 'Category B', 'B', 85606578, false, NOW(), NOW(), '1', '1')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.extensible_enum_extensible_enum_option (id, extensible_enum_id, extensible_enum_option_id, sorting, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
