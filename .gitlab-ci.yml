@@ -121,7 +121,7 @@ validate:fresh-install:
       check "select count(*) from location where id like 'demo-%'"         "demo locations"     1
       check "select count(*) from service_provider where id like 'demo-%'" "demo providers"     2
       check "select count(*) from inspector where id like 'demo-%'"        "demo inspectors"    3
-      check "select count(*) from inspection where id like 'demo-%'"       "demo inspections"   2
+      check "select count(*) from inspection where id like 'demo-%'"       "demo inspections"   3
       check "select count(*) from specialty"                                "specialties"       16
       check "select count(*) from \"user\" where id='1' and is_admin"       "super admin"        1
       check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7

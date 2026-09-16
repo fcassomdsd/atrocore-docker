@@ -348,10 +348,22 @@ definitions reference the risk-level and USOAP extensible enums by hard-coded id
 AtroCore's extensible enums have no home in `metadata/`. Without it a fresh install
 resolves every risk level and USOAP Critical Element / area to nothing.
 
-Result: **82 rows across 25 tables** — one fictional airport, two service providers, three
-inspectors, a site visit three weeks ahead, two inspections, the interview schedules the
-plan generator needs, a checklist catalog (three topics, nine questions) with its USOAP
-citation chain, and the per-inspection selections `/checklist` actually reads.
+Result: **90 rows across 25 tables** — one fictional airport, two service providers, three
+inspectors, **two site visits**, three inspections, the interview schedules the plan generator
+needs, a checklist catalog (three topics, nine questions) with its USOAP citation chain, and the
+per-inspection selections `/checklist` actually reads.
+
+**The two visits exist because the demo walks two halves of the lifecycle that cannot share a
+date** (§7.4 — the payload dates are derived from the visit the inspection belongs to):
+
+| Visit | Dates | Status | Used for |
+|---|---|---|---|
+| `V-ZZZZ-2026-01` (`demo-sv-01`) | `CURRENT_DATE - 30` → `-29` | `Complete` | the ATS and MET inspections, whose checklists and findings are imported and whose finding is walked through closure — so a closure is reviewed *after* the finding was issued |
+| `V-ZZZZ-2026-02` (`demo-sv-02`) | `CURRENT_DATE + 21` → `+22` | `Planned` | the planning walkthrough: `GET /inspectionPlan` on `demo-iprov-ans-02` renders the plan and moves `AV-ZZZZ-A-0002` from `Assigned` to `Planned` |
+
+Both visits are re-dated relative to the day the seed runs, so the demo is coherent whenever it
+is seeded — that is why the quickstart reads the window back from `demo-sv-01` and stamps the
+payload dates with it rather than embedding dates in the ZIPs.
 
 ### 7.3 Demo identities (`compliance_cmis`)
 

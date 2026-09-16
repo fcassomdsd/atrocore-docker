@@ -13,7 +13,8 @@
 #   ./scripts/seed-demo-dataset.sh --yes
 #
 # What it creates: one fictional airport, two service providers, three
-# inspectors, their services and specialties, a site visit three weeks out, two
+# inspectors, their services and specialties, two site visits (one a month back
+# for the finding/closure walkthrough, one three weeks out for planning), three
 # inspections and their interview schedules. Enough to walk the whole workflow
 # on a fresh install instead of staring at empty tables.
 #
@@ -146,5 +147,6 @@ docker compose exec -T db psql \
   -d "${TARGET_DB}" < "${SQL_FILE}"
 
 echo "Demo dataset seeded."
-echo "The site visit is dated three weeks from today; its year-bearing code uses the current year."
+echo "Site visits are dated relative to today (one a month back, one three weeks out); their"
+echo "year-bearing codes use the current year."
 echo "Reminder: clear the AtroCore cache (Administration > Clear Cache) so the UI picks up the new records."
