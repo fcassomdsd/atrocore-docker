@@ -59,8 +59,11 @@ if [[ -n "${CI:-}" && -z "${DEMO_HOST:-}" ]]; then
 else
   export DEMO_HOST="${DEMO_HOST:-localhost}"
 fi
-export ATROCORE_BASE_URL="${ATROCORE_BASE_URL:-http://${DEMO_HOST}}"
-export ALFRESCO_URL="${ALFRESCO_URL:-http://${DEMO_HOST}:8080/alfresco}"
+# ATROCORE_BASE_URL and ALFRESCO_URL are deliberately NOT exported here: `docker compose` reads
+# the shell environment for its own interpolation, so exporting a host-reachable address would put
+# it inside the containers, where `docker` (the dind alias) does not resolve. The quickstart passes
+# the host-facing values to the two commands that need them; the containers keep the in-network
+# addresses from their .env files.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
