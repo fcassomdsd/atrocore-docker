@@ -133,6 +133,12 @@ probe "web backend"     "http://${DEMO_HOST}:4000/health" "200"
 # install wizard in particular, which would then be told to reach a host it cannot resolve
 # (`http://atro-web/api/v1 did not answer; is the stack up?` on a stack that is up). A caller's
 # ATROCORE_BASE_URL is therefore preserved across the sourcing below.
+
+# The rule this script follows: **the containers keep their in-network addresses from their own
+# .env files, and every URL this script uses is built from DEMO_HOST.** So the host-facing values
+# are passed to the individual commands that need them (the install wizard, the identity seed)
+# rather than exported, which would also leak them into `docker compose` and hand a container a
+# hostname only the runner can resolve.
 CALLER_ATROCORE_BASE_URL="${ATROCORE_BASE_URL:-}"
 
 set -a
@@ -168,7 +174,7 @@ if [[ "${SKIP_METADATA}" == "0" ]]; then
   # write, which surfaces as HTTP 500 on every API route.
   ( cd "${REPO_DIR}" \
     && ./scripts/bootstrap-web-data.sh \
-    && ./scripts/install-atrocore.sh --yes \
+    && ATROCORE_BASE_URL="${CALLER_ATROCORE_BASE_URL:-http://${DEMO_HOST}}" ./scripts/install-atrocore.sh --yes \
     && ./scripts/install-metadata.sh >/dev/null \
     && docker compose exec -T -u www-data atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" clear cache >/dev/null \
     && docker compose exec -T -u www-data atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" sql diff --run >/dev/null ) \
@@ -245,7 +251,8 @@ ok "seeded demo site visit window: ${VISIT_START} -> ${VISIT_END}"
 
 # ---------------------------------------------------------------------------
 step "1b. Seed the demo identities (compliance_cmis)"
-( cd "${WORKSPACE_ROOT}/compliance_cmis" && ./scripts/seed-demo-identities.sh --yes >/dev/null ) \
+( cd "${WORKSPACE_ROOT}/compliance_cmis" \
+    && ALFRESCO_URL="http://${DEMO_HOST}:8080/alfresco" ./scripts/seed-demo-identities.sh --yes >/dev/null ) \
   || die "identity seeding failed"
 ok "closure.reviewer (closure_reviewer) and demo.inspector1 (inspector) can log in"
 
