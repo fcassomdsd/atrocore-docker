@@ -26,21 +26,32 @@ ROOT = Path(__file__).resolve().parent.parent
 METADATA = ROOT / "metadata"
 ENTITY_DEFS = METADATA / "entityDefs"
 
-# Entities that live in the AtroCore base or remain admin-UI-only. Prefer
-# tracking a definition under metadata/entityDefs over extending this list.
-KNOWN_UPSTREAM_ENTITIES = {
-    "DocumentoOACI",
-    "Finding",
-    "InspectedProvider",
-    "InspectedService",
-    "InspectedSpecialty",
-    "InspectionSchedule",
-    "Inspector",
-    "Location",
-    "LocationService",
-    "Reglamento",
-    "User",
-}
+# Entity definitions that must be tracked. Deliberately explicit: without it,
+# deleting a file silently shrinks the model — which is precisely how the
+# operational entities stayed untracked while a fresh clone built a schema without
+# them. Adding an entity means adding it here too.
+EXPECTED_ENTITIES = frozenset({
+    "AcapiteOACI", "ActingInspector", "ActivityType", "AssignmentGroup",
+    "ChecklistQuestion", "CorrectiveAction", "CorrectiveActionFollowUp",
+    "CorrectiveActionPlan", "DocumentoOACI", "Finding", "FindingSeverity",
+    "InspectedProvider", "InspectedService", "InspectedSpecialty", "Inspection",
+    "InspectionCadence", "InspectionQuestion", "InspectionSchedule", "Inspector",
+    "Location", "LocationService", "Normativa", "Person", "QuestionTopic",
+    "Reglamento", "ServiceArea", "ServiceProvider", "SiteVisit", "Specialty",
+    "Tag", "UsoapEvidenceExpectation", "UsoapProtocolQuestion",
+})
+
+# The only entities the model links to that live upstream in the AtroCore base.
+# This list used to hold eleven entries, several of which were project entities that
+# simply were not tracked — an escape hatch that would have let one of them vanish
+# again without failing. Prefer tracking a definition over extending this.
+KNOWN_UPSTREAM_ENTITIES = {"User"}
+
+# The model is one-to-one: every entity has a client definition, a scope and a
+# layout directory, and there are no orphans in any of the four trees.
+CLIENT_DEFS = METADATA / "clientDefs"
+SCOPES = METADATA / "scopes"
+LAYOUTS = METADATA / "layouts"
 
 errors: list[str] = []
 
@@ -88,6 +99,42 @@ else:
         for required in ("fields", "links"):
             if required not in data:
                 fail(f"metadata/entityDefs/{path.name}: missing '{required}'")
+
+# ----------------------------------------------- expected set and 1:1 coverage
+missing_entities = sorted(EXPECTED_ENTITIES - tracked)
+unexpected_entities = sorted(tracked - EXPECTED_ENTITIES)
+
+if missing_entities:
+    fail(
+        f"metadata/entityDefs/ is missing {len(missing_entities)} expected definition(s): "
+        f"{', '.join(missing_entities)}"
+    )
+
+if unexpected_entities:
+    fail(
+        f"metadata/entityDefs/ has {len(unexpected_entities)} definition(s) that "
+        f"EXPECTED_ENTITIES does not list (add them deliberately): "
+        f"{', '.join(unexpected_entities)}"
+    )
+
+for label, directory, is_directory_tree in (
+    ("clientDefs", CLIENT_DEFS, False),
+    ("scopes", SCOPES, False),
+    ("layouts", LAYOUTS, True),
+):
+    if not directory.is_dir():
+        fail(f"metadata/{label}/ is missing")
+        continue
+
+    if is_directory_tree:
+        present = {p.name for p in directory.iterdir() if p.is_dir()}
+    else:
+        present = {p.stem for p in directory.glob("*.json")}
+
+    for name in sorted(tracked - present):
+        fail(f"metadata/{label}/: no entry for entity '{name}' (the model is one-to-one)")
+    for name in sorted(present - tracked):
+        fail(f"metadata/{label}/: '{name}' has no entity definition in metadata/entityDefs/")
 
 # ------------------------------------------------------------- link targets
 def check_target(entity: object, where: str) -> None:

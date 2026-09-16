@@ -47,6 +47,24 @@ reviewable and reproducible.
 When you change an entity through the admin UI, export it back into this
 directory rather than leaving it only in `web-data/`.
 
+`scripts/export-instance-metadata.py` is the tool for that, and it is also the guard
+against forgetting to:
+
+```bash
+make metadata-drift     # scripts/export-instance-metadata.py --check
+                        # exit 1 when the running instance and metadata/ differ
+make metadata-export    # copy the instance's definitions back into metadata/
+```
+
+`--check` compares the JSON of every tracked definition (entityDefs, clientDefs, scopes
+and layouts) against the running instance and fails on any difference, so drift is
+visible before it is lost. It also reports entities that exist **only** at runtime — the
+`ProtocolQuestion` layout left over from the 2026-09 rename is one — without failing on
+them, because an entity the project does not own may legitimately live there. Adding a
+new one is deliberate: export it with `--include-new` **and** add it to
+`EXPECTED_ENTITIES` in `scripts/validate-metadata.py`, which fails the build if a
+tracked definition disappears.
+
 ## Applying changes
 
 ```bash

@@ -56,46 +56,75 @@ validate:metadata:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
-blank_instance_check:
+# The fresh-install check. This job used to assert only that PostgreSQL answered and a
+# backup could be written, which said nothing about whether a new user gets a working
+# system — and it passed throughout the period when a clean clone could not build its
+# application or its schema at all. It now walks the README's steps 3–7 on an empty
+# database: build, bootstrap the application out of the image, install the tracked model,
+# sync the schema, seed, and check the result. `web-data/` and `db-data/` are deleted
+# first, so this is exactly what `git clone` + `docker compose up` gives someone.
+validate:fresh-install:
   stage: validate
   script:
+    # `python3` is needed by install-metadata.sh (register-entity-tab.py); the default
+    # before_script has already installed bash and written .env.
+    - apk add --no-cache python3
     - rm -rf db-data web-data
     - mkdir -p db-data web-data
     - docker compose up -d --build db atro-web
     - |
-      for i in $(seq 1 60); do
+      for i in $(seq 1 90); do
         if docker compose exec -T db pg_isready -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" >/dev/null 2>&1; then
           echo "PostgreSQL is ready"
           break
         fi
-        if [ "$i" -eq 60 ]; then
+        if [ "$i" -eq 90 ]; then
           echo "PostgreSQL did not become ready in time"
           docker compose logs db || true
           exit 1
         fi
-        echo "Waiting for PostgreSQL to be ready... ($i/60)"
+        echo "Waiting for PostgreSQL to be ready... ($i/90)"
         sleep 2
       done
-    - docker compose ps
-    - docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -c "SELECT 1;"
+    - ./scripts/bootstrap-web-data.sh
+    - ./scripts/install-metadata.sh
+    - docker compose exec -T atro-web php /var/www/localhost/console.php clear cache
+    - docker compose exec -T atro-web php /var/www/localhost/console.php sql diff --run
+    - ./scripts/seed-usoap-vocabularies.sh --yes
+    - ./scripts/seed-nomenclatura.sh --yes
+    - ./scripts/seed-demo-dataset.sh --yes
+    - |
+      check() { # check <sql> <label> <expected>
+        got=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -tAc "$1")
+        echo "  $2 = $got"
+        [ "$got" = "$3" ] || { echo "FAIL: expected $2 = $3, got '$got'"; exit 1; }
+      }
+      check "select count(*) from location where id like 'demo-%'"         "demo locations"     1
+      check "select count(*) from service_provider where id like 'demo-%'" "demo providers"     2
+      check "select count(*) from inspector where id like 'demo-%'"        "demo inspectors"    3
+      check "select count(*) from inspection where id like 'demo-%'"       "demo inspections"   2
+      check "select count(*) from specialty"                                "specialties"       16
+      check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7
+      # Tables that only exist if the recovered operational model was installed.
+      check "select count(*) from information_schema.tables where table_schema='public' and table_name in ('service_area','site_visit','finding','corrective_action','documento_o_a_c_i')" "operational tables" 5
     - ./scripts/backup-db.sh
     - test -n "$(find db-dumps -maxdepth 1 -type f -name '*.dump' -size +0c | head -n 1)"
   after_script:
     - docker compose down -v || true
+  # Merge request pipelines only. Every change lands through an MR, so this both gates the
+  # merge and runs the expensive build once instead of also on the develop push that follows.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
-# `sql/seed-demo-dataset.sql` is applied to a live database locally and in the
-# quickstart; this pipeline cannot do that. The `atro-web` image built here
-# starts Apache with a DocumentRoot that does not exist — the AtroCore
-# application is never installed, so its schema never appears and there is
-# nothing to seed. (The previous `demo_seed_check` job worked around that by
-# skipping itself whenever `atrocore.dump` was absent, which — since dumps are
-# gitignored — was every run; it then asserted only that some public tables
-# existed, which was already true against an empty database.)
-#
-# So validate the seed's invariants instead: additive-only (every DELETE scoped
-# to demo- rows), no TRUNCATE, every row id namespaced, the row count matching
-# its documentation, and --remove covering every table the seed writes. Fast,
-# no containers, and it always runs.
+# The live seed run now happens in `validate:fresh-install` above, which deletes
+# `web-data`/`db-data`, builds, installs the tracked model, syncs the schema and runs all
+# three seeds. This job stays as the fast, container-free companion: it validates the
+# seed's invariants — additive-only (every DELETE scoped to demo- rows), no TRUNCATE,
+# every row id namespaced, the row count matching its documentation, `--remove` covering
+# every table the seed writes, and every extensible enum the tracked entity definitions
+# reference by id being created by `seed-usoap-vocabularies.sql`. It runs in seconds and
+# needs no Docker, so it catches a broken seed on the first push rather than ten minutes
+# into an image build.
 validate:seed:
   stage: validate
   image: python:3.12-alpine
