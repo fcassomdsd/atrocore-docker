@@ -393,8 +393,11 @@ fi
 
 # ---------------------------------------------------------------------------
 step "6. Verify"
-( cd "${WORKSPACE_ROOT}/compliance_flow" && node scripts/smoke-flows.mjs ) | tail -1 || die "smoke harness failed"
-( cd "${WORKSPACE_ROOT}/compliance_flow" && node scripts/audit-error-envelope.mjs --enforce ) | tail -1 || die "error-envelope audit failed"
+# Both harnesses default to http://localhost:1880, which is the machine they run *on* — this host
+# locally, the CI job container on a runner (where the stack is behind the dind alias), so every
+# check fails there without BASE. They already accept it from the environment.
+( cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/smoke-flows.mjs ) | tail -1 || die "smoke harness failed"
+( cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/audit-error-envelope.mjs --enforce ) | tail -1 || die "error-envelope audit failed"
 OPEN=$(curl -s -m 60 "http://${DEMO_HOST}:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS" \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).length)}catch(e){console.log("?")}})')
 ok "open demo findings: ${OPEN}"
