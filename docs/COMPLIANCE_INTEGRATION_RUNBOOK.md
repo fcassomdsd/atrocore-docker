@@ -586,6 +586,82 @@ Where the demo's state actually lives, so any step can be traced to the system t
 
 The per-provider `Inspection` status machine (`Created → Defined → Assigned → Planned → Uploaded → Reported → Complete`, with `Inactive` as a soft delete reachable only before `Uploaded`) is documented in `compliance_web/docs/STYLE_GUIDE.md` §12, and the finding/follow-up/CAP lifecycle in the platform `CLAUDE.md`; neither is restated here.
 
+### 7.9 Generate the oversight artifacts (`compliance_flow` + `compliance_cmis`)
+
+Step 7 of the quickstart does this automatically; by hand it is four calls. Two visits are
+involved (§7.2): the **plan** belongs to the visit that has not happened yet, everything else to
+the one that has.
+
+    # plan — on the FUTURE visit, and it is also what moves the inspection Assigned -> Planned
+    curl -s "http://localhost:1880/inspectionPlan?siteVisit=V-ZZZZ-$(date +%Y)-02&provider=demo-iprov-ans-02&locale=es"
+    # => {"status":"success","generatedFile":{"name":"Plan de inspeccion - AV-ZZZZ-A-0002.pdf",
+    #     "path":"…/Inspecciones/AV-ZZZZ-A-0002/…","version":"1.0","downloadURL":"…"},
+    #     "inspectionFolder":"…","sourceName":"…","inspectionId":"demo-insp-ans-02","inspectionStatus":"Planned"}
+
+    # inspection report — on the PAST visit, whose documents were imported in §7.4
+    curl -s "http://localhost:1880/inspectionReport?siteVisit=V-ZZZZ-$(date +%Y)-01&provider=demo-prov-ans&locale=es"
+
+    # provider history — the year filter is why a checklist item needs a dated inspection ancestor
+    curl -s -X POST \
+      "http://localhost:8080/alfresco/s/api/providers/provider-history-report?alf_ticket=$TICKET" \
+      -H 'Content-Type: application/json' \
+      -d "{\"providerId\":\"demo-prov-ans\",\"year\":\"$(date +%Y)\"}"
+    # => {"success":true,…,"summary":{"total":26,…}}  — findings, checklist items and follow-ups
+
+    # USOAP CE evidence — its artifacts are the chain tags the canonical import writes
+    curl -s -X POST \
+      "http://localhost:8080/alfresco/s/api/usoap/ce-evidence-report?alf_ticket=$TICKET" \
+      -H 'Content-Type: application/json' \
+      -d "{\"ce\":\"CE-5\",\"year\":\"$(date +%Y)\",\"populationQueries\":[{\"pqCode\":\"PQ 99.001\",\"artifactCategory\":\"Checklist\",\"specialtyCode\":\"ATS\",\"monthsBack\":24}]}"
+    # => {"success":true,…,"summary":{"total":9,"byType":{"finding":2,"checklistItem":3,…},
+    #     "byPq":{"PQ 99.001":…},"byArea":{"ATS":…},"gaps":[{"gap":"Missing evidence basis",…}]}}
+
+**Watch the two parameter shapes — they are not the same.**
+
+- `/inspectionPlan` takes the **inspected-provider** id (`demo-iprov-ans-02`) and reads its
+  `serviceProviderId`; `/inspectionReport` takes the **service-provider** id (`demo-prov-ans`)
+  and matches it with `siteVisitId`. Passing the wrong one answers `400` with a named error
+  (`No inspected provider found for id: …`) instead of the `TypeError` it used to raise.
+- The USOAP report needs an `artifactCategory` from its own vocabulary (`Checklist`,
+  `InspectionReport`, `AuditReport`, `CAPExecution`, `TrainingRecord`, `PersonnelFile`, `Manual`,
+  `License`, `OversightPlan`, `AerodromeDossier`); anything else comes back as a `population` gap
+  naming the unknown category rather than as an error.
+
+**The plan and the report are PDFs filed into the inspection folder** —
+`Inspecciones/<inspectionCode>/` — not the `.fodt` sources the webscripts render, and each
+response reports the PDF's path, version and download URL. The webscripts file them themselves
+(transform, write, remove the source), so no repository-side rule is required; a deployment that
+still has the old "fodt to odt" `Template data` rule does the same work first and the webscript's
+own filing is simply not reached.
+
+**Share smart folders** are the browser view of the same evidence (CE × area × evidence role),
+auditor-facing navigation configured per provider profile: treat them as a Share walkthrough step
+rather than a scripted one. The mapping and templates live in
+`compliance_cmis/docs/smart-folders-operational-map.md` and `compliance_cmis/templates/`.
+
+### 7.10 The field app (`compliance_checklist`)
+
+The demo imports **pre-made ZIPs** (§7.4), which shows the ingestion contract but not the app that
+produces them. To walk the field half:
+
+    cd compliance_checklist
+    npm install
+    npm run build          # both `npm start` and e2e need a build first
+    npm start              # the Electron app
+
+`app.config.json` already points at this stack — `http://localhost:1880` for the flow (checklists,
+findings, specialties, locations), `http://localhost:8000` for the ZIP upload and
+`http://localhost:8080` for the sync-time Alfresco sign-in — so a local demo needs no
+configuration. Worth knowing:
+
+- **Operator login is required** (`identity.requireOperator`): sign in as `demo.inspector1` (§7.3)
+  at sync time. The ticket is verified against Alfresco before an upload and is never stored.
+- The app is **offline-first** and falls back to the bundled data in `app.config.json` when the
+  flow is unreachable, so a responsive app is not evidence that the stack is up — check the
+  service indicator.
+- `npm run e2e` needs a built app **and** a display (`xvfb-run` on a headless host); CI installs
+  both. Without a display it fails before it reaches the app.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:
