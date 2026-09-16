@@ -87,7 +87,7 @@ json() { # json <file> <node expression over `j`
 }
 
 # ---------------------------------------------------------------------------
-step "0. Preflight — every service must answer before anything is seeded"
+step "0. Preflight — the other services (AtroCore is bootstrapped and checked after step 0b)"
 # ---------------------------------------------------------------------------
 probe() { # probe <label> <url> <acceptable>
   local code
@@ -97,38 +97,15 @@ probe() { # probe <label> <url> <acceptable>
     *) die "$1 did not answer (HTTP ${code:-none}) — is the stack up? see runbook §5" ;;
   esac
 }
-probe "AtroCore"        "http://localhost/api/v1/App/user" "401"
+# AtroCore itself is deliberately NOT probed here: on a clean clone `web-data/` is empty, so
+# Apache has no DocumentRoot and answers 404 — step 0b bootstraps the application and probes it
+# afterwards, which is the whole point of that step. Node-RED is probed on its editor root
+# rather than `/specialties`, because that endpoint proxies to AtroCore and answers 400 until
+# step 0b has run (and the seed after it has data).
 probe "Alfresco"        "http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-" "200"
-probe "Node-RED"        "http://localhost:1880/specialties" "200"
+probe "Node-RED"        "http://localhost:1880/" "200 401"
 probe "import service"  "http://127.0.0.1:8000/health" "200"
 probe "web backend"     "http://127.0.0.1:4000/health" "200"
-
-# A missing operational schema means the tracked model was never installed and synced on this
-# instance — metadata/ is complete, so step 0b creates every table. Fail here, with that remedy,
-# rather than four steps later inside the seed scripts.
-# SCHEMA_PROBE_TABLE is overridable so the failure path can be exercised deliberately.
-SCHEMA_PROBE_TABLE="${SCHEMA_PROBE_TABLE:-service_area}"
-schema_ready() {
-  local user db
-  user="$(grep -E '^POSTGRES_PIM_USER=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
-  db="$(grep -E '^POSTGRES_PIM_DB=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
-  [[ -n "${user}" && -n "${db}" ]] || return 1
-  ( cd "${REPO_DIR}" && docker compose exec -T db psql -U "${user}" -d "${db}" -tAc \
-      "select to_regclass('public.${SCHEMA_PROBE_TABLE}') is not null" 2>/dev/null ) \
-    | tr -d '[:space:]' | grep -q '^t$'
-}
-if schema_ready; then
-  ok "operational schema present (public.${SCHEMA_PROBE_TABLE})"
-else
-  die "the AtroCore database has no operational schema (public.${SCHEMA_PROBE_TABLE} is missing).
-         Install the tracked model and sync the schema — re-run this script without --skip-metadata,
-         or by hand:
-           ./scripts/install-metadata.sh
-           docker compose exec atro-web php /var/www/localhost/console.php clear cache
-           docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
-         See docs/COMPLIANCE_INTEGRATION_RUNBOOK.md §7.2. If the stack is still starting, wait for
-         PostgreSQL and re-run."
-fi
 
 set -a
 # shellcheck disable=SC1091
@@ -150,15 +127,51 @@ if [[ "${SKIP_METADATA}" == "0" ]]; then
   # the image was built with, so this is what makes a fresh install demonstrable.
   # Re-runnable: the copy is skipped when web-data/ already exists, and `sql diff
   # --run` only applies what is missing.
+  # Order matters: bootstrap the files, complete the application's own installation (which
+  # rebuilds the database and creates the super admin), then install the tracked model and sync
+  # the schema it describes.
+  #
+  # Console commands run as www-data, not as root: `docker compose exec` defaults to root, and
+  # root-owned files in `data/cache` then make the web process (www-data) fail on its next cache
+  # write, which surfaces as HTTP 500 on every API route.
   ( cd "${REPO_DIR}" \
     && ./scripts/bootstrap-web-data.sh \
+    && ./scripts/install-atrocore.sh --yes \
     && ./scripts/install-metadata.sh >/dev/null \
-    && docker compose exec -T atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" clear cache >/dev/null \
-    && docker compose exec -T atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" sql diff --run >/dev/null ) \
+    && docker compose exec -T -u www-data atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" clear cache >/dev/null \
+    && docker compose exec -T -u www-data atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" sql diff --run >/dev/null ) \
     || die "metadata install failed (see docs/COMPLIANCE_INTEGRATION_RUNBOOK.md §7.2)"
-  ok "metadata installed into web-data/, cache cleared, schema synced"
+  ok "application installed, metadata copied, cache cleared, schema synced"
 else
   step "0b. Metadata install skipped"
+fi
+
+# Now that the application exists, check it, and check that the model really reached the
+# database. A missing operational schema means the model was never installed/synced — the
+# remedy is step 0b, not a dump.
+# SCHEMA_PROBE_TABLE is overridable so the failure path can be exercised deliberately.
+SCHEMA_PROBE_TABLE="${SCHEMA_PROBE_TABLE:-service_area}"
+schema_ready() {
+  local user db
+  user="$(grep -E '^POSTGRES_PIM_USER=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+  db="$(grep -E '^POSTGRES_PIM_DB=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+  [[ -n "${user}" && -n "${db}" ]] || return 1
+  ( cd "${REPO_DIR}" && docker compose exec -T db psql -U "${user}" -d "${db}" -tAc \
+      "select to_regclass('public.${SCHEMA_PROBE_TABLE}') is not null" 2>/dev/null ) \
+    | tr -d '[:space:]' | grep -q '^t$'
+}
+probe "AtroCore" "http://localhost/api/v1/App/user" "401"
+if schema_ready; then
+  ok "operational schema present (public.${SCHEMA_PROBE_TABLE})"
+else
+  die "the AtroCore database has no operational schema (public.${SCHEMA_PROBE_TABLE} is missing).
+         Install the tracked model and sync the schema — re-run this script without --skip-metadata,
+         or by hand:
+           ./scripts/install-metadata.sh
+           docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+           docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
+         See docs/COMPLIANCE_INTEGRATION_RUNBOOK.md §7.2. If the stack is still starting, wait for
+         PostgreSQL and re-run."
 fi
 
 # ---------------------------------------------------------------------------
@@ -169,7 +182,7 @@ if [[ "${SKIP_SEED}" == "0" ]]; then
     && ./scripts/seed-nomenclatura.sh --yes >/dev/null \
     && ./scripts/seed-demo-dataset.sh --yes >/dev/null ) \
     || die "seeding failed"
-  ( cd "${REPO_DIR}" && docker compose exec -T atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" clear cache >/dev/null 2>&1 ) || true
+  ( cd "${REPO_DIR}" && docker compose exec -T -u www-data atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" clear cache >/dev/null 2>&1 ) || true
   ok "82 demo rows across 25 tables (airport ZZZZ, 2 providers, 3 inspectors, 2 inspections, 9 questions + USOAP chain)"
 else
   step "1. Seeding skipped"

@@ -7,8 +7,8 @@
 # schema from web-data/<domain>/data/metadata/:
 #
 #   ./scripts/install-metadata.sh
-#   docker compose exec atro-web php /var/www/localhost/console.php clear cache
-#   docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+#   docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+#   docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
 #
 # That is what creates the `activity_type` table and the `activity_type_id`
 # columns; this script only fills in the rows.

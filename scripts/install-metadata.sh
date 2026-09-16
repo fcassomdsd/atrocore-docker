@@ -23,9 +23,9 @@
 # reference rows. This AtroCore build has no `rebuild` console command; the
 # equivalent is `clear cache` followed by `sql diff`:
 #
-#   docker compose exec atro-web php /var/www/localhost/console.php clear cache
-#   docker compose exec atro-web php /var/www/localhost/console.php sql diff --show
-#   docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+#   docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+#   docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --show
+#   docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
 #   ./scripts/seed-nomenclatura.sh --yes
 #
 # Review the `--show` output before `--run`: it is the exact DDL AtroCore
@@ -211,7 +211,7 @@ fi
 
 echo
 echo "Metadata installed. Next steps:"
-echo "  docker compose exec atro-web php /var/www/${DOMAIN}/console.php clear cache"
-echo "  docker compose exec atro-web php /var/www/${DOMAIN}/console.php sql diff --show   # review"
-echo "  docker compose exec atro-web php /var/www/${DOMAIN}/console.php sql diff --run    # apply"
+echo "  docker compose exec -u www-data atro-web php /var/www/${DOMAIN}/console.php clear cache"
+echo "  docker compose exec -u www-data atro-web php /var/www/${DOMAIN}/console.php sql diff --show   # review"
+echo "  docker compose exec -u www-data atro-web php /var/www/${DOMAIN}/console.php sql diff --run    # apply"
 echo "  ./scripts/seed-nomenclatura.sh --yes"

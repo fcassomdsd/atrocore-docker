@@ -18,17 +18,27 @@ Use this checklist if you are running the project for the first time:
 2. Fill in database credentials in `.env`.
 3. Start containers with `docker compose up -d --build`.
 4. Wait until `db` and `atro-web` are `running` in `docker compose ps` (the compose services define no healthcheck, so they never report `healthy`).
-5. Install the tracked metadata and create the schema — **on a clean clone this is also what first puts the application into `web-data/`** (that directory is bind-mounted over `/var/www`, so the copy baked into the image is hidden until it is copied out). The tracked model is complete, so this is what creates every operational table (`location`, `service_provider`, `site_visit`, `service_area`, `finding`, …):
+5. **Install the application.** `docker compose up` scaffolds the application *files* but does not install it: a fresh instance has `'isInstalled' => false` and an empty `user` table, so `/api/v1/App/user` answers `500` and every consumer sees a broken AtroCore. This runs AtroCore's own install wizard with the credentials the platform uses (`ATROCORE_USERNAME`/`ATROCORE_PASSWORD` in `../compliance_flow/.env`).
 
    ```bash
-   ./scripts/install-metadata.sh          # bootstraps web-data/ when empty, then copies metadata/
-   docker compose exec atro-web php /var/www/localhost/console.php clear cache
-   docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+   ./scripts/install-atrocore.sh --yes    # bootstraps web-data/, then installs (rebuilds the DB)
    ```
 
-6. Open http://localhost.
+6. Install the tracked metadata and create the schema — **on a clean clone the bootstrap inside step 5 is what first puts the application into `web-data/`** (that directory is bind-mounted over `/var/www`, so the copy baked into the image is hidden until it is copied out). The tracked model is complete, so this creates every operational table (`location`, `service_provider`, `site_visit`, `service_area`, `finding`, …):
 
-7. Optional: load the synthetic demo dataset (next section) with `./scripts/seed-usoap-vocabularies.sh --yes && ./scripts/seed-nomenclatura.sh --yes && ./scripts/seed-demo-dataset.sh --yes`, or restore a real authority's data with `./scripts/seed-demo-db.sh <dump-file> --yes`.
+   ```bash
+   ./scripts/install-metadata.sh          # copies metadata/ into web-data/
+   docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+   docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
+   ```
+
+   Console commands must run as **`www-data`** (`-u www-data`): `docker compose exec` defaults to root, and root-owned files in `data/cache` make the web process fail on its next cache write, which surfaces as `500` on every API route.
+
+7. Open http://localhost.
+
+8. Optional: load the synthetic demo dataset (next section) with `./scripts/seed-usoap-vocabularies.sh --yes && ./scripts/seed-nomenclatura.sh --yes && ./scripts/seed-demo-dataset.sh --yes`, or restore a real authority's data with `./scripts/seed-demo-db.sh <dump-file> --yes`.
+
+Everything above is also available as one command once the stack is up — see "End-to-end demo quickstart" below.
 
 ### 1. Prerequisites
 
