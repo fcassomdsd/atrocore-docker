@@ -1,0 +1,141 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": true,
+            "trim": true
+        },
+        "description": {
+            "type": "text"
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "startDateTime": {
+            "tooltip": false,
+            "type": "datetime",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "useNumericFormat": false,
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "showUser": false
+        },
+        "endDateTime": {
+            "tooltip": false,
+            "type": "datetime",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "useNumericFormat": false,
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "showUser": false
+        },
+        "inspection": {
+            "tooltip": false,
+            "type": "link",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "dropdown": false,
+            "readOnly": false,
+            "foreignName": "code"
+        },
+        "serviceArea": {
+            "tooltip": false,
+            "type": "link",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "dropdown": false,
+            "readOnly": false
+        },
+        "place": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "isMultilang": false
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "inspection": {
+            "type": "belongsTo",
+            "foreign": "inspectionSchedules",
+            "entity": "Inspection"
+        },
+        "serviceArea": {
+            "type": "belongsTo",
+            "foreign": "inspectionSchedules",
+            "entity": "ServiceArea"
+        }
+    },
+    "indexes": {
+        "name": {
+            "columns": [
+                "name",
+                "deleted"
+            ]
+        },
+        "createdAt": {
+            "columns": [
+                "createdAt",
+                "deleted"
+            ]
+        },
+        "modifiedAt": {
+            "columns": [
+                "modifiedAt",
+                "deleted"
+            ]
+        }
+    },
+    "collection": {
+        "asc": false
+    }
+}

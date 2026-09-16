@@ -1,0 +1,188 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": false,
+            "trim": true,
+            "defaultValueType": "basic"
+        },
+        "description": {
+            "type": "text"
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "code": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "isMultilang": false
+        },
+        "startDate": {
+            "tooltip": false,
+            "type": "date",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "useNumericFormat": false,
+            "readOnly": false,
+            "unique": false,
+            "index": false
+        },
+        "endDate": {
+            "tooltip": false,
+            "type": "date",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "useNumericFormat": false,
+            "readOnly": false,
+            "unique": false,
+            "index": false
+        },
+        "status": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "isMultilang": false
+        },
+        "location": {
+            "tooltip": false,
+            "type": "link",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "foreignName": "name",
+            "required": false,
+            "dropdown": false,
+            "readOnly": false
+        },
+        "mainInspector": {
+            "tooltip": false,
+            "type": "link",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "foreignName": "name",
+            "required": false,
+            "dropdown": false,
+            "readOnly": false
+        },
+        "secondaryInspector": {
+            "tooltip": false,
+            "type": "link",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "foreignName": "name",
+            "required": false,
+            "dropdown": false,
+            "readOnly": false
+        },
+        "inspectedProviders": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "location": {
+            "type": "belongsTo",
+            "foreign": "siteVisits",
+            "entity": "Location"
+        },
+        "mainInspector": {
+            "type": "belongsTo",
+            "foreign": "siteVisitsMain",
+            "entity": "Inspector"
+        },
+        "secondaryInspector": {
+            "type": "belongsTo",
+            "foreign": "siteVisitsSec",
+            "entity": "Inspector"
+        },
+        "inspectedProviders": {
+            "type": "hasMany",
+            "foreign": "siteVisit",
+            "entity": "InspectedProvider"
+        }
+    },
+    "indexes": {
+        "name": {
+            "columns": [
+                "name",
+                "deleted"
+            ]
+        },
+        "createdAt": {
+            "columns": [
+                "createdAt",
+                "deleted"
+            ]
+        },
+        "modifiedAt": {
+            "columns": [
+                "modifiedAt",
+                "deleted"
+            ]
+        }
+    },
+    "collection": {
+        "sortBy": "code",
+        "asc": false
+    }
+}

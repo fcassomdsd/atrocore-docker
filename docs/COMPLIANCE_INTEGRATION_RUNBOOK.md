@@ -284,9 +284,9 @@ generated document code (`V-ZZZZ-<year>-01`, `AV-ZZZZ-A-0001`) obviously synthet
 The executable form of this section is `scripts/demo-quickstart.sh` in this repository:
 run it from the repository root with `--yes` once the stack is up, and it performs §7.2's
 app bootstrap, metadata install and seeding, §7.3 (identities), §7.4 and §7.6 in one pass,
-then prints the closure-review calls for §7.5. Step 0b bootstraps `web-data/` when it is
-empty — necessary for a clean clone, but not sufficient: §7.2's note on the provisioned
-`atrocore.dump` still applies. Read on when something fails — §7.7 lists the traps.
+then prints the closure-review calls for §7.5. Step 0b is what makes a clean clone work:
+it bootstraps `web-data/` when it is empty, installs the tracked model and syncs the schema,
+so no dump is needed. Read on when something fails — §7.7 lists the traps.
 
 ### 7.1 Start the stack
 
@@ -322,18 +322,14 @@ abort with "start the stack first so AtroCore creates web-data/", which the stac
 then creates the schema. Run `make bootstrap` (or the script directly) if you want that step
 on its own.
 
-> **A clean clone still needs a provisioned `atrocore.dump` before the seeds will run.**
-> The tracked `metadata/` tree is a **partial overlay** — 13 entity definitions against the
-> 32 a provisioned instance carries — because, by design, "only the files this project
-> actually customises are tracked here" (`metadata/README.md`). The operational entities the
-> demo writes to (`Location`, `ServiceProvider`, `SiteVisit`, `Inspector`, `ServiceArea`,
-> `Finding`, the `CorrectiveAction*` family, …) are therefore **not** created by
-> `sql diff --run`: on a genuinely empty database step 1 fails with
-> `relation "public.service_area" does not exist`, and the vocabulary seed fails with
-> `column "multilingual" of relation "extensible_enum" does not exist` because the skeleton's
-> core schema is older than the dump's. Restore the dump first (README, "Restoring a real
-> dataset") — it is deliberately not committed, and is provisioned from the release artifact
-> store. Tracked in `TECHNICAL_DEBT_ANALYSIS.md`.
+> **A clean clone needs no dump.** The whole operational model is tracked (all 32 entities with
+> their `clientDefs`, `scopes` and `layouts`), so `install-metadata.sh` + `sql diff --run` above
+> create every table the demo writes to — `location`, `service_provider`, `site_visit`,
+> `service_area`, `finding`, the `CorrectiveAction*` family and the rest. Verified end to end on
+> an isolated fresh instance with empty `web-data`/`db-data`: all three seeds below pass. A
+> provisioned `atrocore.dump` is still how you load a **real authority's data** (README,
+> "Restoring a real dataset") — it is deliberately not committed — but the schema no longer
+> depends on it.
 
 `seed-usoap-vocabularies.sh` is not optional and not demo data: the tracked entity
 definitions reference the risk-level and USOAP extensible enums by hard-coded id, and

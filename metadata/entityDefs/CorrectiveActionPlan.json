@@ -1,0 +1,159 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": false,
+            "trim": true,
+            "defaultValueType": "basic"
+        },
+        "description": {
+            "type": "text"
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "issueDate": {
+            "tooltip": false,
+            "type": "date",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": true,
+            "useNumericFormat": false,
+            "readOnly": false,
+            "unique": false,
+            "index": false
+        },
+        "acceptanceDate": {
+            "tooltip": false,
+            "type": "date",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "useNumericFormat": false,
+            "readOnly": false,
+            "unique": false,
+            "index": false
+        },
+        "code": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": true,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "isMultilang": false
+        },
+        "comments": {
+            "tooltip": false,
+            "type": "text",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "seeMoreDisabled": false,
+            "rowsMin": 2,
+            "rowsMax": 10,
+            "lengthOfCut": 400,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "useDisabledTextareaInViewMode": false,
+            "isMultilang": false
+        },
+        "correctiveActions": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true,
+            "foreignName": "id"
+        },
+        "inspectedServcies": {
+            "tooltip": false,
+            "type": "linkMultiple",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "foreignName": "name",
+            "required": false,
+            "dropdown": false,
+            "readOnly": false,
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "correctiveActions": {
+            "type": "hasMany",
+            "foreign": "correctiveActionPlan",
+            "entity": "CorrectiveAction"
+        },
+        "inspectedServcies": {
+            "type": "hasMany",
+            "foreign": "correctiveActionPlan",
+            "entity": "InspectedService"
+        }
+    },
+    "indexes": {
+        "name": {
+            "columns": [
+                "name",
+                "deleted"
+            ]
+        },
+        "createdAt": {
+            "columns": [
+                "createdAt",
+                "deleted"
+            ]
+        },
+        "modifiedAt": {
+            "columns": [
+                "modifiedAt",
+                "deleted"
+            ]
+        }
+    },
+    "collection": {
+        "asc": false
+    }
+}

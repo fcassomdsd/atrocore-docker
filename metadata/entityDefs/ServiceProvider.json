@@ -1,0 +1,154 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": true,
+            "trim": true
+        },
+        "description": {
+            "type": "text"
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "children": {
+            "type": "linkMultiple",
+            "layoutDetailDisabled": true,
+            "layoutLeftSidebarDisabled": true,
+            "noLoad": true
+        },
+        "parents": {
+            "type": "linkMultiple",
+            "view": "views/fields/hierarchy-parents",
+            "layoutLeftSidebarDisabled": true,
+            "noLoad": true
+        },
+        "sortOrder": {
+            "type": "int",
+            "default": null,
+            "massUpdateDisabled": true,
+            "filterDisabled": true
+        },
+        "alias": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "isMultilang": false
+        },
+        "locationServices": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "pointsOfContact": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "inspectedProviders": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "children": {
+            "type": "hasMany",
+            "relationName": "ServiceProviderHierarchy",
+            "foreign": "parents",
+            "entity": "ServiceProvider",
+            "midKeys": [
+                "entityId",
+                "parentId"
+            ]
+        },
+        "parents": {
+            "type": "hasMany",
+            "relationName": "ServiceProviderHierarchy",
+            "foreign": "children",
+            "entity": "ServiceProvider",
+            "midKeys": [
+                "parentId",
+                "entityId"
+            ]
+        },
+        "locationServices": {
+            "type": "hasMany",
+            "foreign": "serviceProvider",
+            "entity": "LocationService"
+        },
+        "pointsOfContact": {
+            "type": "hasMany",
+            "foreign": "serviceProvider",
+            "entity": "Person"
+        },
+        "inspectedProviders": {
+            "type": "hasMany",
+            "foreign": "serviceProvider",
+            "entity": "InspectedProvider"
+        }
+    },
+    "indexes": {
+        "name": {
+            "columns": [
+                "name",
+                "deleted"
+            ]
+        },
+        "createdAt": {
+            "columns": [
+                "createdAt",
+                "deleted"
+            ]
+        },
+        "modifiedAt": {
+            "columns": [
+                "modifiedAt",
+                "deleted"
+            ]
+        }
+    },
+    "collection": {
+        "asc": false
+    }
+}

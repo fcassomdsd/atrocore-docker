@@ -133,6 +133,8 @@ EXPECTED_VOCAB_OPTIONS = {
     "usoapAreaCode": 17,
     "usoapArtifactCategory": 10,
     "compliance": 3,
+    "inspectorRoles": 3,
+    "findingClass": 2,
 }
 
 if not VOCAB_FILE.is_file():

@@ -1,0 +1,167 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": true,
+            "trim": true
+        },
+        "description": {
+            "type": "text"
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "organizationID": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": true,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "isMultilang": false
+        },
+        "specialty": {
+            "tooltip": false,
+            "type": "linkMultiple",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "foreignName": "name",
+            "required": false,
+            "dropdown": false,
+            "readOnly": false,
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true
+        },
+        "actingInspectors": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "inspectedSpecialties": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "externalUserID": {
+            "tooltip": false,
+            "type": "varchar",
+            "auditableEnabled": false,
+            "auditableDisabled": false,
+            "isCustom": true,
+            "modifiedExtendedDisabled": false,
+            "required": false,
+            "notNull": false,
+            "countBytesInsteadOfCharacters": false,
+            "trim": true,
+            "defaultValueType": "basic",
+            "readOnly": false,
+            "unique": false,
+            "index": false,
+            "isMultilang": false
+        },
+        "siteVisitsMain": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        },
+        "siteVisitsSec": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "specialty": {
+            "type": "hasMany",
+            "foreign": "inspectors",
+            "relationName": "InspectorSpecialty",
+            "entity": "Specialty"
+        },
+        "actingInspectors": {
+            "type": "hasMany",
+            "foreign": "inspector",
+            "entity": "ActingInspector"
+        },
+        "inspectedSpecialties": {
+            "type": "hasMany",
+            "foreign": "actingInspectors",
+            "relationName": "InspectedSpecialtyInspector",
+            "entity": "InspectedSpecialty"
+        },
+        "siteVisitsMain": {
+            "type": "hasMany",
+            "foreign": "mainInspector",
+            "entity": "SiteVisit"
+        },
+        "siteVisitsSec": {
+            "type": "hasMany",
+            "foreign": "secondaryInspector",
+            "entity": "SiteVisit"
+        }
+    },
+    "indexes": {
+        "name": {
+            "columns": [
+                "name",
+                "deleted"
+            ]
+        },
+        "createdAt": {
+            "columns": [
+                "createdAt",
+                "deleted"
+            ]
+        },
+        "modifiedAt": {
+            "columns": [
+                "modifiedAt",
+                "deleted"
+            ]
+        }
+    },
+    "collection": {
+        "asc": false
+    }
+}
