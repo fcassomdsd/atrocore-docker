@@ -419,6 +419,23 @@ Both import endpoints require an operator ticket, and the canonical import takes
     # => {"success":true,"summary":{"processed":1,"pendingClosureApprovals":1,...}}
     #    and the finding moves to "Pending Closure Approval"
 
+**Two inspections, two payloads.** The dataset seeds an ATS inspection and a MET one, and each
+needs its own payload for the same reason: the inspection **window** lives on the Alfresco
+inspection folder (`vso:startDate`/`vso:endDate`; `inspection` in AtroCore has no date columns),
+and that folder only exists once canonical documents have been imported for the inspection. A
+seeded inspection with no payload cannot be dated, so its items drop out of the year-filtered
+provider-history report. Run the same pair as steps 1 and 2 for MET:
+
+    curl -X POST http://127.0.0.1:8000/inspection-import -H "X-Alfresco-Ticket: $TICKET" \
+      -F "file=@example data/demo_met_inspection_payload.zip"
+    # => {"status":"imported","inspectionId":"demo-insp-met-01","evidenceImported":3}
+
+    curl -X POST "http://localhost:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=$TICKET" \
+      -H 'Content-Type: application/json' \
+      -d '{"inspectionCode":"AV-ZZZZ-I-0001","specialtyName":"Meteorología aeronáutica"}'
+
+Step 6 below fails if either inspection ends up without a window.
+
 **Step 4 is not optional and not the same as step 2.** The query-param form carries no
 follow-up context, so `closurePolicy.shouldClose` never runs and the summary reports
 `processed: 0, pendingClosureApprovals: 0` while the finding stays open. Only the
