@@ -18,14 +18,7 @@ Use this checklist if you are running the project for the first time:
 2. Fill in database credentials in `.env`.
 3. Start containers with `docker compose up -d --build`.
 4. Wait until `db` and `atro-web` are `running` in `docker compose ps` (the compose services define no healthcheck, so they never report `healthy`).
-5. **Restore the provisioned seed dump — required on a fresh database.** The tracked `metadata/` tree is a *partial overlay* (see "Entity Metadata and Reference Catalogs" below), so the operational tables (`location`, `service_provider`, `site_visit`, `service_area`, `finding`, …) are **not** created from the repository; they come from `atrocore.dump`. Dumps are deliberately not committed — provision one from the release artifact store first.
-
-   ```bash
-   ./scripts/seed-demo-db.sh <dump-file> --yes     # destructive: replaces the target database
-   # or: make db-seed DUMP=<dump-file> YES=1
-   ```
-
-6. Install the tracked metadata — **on a clean clone this is also what first puts the application into `web-data/`** (that directory is bind-mounted over `/var/www`, so the copy baked into the image is hidden until it is copied out):
+5. Install the tracked metadata and create the schema — **on a clean clone this is also what first puts the application into `web-data/`** (that directory is bind-mounted over `/var/www`, so the copy baked into the image is hidden until it is copied out). The tracked model is complete, so this is what creates every operational table (`location`, `service_provider`, `site_visit`, `service_area`, `finding`, …):
 
    ```bash
    ./scripts/install-metadata.sh          # bootstraps web-data/ when empty, then copies metadata/
@@ -33,9 +26,9 @@ Use this checklist if you are running the project for the first time:
    docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
    ```
 
-7. Open http://localhost.
+6. Open http://localhost.
 
-The synthetic demo dataset (next section) is additive and can be loaded on top of either a restored dump or a real dataset.
+7. Optional: load the synthetic demo dataset (next section) with `./scripts/seed-usoap-vocabularies.sh --yes && ./scripts/seed-nomenclatura.sh --yes && ./scripts/seed-demo-dataset.sh --yes`, or restore a real authority's data with `./scripts/seed-demo-db.sh <dump-file> --yes`.
 
 ### 1. Prerequisites
 
@@ -175,16 +168,16 @@ Important:
 
 ## Demo Data Seeding
 
-### Synthetic demo dataset (load it on top of a provisioned instance)
+### Synthetic demo dataset (use this on a fresh install)
 
-No dump is committed, and the tracked `metadata/` tree is only a partial overlay, so a
-fresh clone has no operational schema until step 5's dump restore. **Once that is done**,
-this dataset fills the instance with a demo scenario: it is version-controlled, contains
-no secrets, is **additive** (it only ever writes rows whose `id` starts with `demo-`) and
-is re-runnable, so it is safe to run against a database that already holds real records.
-On an instance that never had the dump restored it fails fast with
-`relation "public.service_area" does not exist` — `demo-quickstart.sh` checks for that
-before it starts.
+A fresh clone comes up with an empty but **complete** schema — step 5 creates every
+operational table from the tracked `metadata/` — so this version-controlled dataset is
+all a demo needs. It contains no secrets, is **additive** (it only ever writes rows whose
+`id` starts with `demo-`) and is re-runnable, so it is safe to run against a database
+that already holds real records. Restore a real authority's data instead (or on top) with
+`./scripts/seed-demo-db.sh <dump-file> --yes`; dumps are deliberately not committed.
+`demo-quickstart.sh` checks that the operational schema exists before it seeds, so a
+schema that was never synced fails there rather than four steps later.
 
 ```bash
 ./scripts/seed-usoap-vocabularies.sh --yes  # risk / USOAP extensible enums (required)
@@ -217,7 +210,7 @@ authority's data in it** — see the P0 finding in `TECHNICAL_DEBT_ANALYSIS.md`.
 fields whose vocabularies the tracked entity definitions reference **by hard-coded id**, and AtroCore's
 extensible enums have no home in `metadata/` (`install-metadata.sh` syncs entityDefs/clientDefs/scopes/layouts
 only). They therefore existed only in the database: without them a fresh install resolves every risk level and
-USOAP Critical Element / area to nothing. The seed recreates 5 enums and their 42 option bindings, is additive
+USOAP Critical Element / area to nothing. The seed recreates 7 enums and their 47 option bindings, is additive
 (`INSERT ... ON CONFLICT DO NOTHING`, so customised vocabularies are never overwritten) and is deliberately
 **not** removed by `--remove`.
 

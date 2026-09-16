@@ -3,24 +3,32 @@
 --
 -- WHY THIS EXISTS
 -- ---------------
--- `ChecklistQuestion.riskLevel`, `UsoapProtocolQuestion.criticalElement` and
--- `UsoapProtocolQuestion.areaCode` are `extensibleEnum` fields, and the tracked
--- entity definitions in `metadata/entityDefs/` reference their vocabularies by
--- hard-coded id:
+-- `ChecklistQuestion.riskLevel`, `UsoapProtocolQuestion.criticalElement`,
+-- `UsoapProtocolQuestion.areaCode`, `UsoapEvidenceExpectation.artifactCategory`,
+-- `InspectionQuestion.compliance`, `ActingInspector.role` and `Finding.class` are
+-- `extensibleEnum`/`extensibleMultiEnum` fields, and the tracked entity definitions
+-- in `metadata/entityDefs/` reference their vocabularies by hard-coded id:
 --
 --   ChecklistQuestion.riskLevel            -> a01kny6kktqe689xt03tsy539tj  (riskLevel)
 --   UsoapProtocolQuestion.criticalElement  -> a01m00yh7jtea18cz0dsbx3ed4g  (usoapCriticalElement)
 --   UsoapProtocolQuestion.areaCode         -> a01m00yhhnweebvy2zphrbhwdc4  (usoapAreaCode)
+--   UsoapEvidenceExpectation.artifactCategory -> ext_usoap_artifact_cat    (usoapArtifactCategory)
+--   InspectionQuestion.compliance          -> a01k5cgz2x2e0bbspakk3c5hf0a (compliance)
+--   ActingInspector.role                   -> a01k60s39gce7ct0jrnbybszncc (inspectorRoles)
+--   Finding.class                          -> a01k5cjq7hxeb9v2c6yrd8e54xs (findingClass)
 --
 -- AtroCore's extensible enums are created through the UI, and `metadata/` has no
 -- home for them: `scripts/install-metadata.sh` synchronises entityDefs,
--- clientDefs, scopes and layouts only. So these three vocabularies existed *only
+-- clientDefs, scopes and layouts only. So these vocabularies existed *only
 -- in the database* — the same "lives only in the dump" gap as the operational
 -- records that `seed-demo-dataset.sql` fixes, except this one is worse: without
 -- them a fresh install cannot use the checklist catalog at all, because
 -- `/checklist` resolves `riskLevelName`, `criticalElementName` and
 -- `areaCodeName` through these enums and would render empty or garbage labels,
--- and the USOAP evidence report groups by them.
+-- and the USOAP evidence report groups by them. `ActingInspector.role` and
+-- `Finding.class` came in with the operational model (2026-09-16) and are caught
+-- by `scripts/validate-seeds.py`, which fails the build when a tracked
+-- definition references an enum this file does not create.
 --
 -- This is REQUIRED INFRASTRUCTURE, not demo data:
 --   * the enum ids and option ids are the canonical ones already referenced by
@@ -47,14 +55,16 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- 1. The three extensible enums
+-- 1. The extensible enums the tracked entity definitions reference by id
 -- ---------------------------------------------------------------------------
 INSERT INTO public.extensible_enum (id, name, code, multilingual, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
     ('a01kny6kktqe689xt03tsy539tj', 'Risk Level',              'riskLevel',             false, false, NOW(), NOW(), '1', '1'),
     ('a01m00yh7jtea18cz0dsbx3ed4g', 'USOAP Critical Element',  'usoapCriticalElement',  false, false, NOW(), NOW(), '1', '1'),
     ('a01m00yhhnweebvy2zphrbhwdc4', 'USOAP Area Code',         'usoapAreaCode',         false, false, NOW(), NOW(), '1', '1'),
     ('ext_usoap_artifact_cat',      'USOAP Artifact Category',  'usoapArtifactCategory', false, false, NOW(), NOW(), '1', '1'),
-    ('a01k5cgz2x2e0bbspakk3c5hf0a', 'Compliance',               'compliance',            false, false, NOW(), NOW(), '1', '1')
+    ('a01k5cgz2x2e0bbspakk3c5hf0a', 'Compliance',               'compliance',            false, false, NOW(), NOW(), '1', '1'),
+    ('a01k60s39gce7ct0jrnbybszncc', 'Inspector Roles',          'inspectorRoles',        true,  false, NOW(), NOW(), '1', '1'),
+    ('a01k5cjq7hxeb9v2c6yrd8e54xs', 'Finding Class',            'findingClass',          true,  false, NOW(), NOW(), '1', '1')
 ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------------
@@ -186,6 +196,36 @@ INSERT INTO public.extensible_enum_extensible_enum_option (id, extensible_enum_i
     ('vocab-link-compliance-compliant',    'a01k5cgz2x2e0bbspakk3c5hf0a', 'a01k5ch4xh0e3qrbez341chrexp', 10, false, NOW(), NOW(), '1', '1'),
     ('vocab-link-compliance-noncompliant', 'a01k5cgz2x2e0bbspakk3c5hf0a', 'a01k5ch5hc2e6wa2xb2dvp04fed', 20, false, NOW(), NOW(), '1', '1'),
     ('vocab-link-compliance-na',           'a01k5cgz2x2e0bbspakk3c5hf0a', 'a01k5ch9n9pe2gbfw2byz9h9ere', 30, false, NOW(), NOW(), '1', '1')
+ON CONFLICT DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- 8. Options — Inspector Roles (3), referenced by ActingInspector.role
+--
+-- `multilingual`, so the Spanish label lives in `name_es_do` rather than `name`.
+-- ---------------------------------------------------------------------------
+INSERT INTO public.extensible_enum_option (id, name, code, sort_order, deleted, created_at, modified_at, created_by_id, modified_by_id, name_es_do) VALUES
+    ('a01k60s4sstea0awdgtgaq3gnrz', 'Main Inspector',      'MAIN',        85606557, false, NOW(), NOW(), '1', '1', 'Inspector Principal'),
+    ('a01k60s618se9mth8aq77qvzxcg', 'Secondary Inspector', 'SECONDARY',   85606578, false, NOW(), NOW(), '1', '1', 'Inspector Secundario'),
+    ('a01k60s6v3xe2hag3whymmafze3', 'Team Member',         'TEAM_MEMBER', 86284346, false, NOW(), NOW(), '1', '1', 'Miembro de Equipo')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.extensible_enum_extensible_enum_option (id, extensible_enum_id, extensible_enum_option_id, sorting, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('vocab-link-inspector-main',      'a01k60s39gce7ct0jrnbybszncc', 'a01k60s4sstea0awdgtgaq3gnrz', 85606557, false, NOW(), NOW(), '1', '1'),
+    ('vocab-link-inspector-secondary', 'a01k60s39gce7ct0jrnbybszncc', 'a01k60s618se9mth8aq77qvzxcg', 85606578, false, NOW(), NOW(), '1', '1'),
+    ('vocab-link-inspector-team',      'a01k60s39gce7ct0jrnbybszncc', 'a01k60s6v3xe2hag3whymmafze3', 86284346, false, NOW(), NOW(), '1', '1')
+ON CONFLICT DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- 9. Options — Finding Class (2), referenced by Finding.class
+-- ---------------------------------------------------------------------------
+INSERT INTO public.extensible_enum_option (id, name, code, sort_order, deleted, created_at, modified_at, created_by_id, modified_by_id, name_es_do) VALUES
+    ('a01k5cjtbw2ecvv5pdhwr767caw', 'Category A', 'A', 85606557, false, NOW(), NOW(), '1', '1', 'Categoría A'),
+    ('a01k5cjtzxde8kt2vzkzkss45f1', 'Category B', 'B', 85606578, false, NOW(), NOW(), '1', '1', 'Categoría B')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.extensible_enum_extensible_enum_option (id, extensible_enum_id, extensible_enum_option_id, sorting, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('vocab-link-findingclass-a', 'a01k5cjq7hxeb9v2c6yrd8e54xs', 'a01k5cjtbw2ecvv5pdhwr767caw', 85606557, false, NOW(), NOW(), '1', '1'),
+    ('vocab-link-findingclass-b', 'a01k5cjq7hxeb9v2c6yrd8e54xs', 'a01k5cjtzxde8kt2vzkzkss45f1', 85606578, false, NOW(), NOW(), '1', '1')
 ON CONFLICT DO NOTHING;
 
 COMMIT;

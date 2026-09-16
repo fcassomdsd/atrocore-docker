@@ -103,10 +103,8 @@ probe "Node-RED"        "http://localhost:1880/specialties" "200"
 probe "import service"  "http://127.0.0.1:8000/health" "200"
 probe "web backend"     "http://127.0.0.1:4000/health" "200"
 
-# The operational schema is NOT built from this repository: the tracked metadata/ tree
-# is a partial overlay (13 of the 32 entity definitions a provisioned instance carries —
-# see metadata/README.md), so Location / ServiceProvider / SiteVisit / ServiceArea / …
-# only exist after a provisioned `atrocore.dump` is restored. Fail here, with the remedy,
+# A missing operational schema means the tracked model was never installed and synced on this
+# instance — metadata/ is complete, so step 0b creates every table. Fail here, with that remedy,
 # rather than four steps later inside the seed scripts.
 # SCHEMA_PROBE_TABLE is overridable so the failure path can be exercised deliberately.
 SCHEMA_PROBE_TABLE="${SCHEMA_PROBE_TABLE:-service_area}"
@@ -123,10 +121,13 @@ if schema_ready; then
   ok "operational schema present (public.${SCHEMA_PROBE_TABLE})"
 else
   die "the AtroCore database has no operational schema (public.${SCHEMA_PROBE_TABLE} is missing).
-         The tracked metadata/ tree is a partial overlay, so a clean clone must first restore a
-         provisioned atrocore.dump: ./scripts/seed-demo-db.sh <dump-file> --yes
-         (see README 'Restoring a real dataset' and runbook §7.2). If the stack is still
-         starting, wait for PostgreSQL and re-run."
+         Install the tracked model and sync the schema — re-run this script without --skip-metadata,
+         or by hand:
+           ./scripts/install-metadata.sh
+           docker compose exec atro-web php /var/www/localhost/console.php clear cache
+           docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+         See docs/COMPLIANCE_INTEGRATION_RUNBOOK.md §7.2. If the stack is still starting, wait for
+         PostgreSQL and re-run."
 fi
 
 set -a
