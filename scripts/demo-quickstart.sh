@@ -364,7 +364,16 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
     -d "{\"inspectionCode\":\"AV-ZZZZ-A-0001\",\"specialtyName\":\"Servicio de tránsito aéreo\",\"followUpFiles\":[\"${FOLLOW_UP_FILE}\"]}")
   echo "    ${RESP}" | head -c 260; echo
   PENDING=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).summary||{}).pendingClosureApprovals||0)}catch(e){console.log(0)}})')
-  [[ "${PENDING}" == "1" ]] || die "the follow-up was not processed (pendingClosureApprovals=${PENDING}); a moved-evidence re-run needs step 4 repeated"
+  if [[ "${PENDING}" != "1" ]]; then
+    # The summary is the whole diagnosis — `processed` alone does not say whether the follow-up was
+    # not found, matched more than one node, or failed validation — and "a moved-evidence re-run
+    # needs step 4 repeated" is only one of the possibilities. Print it in full, then the
+    # repository's own view of the request, because a fresh instance is where this goes wrong.
+    printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log("    summary:",JSON.stringify(j.summary||{}))}catch(e){console.log("    (response was not JSON)")}})' >&2
+    ( cd "${REPO_DIR}" && docker compose logs --tail 40 atro-web 2>/dev/null | grep -iE "follow.?up|canonical|error|warn" | tail -12 | sed 's/^/    alfresco | /' ) >&2 || true
+    ( cd "${WORKSPACE_ROOT}/compliance_cmis" && docker compose logs --tail 80 alfresco 2>/dev/null | grep -iE "canonical|follow.?up|error|exception" | tail -12 | sed 's/^/    alfresco | /' ) >&2 || true
+    die "the follow-up was not processed (pendingClosureApprovals=${PENDING}); see the summary above"
+  fi
   ok "finding H-ZZZZA0001-ATS-001 is now Pending Closure Approval"
 else
   step "2-5. Importing skipped"
