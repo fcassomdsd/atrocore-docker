@@ -368,6 +368,13 @@ group memberships, and repository access on `vigilancia-de-la-so`. The `closure_
 a rebuilt image**: migrations are `COPY`d into `Dockerfile.backend`, and `docker compose up`
 alone re-runs the old ones.
 
+**The two passwords** are printed by the seed's closing banner, and they are the script's
+`REVIEWER_PASSWORD` / `INSPECTOR_PASSWORD` variables — export either before running it to set
+your own. They are demo-only credentials for a synthetic dataset (`closure.reviewer`,
+`demo.inspector1`), committed so the walkthrough works out of the box: **change or delete them
+on any deployment that is not a throwaway demo** (`./scripts/seed-demo-identities.sh --remove`),
+exactly as §10 says for every other development default.
+
 Two things here are easy to miss and both cost a round trip:
 
 - **An application role does not grant an Alfresco permission.** The server authorises by
@@ -483,9 +490,12 @@ precisely so the browser path works; before that the role could decide a closure
 `403 AUTH_FORBIDDEN` on every read, so only the curl path worked.
 
 **Browser:** open http://localhost:3000 (see §5.5 for the command that publishes it), log in
-as `closure.reviewer` / the demo password from §7.3, open **Findings**, and pick
+as `closure.reviewer` with the password the identity seed printed (§7.3 — its
+`REVIEWER_PASSWORD`, overridable), open **Findings**, and pick
 `H-ZZZZA0001-ATS-001` (status `Pending Closure Approval`) to get the closure-review panel:
-a reason field and Apply Decision, which is the `reject`/`approve` call below.
+a reason field and Apply Decision, which is the `reject`/`approve` call below. The same
+identity works as `demo.inspector1` (`INSPECTOR_PASSWORD`) if you want to see the inspector's
+side of the finding.
 
 **API:** login returns a `csrfToken` that must be sent as `X-CSRF-Token` with the session cookie:
 
@@ -550,6 +560,19 @@ inspection ancestor and an item outside the period a report filters on simply di
   `0` immediately after a finding had moved to `Pending Closure Approval`, and `1` a moment later.
 
 ### 7.8 Generic lifecycle (for reference)
+
+Where the demo's state actually lives, so any step can be traced to the system that owns it:
+
+| What | System of record | How it moves |
+|---|---|---|
+| Site visit, inspection, inspector, specialty | **AtroCore** (`site_visit`, `inspection`, `inspector`, `specialty`) | Written by the seeds; read by Node-RED's `/siteVisits`, `/providers`, `/inspection/:id` |
+| Plan and report | **Alfresco**, under `Vigilancia/Inspecciones/<inspectionCode>/` | `/inspectionPlan` and `/inspectionReport` render the `.fodt` templates and file the PDFs; the AtroCore `inspection.status` follows (`Planned`, `Reported`) |
+| Checklist, findings, follow-ups, evidence | **Alfresco** canonical documents | `compliance_checklist` exports a ZIP → `/inspection-import` and `/followup-import` store it → `/importCanonical` builds the canonical model and moves the evidence |
+| Inspection window (`vso:startDate`/`vso:endDate`) | **Alfresco inspection folder** — AtroCore's `inspection` has no date columns | Copied from the payload's `checklist.startDate`/`endDate` by the canonical import (§7.4) |
+| Finding status, closure, CAP acceptance | **Alfresco** `vso:finding` properties | `compliance_web` writes them on the reviewer's decision; `vso:findingClosureDate` is set only when the finding reaches `Closed` |
+| Sessions, roles, route authorisation | **PostgreSQL** (`compliance_web`) + Alfresco group membership | `alfresco_group_role_map` maps group → role; roles are cached in the session and refresh on login |
+
+The per-provider `Inspection` status machine (`Created → Defined → Assigned → Planned → Uploaded → Reported → Complete`, with `Inactive` as a soft delete reachable only before `Uploaded`) is documented in `compliance_web/docs/STYLE_GUIDE.md` §12, and the finding/follow-up/CAP lifecycle in the platform `CLAUDE.md`; neither is restated here.
 
 ## 8. Failure Isolation Guide
 
