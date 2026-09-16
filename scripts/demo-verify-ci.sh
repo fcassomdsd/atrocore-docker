@@ -306,6 +306,12 @@ compose_up() { # compose_up <dir> [service ...]
 }
 
 compose_up "${REPO_DIR}" db atro-web
+# The Alfresco content store lives in a bind mount that is gitignored, so a fresh checkout does
+# not have it and the container cannot create it (compliance_cmis/scripts/bootstrap-alf-data.sh
+# has the whole failure). Without this the repository webapp never deploys and `compose up` fails
+# with "dependency failed to start: container … is unhealthy".
+( cd "${WORKSPACE}/compliance_cmis" && ./scripts/bootstrap-alf-data.sh ) \
+  || die "could not prepare the Alfresco content store"
 compose_up "${WORKSPACE}/compliance_cmis"
 compose_up "${WORKSPACE}/compliance_import"
 compose_up "${WORKSPACE}/compliance_flow"
