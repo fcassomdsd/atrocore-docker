@@ -56,6 +56,12 @@ WORKSPACE_ROOT="$(cd "${REPO_DIR}/.." && pwd)"
 ATROCORE_DOMAIN="$(grep -E '^PRODUCTION_DOMAIN=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'" || true)"
 ATROCORE_DOMAIN="${ATROCORE_DOMAIN:-localhost}"
 
+# Every service URL below goes through this. It is `localhost` for a local run, and the dind
+# service alias on a CI runner, where published ports are NOT on the job container's own
+# localhost (see .gitlab-ci.yml and scripts/demo-verify-ci.sh). ATROCORE_DOMAIN is a different
+# thing: it is the virtual host the app lives under inside the container.
+DEMO_HOST="${DEMO_HOST:-localhost}"
+
 # The database settings the seed scripts use, read once for the status assertions below.
 POSTGRES_PIM_USER="$(grep -E '^POSTGRES_PIM_USER=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
 POSTGRES_PIM_DB="$(grep -E '^POSTGRES_PIM_DB=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
@@ -117,10 +123,10 @@ probe() { # probe <label> <url> <acceptable>
 # afterwards, which is the whole point of that step. Node-RED is probed on its editor root
 # rather than `/specialties`, because that endpoint proxies to AtroCore and answers 400 until
 # step 0b has run (and the seed after it has data).
-probe "Alfresco"        "http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-" "200"
-probe "Node-RED"        "http://localhost:1880/" "200 401"
-probe "import service"  "http://127.0.0.1:8000/health" "200"
-probe "web backend"     "http://127.0.0.1:4000/health" "200"
+probe "Alfresco"        "http://${DEMO_HOST}:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-" "200"
+probe "Node-RED"        "http://${DEMO_HOST}:1880/" "200 401"
+probe "import service"  "http://${DEMO_HOST}:8000/health" "200"
+probe "web backend"     "http://${DEMO_HOST}:4000/health" "200"
 
 set -a
 # shellcheck disable=SC1091
@@ -129,7 +135,7 @@ set +a
 
 ticket() {
   curl -s -m 30 -X POST \
-    "http://localhost:8080/alfresco/api/-default-/public/authentication/versions/1/tickets" \
+    "http://${DEMO_HOST}:8080/alfresco/api/-default-/public/authentication/versions/1/tickets" \
     -H 'Content-Type: application/json' \
     -d "{\"userId\":\"${ALFRESCO_USERNAME}\",\"password\":\"${ALFRESCO_PASSWORD}\"}" \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).entry.id)}catch(e){process.exit(1)}})'
@@ -175,7 +181,7 @@ schema_ready() {
       "select to_regclass('public.${SCHEMA_PROBE_TABLE}') is not null" 2>/dev/null ) \
     | tr -d '[:space:]' | grep -q '^t$'
 }
-probe "AtroCore" "http://localhost/api/v1/App/user" "401"
+probe "AtroCore" "http://${DEMO_HOST}/api/v1/App/user" "401"
 if schema_ready; then
   ok "operational schema present (public.${SCHEMA_PROBE_TABLE})"
 else
@@ -266,7 +272,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
 
   step "2. Import the checklist + findings payload, stamped with the seeded window (compliance_import)"
   ATS_PAYLOAD="$(stamp_payload demo_inspection_payload.zip)"
-  RESP=$(curl -s -m 240 -X POST "http://127.0.0.1:8000/inspection-import" \
+  RESP=$(curl -s -m 240 -X POST "http://${DEMO_HOST}:8000/inspection-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
     -F "file=@${ATS_PAYLOAD}")
   echo "    ${RESP}" | head -c 200; echo
@@ -276,7 +282,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
 
   step "3. Import the canonical documents (compliance_cmis, query-param form)"
   RESP=$(curl -s -m 240 -X POST \
-    "http://localhost:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
+    "http://${DEMO_HOST}:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
     -H 'Content-Type: application/json' \
     -d '{"inspectionCode":"AV-ZZZZ-A-0001","specialtyName":"Servicio de tránsito aéreo"}')
   echo "    ${RESP}" | head -c 200; echo
@@ -291,7 +297,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   # record that no provider-history report can date.
   step "2b. Import the MET checklist payload, stamped with the same window (compliance_import)"
   MET_PAYLOAD="$(stamp_payload demo_met_inspection_payload.zip)"
-  RESP=$(curl -s -m 240 -X POST "http://127.0.0.1:8000/inspection-import" \
+  RESP=$(curl -s -m 240 -X POST "http://${DEMO_HOST}:8000/inspection-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
     -F "file=@${MET_PAYLOAD}")
   echo "    ${RESP}" | head -c 200; echo
@@ -301,7 +307,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
 
   step "3b. Import the MET canonical documents (compliance_cmis)"
   RESP=$(curl -s -m 240 -X POST \
-    "http://localhost:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
+    "http://${DEMO_HOST}:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
     -H 'Content-Type: application/json' \
     -d '{"inspectionCode":"AV-ZZZZ-I-0001","specialtyName":"Meteorología aeronáutica"}')
   echo "    ${RESP}" | head -c 200; echo
@@ -311,7 +317,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
 
   step "4. Import the follow-up, stamped after the window it reviews (compliance_import)"
   FOLLOWUP_PAYLOAD="$(stamp_payload demo_followup_payload.zip)"
-  RESP=$(curl -s -m 240 -X POST "http://127.0.0.1:8000/followup-import" \
+  RESP=$(curl -s -m 240 -X POST "http://${DEMO_HOST}:8000/followup-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
     -F "file=@${FOLLOWUP_PAYLOAD}")
   echo "    ${RESP}" | head -c 220; echo
@@ -321,7 +327,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
 
   step "5. Process the follow-up — this is what moves the finding (NOT step 3's form)"
   RESP=$(curl -s -m 240 -X POST \
-    "http://localhost:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
+    "http://${DEMO_HOST}:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
     -H 'Content-Type: application/json' \
     -d "{\"inspectionCode\":\"AV-ZZZZ-A-0001\",\"specialtyName\":\"Servicio de tránsito aéreo\",\"followUpFiles\":[\"${FOLLOW_UP_FILE}\"]}")
   echo "    ${RESP}" | head -c 260; echo
@@ -336,7 +342,7 @@ fi
 step "6. Verify"
 ( cd "${WORKSPACE_ROOT}/compliance_flow" && node scripts/smoke-flows.mjs ) | tail -1 || die "smoke harness failed"
 ( cd "${WORKSPACE_ROOT}/compliance_flow" && node scripts/audit-error-envelope.mjs --enforce ) | tail -1 || die "error-envelope audit failed"
-OPEN=$(curl -s -m 60 "http://localhost:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS" \
+OPEN=$(curl -s -m 60 "http://${DEMO_HOST}:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS" \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).length)}catch(e){console.log("?")}})')
 ok "open demo findings: ${OPEN}"
 
@@ -346,7 +352,7 @@ ok "open demo findings: ${OPEN}"
 # fall outside the period its reports filter on.
 for code in AV-ZZZZ-A-0001 AV-ZZZZ-I-0001; do
   WINDOW=$(curl -s -m 30 -u "${ALFRESCO_USERNAME}:${ALFRESCO_PASSWORD}" \
-    "http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-?relativePath=/Sites/vigilancia-de-la-so/documentLibrary/Vigilancia/Inspecciones/${code}&include=properties" \
+    "http://${DEMO_HOST}:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-?relativePath=/Sites/vigilancia-de-la-so/documentLibrary/Vigilancia/Inspecciones/${code}&include=properties" \
     | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=JSON.parse(s).entry.properties;const day=v=>v?String(v).slice(0,10):"none";console.log(day(p["vso:startDate"])+" -> "+day(p["vso:endDate"]))}catch(e){console.log("missing")}})')
   # `vso:startDate` is a `d:date`, so the API answers a full timestamp (`2026-10-07T00:00:00.000+0000`);
   # only the day is comparable with what the seed wrote into `site_visit.start_date`.
@@ -400,7 +406,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
     relative="${1#/Company Home}"
     encoded=$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "${relative}")
     curl -s -m 30 -u "${ALFRESCO_USERNAME}:${ALFRESCO_PASSWORD}" \
-      "http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-?relativePath=${encoded}&include=properties" \
+      "http://${DEMO_HOST}:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-?relativePath=${encoded}&include=properties" \
       | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const e=JSON.parse(s).entry;console.log(e.id+" "+e.name)}catch(e){}})'
   }
 
@@ -408,14 +414,14 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
 
   # 7a. Plan, on the visit that has not happened yet. This is also what moves the inspection
   #     from Assigned to Planned, which the last line of this step asserts.
-  PLAN=$(retry_json 4 "http://localhost:1880/inspectionPlan?siteVisit=${VISIT_FUTURE}&provider=demo-iprov-ans-02&locale=es")
+  PLAN=$(retry_json 4 "http://${DEMO_HOST}:1880/inspectionPlan?siteVisit=${VISIT_FUTURE}&provider=demo-iprov-ans-02&locale=es")
   PLAN_PATH=$(printf '%s' "${PLAN}" | json_field 'j.generatedFile.path')
   [ -n "${PLAN_PATH}" ] || die "inspectionPlan failed: $(printf '%s' "${PLAN}" | head -c 200)"
   [ -n "$(alfresco_node "${PLAN_PATH}")" ] || die "the plan was reported at ${PLAN_PATH} but no such document exists"
   ok "plan filed: ${PLAN_PATH}"
 
   # 7b. Inspection report, on the visit that has happened.
-  REPORT=$(retry_json 4 "http://localhost:1880/inspectionReport?siteVisit=${VISIT_PAST}&provider=demo-prov-ans&locale=es")
+  REPORT=$(retry_json 4 "http://${DEMO_HOST}:1880/inspectionReport?siteVisit=${VISIT_PAST}&provider=demo-prov-ans&locale=es")
   REPORT_PATH=$(printf '%s' "${REPORT}" | json_field 'j.generatedFile.path')
   [ -n "${REPORT_PATH}" ] || die "inspectionReport failed: $(printf '%s' "${REPORT}" | head -c 200)"
   [ -n "$(alfresco_node "${REPORT_PATH}")" ] || die "the report was reported at ${REPORT_PATH} but no such document exists"
@@ -424,7 +430,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   # 7c. Provider history. It filters by year, which is why a checklist item needs a dated
   #     inspection ancestor — a zero here means the inspection window is missing.
   HISTORY=$(curl -s -m 120 -X POST \
-    "http://localhost:8080/alfresco/s/api/providers/provider-history-report?alf_ticket=${TICKET}" \
+    "http://${DEMO_HOST}:8080/alfresco/s/api/providers/provider-history-report?alf_ticket=${TICKET}" \
     -H 'Content-Type: application/json' \
     -d "{\"providerId\":\"demo-prov-ans\",\"year\":\"$(date +%Y)\"}")
   HISTORY_TOTAL=$(printf '%s' "${HISTORY}" | json_field 'j.summary.total')
@@ -437,7 +443,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   #     onto checklist items and findings, so a zero means the payload carried no reference and
   #     the documents imported untagged.
   CE=$(curl -s -m 120 -X POST \
-    "http://localhost:8080/alfresco/s/api/usoap/ce-evidence-report?alf_ticket=${TICKET}" \
+    "http://${DEMO_HOST}:8080/alfresco/s/api/usoap/ce-evidence-report?alf_ticket=${TICKET}" \
     -H 'Content-Type: application/json' \
     -d "{\"ce\":\"CE-5\",\"year\":\"$(date +%Y)\",\"populationQueries\":[{\"pqCode\":\"PQ 99.001\",\"artifactCategory\":\"Checklist\",\"specialtyCode\":\"ATS\",\"monthsBack\":24}]}")
   CE_TOTAL=$(printf '%s' "${CE}" | json_field 'j.summary.total')
@@ -456,17 +462,17 @@ fi
 step "Next: the closure review (identities are seeded in step 1b)"
 cat <<'REVIEW'
     # log in as the reviewer and take the csrfToken from the response
-    curl -c jar -X POST http://127.0.0.1:4000/api/auth/login \
+    curl -c jar -X POST http://${DEMO_HOST}:4000/api/auth/login \
       -H 'Content-Type: application/json' \
       -d '{"username":"closure.reviewer","password":"<pw>"}'
 
     # reject (a reason is required and is stored on the finding)
-    curl -b jar -X PATCH "http://127.0.0.1:4000/api/findings/H-ZZZZA0001-ATS-001/closure-review" \
+    curl -b jar -X PATCH "http://${DEMO_HOST}:4000/api/findings/H-ZZZZA0001-ATS-001/closure-review" \
       -H 'Content-Type: application/json' -H "X-CSRF-Token: <csrfToken>" \
       -d '{"decision":"reject","reason":"Closure evidence is undated"}'
 
     # approve (closes it, sets vso:findingClosureDate, clears any rejection reason)
-    curl -b jar -X PATCH "http://127.0.0.1:4000/api/findings/H-ZZZZA0001-ATS-001/closure-review" \
+    curl -b jar -X PATCH "http://${DEMO_HOST}:4000/api/findings/H-ZZZZA0001-ATS-001/closure-review" \
       -H 'Content-Type: application/json' -H "X-CSRF-Token: <csrfToken>" \
       -d '{"decision":"approve"}'
 REVIEW
