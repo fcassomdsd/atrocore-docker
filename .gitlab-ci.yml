@@ -75,9 +75,9 @@ validate:fresh-install:
     # reach them here — the service alias does.
     ATROCORE_BASE_URL: http://docker
   script:
-    # `python3` is needed by install-metadata.sh (register-entity-tab.py); the default
-    # before_script has already installed bash and written .env.
-    - apk add --no-cache python3
+    # `python3` is needed by install-metadata.sh (register-entity-tab.py) and `curl` by
+    # install-atrocore.sh; the default before_script has already installed bash and written .env.
+    - apk add --no-cache python3 curl
     - rm -rf db-data web-data
     - mkdir -p db-data web-data
     - docker compose up -d --build db atro-web
