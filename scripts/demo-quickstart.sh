@@ -218,6 +218,30 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   [[ "${SUCCESS}" == "true" ]] || die "canonical import failed: ${RESP}"
   ok "documents moved into the inspection folder"
 
+  # The demo dataset seeds two inspections — ATS and MET. Both need a payload, because the
+  # inspection *window* lives on the Alfresco inspection folder (vso:startDate/vso:endDate),
+  # which only exists once canonical documents have been imported for it; AtroCore's
+  # `inspection` table has no date columns of its own. Without this the MET inspection is a bare
+  # record that no provider-history report can date.
+  step "2b. Import the MET checklist payload (compliance_import)"
+  RESP=$(curl -s -m 240 -X POST "http://127.0.0.1:8000/inspection-import" \
+    -H "X-Alfresco-Ticket: ${TICKET}" \
+    -F "file=@${WORKSPACE_ROOT}/compliance_import/example data/demo_met_inspection_payload.zip")
+  echo "    ${RESP}" | head -c 200; echo
+  [[ "$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).status)}catch(e){console.log("")}})')" == "imported" ]] \
+    || die "MET inspection-import failed: ${RESP}"
+  ok "MET checklist and evidence written to the canonical source folder"
+
+  step "3b. Import the MET canonical documents (compliance_cmis)"
+  RESP=$(curl -s -m 240 -X POST \
+    "http://localhost:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
+    -H 'Content-Type: application/json' \
+    -d '{"inspectionCode":"AV-ZZZZ-I-0001","specialtyName":"Meteorología aeronáutica"}')
+  echo "    ${RESP}" | head -c 200; echo
+  SUCCESS=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success===true)}catch(e){console.log(false)}})')
+  [[ "${SUCCESS}" == "true" ]] || die "MET canonical import failed: ${RESP}"
+  ok "MET inspection folder created with its window (AV-ZZZZ-I-0001)"
+
   step "4. Import the follow-up (compliance_import)"
   RESP=$(curl -s -m 240 -X POST "http://127.0.0.1:8000/followup-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
@@ -247,6 +271,19 @@ step "6. Verify"
 OPEN=$(curl -s -m 60 "http://localhost:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS" \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).length)}catch(e){console.log("?")}})')
 ok "open demo findings: ${OPEN}"
+
+# A checklist item is dated by its nearest inspection ancestor, and the inspection window lives on
+# the Alfresco folder (AtroCore's `inspection` table has no date columns), so both seeded
+# inspections must have one or their items drop out of a year-filtered report.
+for code in AV-ZZZZ-A-0001 AV-ZZZZ-I-0001; do
+  WINDOW=$(curl -s -m 30 -u "${ALFRESCO_USERNAME}:${ALFRESCO_PASSWORD}" \
+    "http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-?relativePath=/Sites/vigilancia-de-la-so/documentLibrary/Vigilancia/Inspecciones/${code}&include=properties" \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=JSON.parse(s).entry.properties;console.log((p["vso:startDate"]||"none")+" -> "+(p["vso:endDate"]||"none"))}catch(e){console.log("missing")}})')
+  case "${WINDOW}" in
+    *none*|missing) die "${code} has no inspection window (${WINDOW})" ;;
+  esac
+  ok "${code} window: ${WINDOW}"
+done
 
 # ---------------------------------------------------------------------------
 step "Next: the closure review (identities are seeded in step 1b)"
