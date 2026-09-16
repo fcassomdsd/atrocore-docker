@@ -1,4 +1,4 @@
-.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies metadata-install db-seed-nomenclatura
+.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies metadata-install metadata-export metadata-drift db-seed-nomenclatura
 
 help:
 	@echo "Available targets:"
@@ -19,6 +19,9 @@ help:
 	@echo "  make bootstrap                 Copy the AtroCore app out of the image into"
 	@echo "                                web-data/ (first run on a clean clone; idempotent)"
 	@echo "  make metadata-install          Install tracked metadata/ into web-data/"
+	@echo "  make metadata-drift            Fail if metadata/ differs from the running instance"
+	@echo "  make metadata-export           Copy the instance's metadata back into metadata/"
+	@echo "                                (for an entity edited through the admin UI)"
 	@echo "  make db-seed-nomenclatura [DB=...] YES=1"
 	@echo "                                Seed Specialty/ActivityType catalogs (destructive)"
 	@echo ""
@@ -50,6 +53,12 @@ db-restore:
 
 metadata-install:
 	./scripts/install-metadata.sh
+
+metadata-drift:
+	./scripts/export-instance-metadata.py --check
+
+metadata-export:
+	./scripts/export-instance-metadata.py
 
 db-seed-nomenclatura:
 	@if [ "$(YES)" != "1" ]; then \
