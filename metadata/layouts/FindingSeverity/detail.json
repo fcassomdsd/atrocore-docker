@@ -1,0 +1,21 @@
+[
+  {
+    "label": "Details",
+    "rows": [
+      [
+        {
+          "name": "name"
+        },
+        false
+      ],
+      [
+        {
+          "name": "daysToSolution"
+        },
+        {
+          "name": "daysToSubmission"
+        }
+      ]
+    ]
+  }
+]

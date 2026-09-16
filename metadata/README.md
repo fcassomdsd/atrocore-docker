@@ -27,8 +27,25 @@ The structure mirrors what AtroCore expects, so the mapping is one-to-one:
 | `scopes/*.json` | `web-data/<domain>/data/metadata/scopes/` |
 | `layouts/<Entity>/*.json` | `web-data/<domain>/data/layouts/<Entity>/` |
 
-Only the files this project actually customises are tracked here. Everything
-else is left to the AtroCore skeleton.
+The **whole operational model** is tracked here — all 32 entities with their
+`clientDefs`, `scopes` and `layouts` — not only the entities a recent change
+touched. The skeleton supplies the framework; it does not define `Location`,
+`ServiceProvider`, `SiteVisit`, `Inspector`, `Finding`, `CorrectiveAction`,
+`DocumentoOACI` and the rest, so anything missing here cannot be created by
+`sql diff` on a fresh database.
+
+This section used to say "only the files this project actually customises are
+tracked here", and that assumption is exactly what broke a clean install: the
+operational entities existed only in the gitignored `web-data/` tree and in a
+database dump that is no longer committed, so a fresh clone built an application
+whose schema lacked every one of them and whose seeds failed on the first missing
+table (`relation "public.service_area" does not exist`). The files were recovered
+from a provisioned instance after confirming the tracked ones were already
+JSON-identical to it, so this is the same model that was in use — now versioned,
+reviewable and reproducible.
+
+When you change an entity through the admin UI, export it back into this
+directory rather than leaving it only in `web-data/`.
 
 ## Applying changes
 
@@ -81,7 +98,8 @@ because they carry live data.
 | `clientDefs/ActivityType.json` | Plain record controller, mirroring `FindingSeverity`. |
 | `scopes/*.json` | `Specialty` demoted from `Hierarchy` to `Base`; `ActivityType` added as `Base`. |
 | `layouts/**` | List/detail layouts, `code` surfaced as the primary column. |
-| `entityDefs/UsoapProtocolQuestion.json`, `AcapiteOACI.json` | Back-ported from the admin-UI-only `web-data/` runtime tree so they survive a clean rebuild. `UsoapProtocolQuestion` also gains the new `evidenceExpectations` reverse link (see below); `AcapiteOACI` is otherwise unmodified. `DocumentoOACI` remains admin-UI-only, a pre-existing gap out of scope here. |
+| `entityDefs/UsoapProtocolQuestion.json`, `AcapiteOACI.json` | Back-ported from the admin-UI-only `web-data/` runtime tree so they survive a clean rebuild. `UsoapProtocolQuestion` also gains the new `evidenceExpectations` reverse link (see below); `AcapiteOACI` is otherwise unmodified. The `DocumentoOACI` gap this entry used to note is closed — see the row below. |
+| `entityDefs/{ActingInspector,CorrectiveAction,CorrectiveActionFollowUp,CorrectiveActionPlan,DocumentoOACI,Finding,FindingSeverity,InspectedProvider,InspectedService,InspectedSpecialty,InspectionSchedule,Inspector,Location,LocationService,Person,Reglamento,ServiceArea,ServiceProvider,SiteVisit}.json` plus their `clientDefs/`, `scopes/` and `layouts/` | The rest of the operational model, recovered from a provisioned instance (2026-09-16) so a bare clone can build it. Eight *already-tracked* definitions link into these (`AcapiteOACI`→`DocumentoOACI`; `Inspection`→`InspectedProvider`/`InspectedService`/`InspectedSpecialty`/`InspectionSchedule`/`Location`; `InspectionCadence`, `InspectionQuestion`, `Normativa`, `Specialty` likewise), so the tracked subset could not load without them. `FindingSeverity` has no entity links at all but is queried live by `compliance_web`'s `server/findings/severityDeadlines.cjs` for `daysToSubmission`/`daysToSolution`; the two empty tables (`acting_inspector`, `corrective_action_follow_up`) are link targets of `Inspector` and `CorrectiveAction`. The stale `ProtocolQuestion` layout directory was **not** copied — `install-metadata.sh` deliberately removes it. |
 | `entityDefs/UsoapEvidenceExpectation.json` | New: one row per USOAP PQ whose evidence guidance asks for a sample across a population of artifacts (checklists, inspection/audit reports, CAP follow-ups, manuals, licenses, training/personnel records, aerodrome dossiers, oversight plans) rather than one specific checklist item. `belongsTo` `UsoapProtocolQuestion`; `artifactCategory` is a new extensible enum (`usoap_artifact_category`), `criticalElement`/`areaCode` reuse the existing USOAP extensible enums. Consumed by `compliance_cmis`'s `POST /api/usoap/ce-evidence-report` to resolve these PQs by live query instead of per-node tagging. |
 | `clientDefs/UsoapProtocolQuestion.json`, `AcapiteOACI.json`, `UsoapEvidenceExpectation.json` | Plain record controllers, mirroring `ActivityType`. |
 | `entityDefs/ChecklistQuestion.json` | Renamed from the admin-UI-only `ProtocolQuestion` (2026-09) to disambiguate it from `UsoapProtocolQuestion` — this is the checklist-question catalog (code, text, verification criteria, risk level), unrelated to the ICAO PQ entity. Back-ported into git as part of the rename, closing the gap `ProtocolQuestion` previously had. `entityDefs/Normativa.json`, `QuestionTopic.json`, `InspectionQuestion.json`, `Tag.json` were newly back-ported alongside it since each holds a reverse link that had to be updated (`protocolQuestions`/`protocolQuestion` → `checklistQuestions`/`checklistQuestion`); `Specialty.json`'s existing `protocolQuestions` link was updated the same way. Relation names `ProtocolQuestionTag` → `ChecklistQuestionTag` and `NormativaProtocolQuestion` → `NormativaChecklistQuestion`. The DB-side rename (table/column/index renames, no data loss) lives in `sql/migrations/0001_rename_protocolquestion_to_checklistquestion.sql`, applied via `scripts/migrate-db.sh --yes` before this metadata is installed. |
