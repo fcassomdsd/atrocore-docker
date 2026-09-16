@@ -257,6 +257,20 @@ step "1b. Seed the demo identities (compliance_cmis)"
 ok "closure.reviewer (closure_reviewer) and demo.inspector1 (inspector) can log in"
 
 # ---------------------------------------------------------------------------
+# The site the whole model lives in. Every path the webscripts resolve is under one Share site
+# (`compliance_cmis/webscripts/common/vso-paths.lib.js`): the canonical documents, the
+# field-collection source the import service writes, the findings, the generation staging folder
+# and the five .fodt templates. A provisioned instance has all of it from a manual Share session;
+# nothing tracked creates it, so a clean instance fails its first canonical import with
+# "Destination base folder not found". Idempotent, so it also just confirms an existing site.
+# ---------------------------------------------------------------------------
+step "1c. Site content — the site, its folders and the document templates (compliance_cmis)"
+( cd "${WORKSPACE_ROOT}/compliance_cmis" \
+  && ALFRESCO_URL="http://${DEMO_HOST}:8080/alfresco" ./scripts/bootstrap-site-content.sh --yes >/dev/null ) \
+  || die "the Alfresco site content could not be created (runbook §7.3)"
+ok "site content ready: Vigilancia/{Inspecciones,Datos de campo,Hallazgos,Template data} + Documentos/Formatos templates"
+
+# ---------------------------------------------------------------------------
 if [[ "${SKIP_IMPORT}" == "0" ]]; then
   # Payloads are stamped into a scratch directory and imported from there, so the tracked
   # ZIPs stay pristine templates. The scratch copy is read by the host's curl, not by a

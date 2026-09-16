@@ -6,6 +6,10 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Added
+
+- **The demo quickstart creates the Alfresco site content, so the demo works on an instance that was never prepared by hand.** New step **1c** runs `compliance_cmis`'s `bootstrap-site-content.sh`: the site `vigilancia-de-la-so`, its `Vigilancia/{Inspecciones,Datos de campo,Hallazgos,Template data}` and `Documentos/Formatos` folders, and the five `.fodt` templates the plan/report/checklist/finding/follow-up webscripts render. Until now those existed only in a provisioned instance — created by hand in Share — and a clean one failed its first canonical import with *"Destination base folder not found"*. Runbook §7.3 documents it, and the whole-stack CI guard runs it as part of the demo; it is idempotent, so it also serves as a completeness check on an existing instance.
+
 ### Fixed
 
 - **The demo guard now prepares the Alfresco content store, which is what stopped it from ever getting past the repository start.** Its first CI runs failed with `dependency failed to start: container compliance_cmis-alfresco-1 is unhealthy`; the improved diagnostics (container states plus the failing container's `Caused by` chain, now part of the script) showed why: `ContentIOException: 08160000 Failed to create store root: ./alf_data/contentstore.deleted`. The store lives in a gitignored bind mount, so an empty checkout has none and the container cannot create it — `compliance_cmis`'s new `scripts/bootstrap-alf-data.sh` fixes that, the guard calls it before starting the project, and runbook §7.1 documents it as the one preparation step a fresh clone needs. Also in the guard's failure path: it prints each container's state and the incident lines from the log of any container that is not healthy, because "container X is unhealthy" on its own cannot be acted on.
