@@ -498,7 +498,8 @@ a reason field and Apply Decision, which is the `reject`/`approve` call below.
     curl -b jar -X PATCH "http://127.0.0.1:4000/api/findings/H-ZZZZA0001-ATS-001/closure-review" \
       -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" \
       -d '{"decision":"reject","reason":"Closure evidence is undated"}'
-    # => 200, finding back to "In Progress", vso:closureRejectionReason set
+    # => 200, finding back to "In Progress", vso:closureRejectionReason set and
+    #    vso:findingClosureDate cleared (an open finding must not carry a closure date)
 
     # approve: closes it — but only while the finding is still Pending Closure Approval
     curl -b jar -X PATCH "http://127.0.0.1:4000/api/findings/H-ZZZZA0001-ATS-001/closure-review" \
