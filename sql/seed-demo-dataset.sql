@@ -68,12 +68,15 @@
 --
 -- DATES ARE RELATIVE ON PURPOSE
 -- -----------------------------
--- A committed seed with hard-coded dates looks stale within a year. The demo
--- site visit is therefore always three weeks ahead of the day you seed, and the
--- year embedded in the Nomenclatura codes follows the current year, so the
--- field workflow (assign -> plan -> upload -> report) is always walkable. The
--- stable identifiers to reference in scripts and docs are the `id`s
--- (`demo-sv-01`, `demo-insp-ans-01`, ...), not the year-bearing codes.
+-- A committed seed with hard-coded dates looks stale within a year, so both demo
+-- site visits are dated relative to the day you seed: the one the closure
+-- walkthrough uses is a month *behind* today and the one the planning walkthrough
+-- uses is three weeks *ahead* of it (see section 7). The year embedded in the
+-- Nomenclatura codes follows the current year, so the field workflow
+-- (assign -> plan -> upload -> report) is always walkable and a closure is always
+-- reviewed after the finding it closes. The stable identifiers to reference in
+-- scripts and docs are the `id`s (`demo-sv-01`, `demo-insp-ans-01`, ...), not the
+-- year-bearing codes.
 --
 
 BEGIN;
@@ -161,24 +164,39 @@ INSERT INTO public.location_service_specialty (id, location_service_id, specialt
     ('demo-lsvc-met-met-met', 'demo-lsvc-met-met', 'spec_met', false, NOW(), NOW(), '1', '1');
 
 -- ---------------------------------------------------------------------------
--- 7. Site visit
+-- 7. Site visits
 --
--- Always three weeks out, so the assign -> plan -> upload -> report workflow is
--- walkable whenever the dataset is seeded. `V-XXXX-YYYY-##` per the platform
--- Nomenclatura, with YYYY = the current year.
+-- Two visits, because the demo walks two halves of the lifecycle that cannot share a date:
 --
--- Seeded as `Planned`, not `Created`, on purpose: /siteVisits only returns
--- visits whose status is Planned, Uploaded, Reported or Complete (a brand-new
--- Created visit is deliberately hidden from the app's visit list), so a seed
--- that stopped at Created would look like an empty database. `Planned` is also
--- where the demo's first action belongs — generating the inspection plan, which
--- then moves the inspection to Uploaded through /importCanonical.
+--   demo-sv-01  in the *past*  — the ATS and MET inspections were carried out, their
+--                                checklists and findings were imported, and a finding is
+--                                walked through closure. Dating this visit in the future (as
+--                                it used to be, `CURRENT_DATE + 21`) meant the demo reviewed
+--                                a closure for an inspection that had not happened yet: the
+--                                finding was issued *after* it was closed. Its window is the
+--                                anchor the quickstart stamps the payload dates onto.
+--   demo-sv-02  in the *future* — nothing has happened yet, so this is the visit the
+--                                planning walkthrough uses: /inspectionPlan renders the plan
+--                                and moves the inspection `Assigned` -> `Planned`.
+--
+-- Both are `V-XXXX-YYYY-##` per the platform Nomenclatura, with YYYY = the current year.
+--
+-- Seeded with statuses `/siteVisits` returns (Planned, Uploaded, Reported, Complete) on
+-- purpose: a brand-new `Created` visit is deliberately hidden from the app's visit list, so a
+-- seed that stopped at Created would look like an empty database.
 -- ---------------------------------------------------------------------------
 DELETE FROM public.site_visit WHERE id LIKE 'demo-%';
 
 INSERT INTO public.site_visit (id, code, start_date, end_date, status, location_id, main_inspector_id, secondary_inspector_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
     ('demo-sv-01',
      'V-ZZZZ-' || to_char(CURRENT_DATE, 'YYYY') || '-01',
+     CURRENT_DATE - 30,
+     CURRENT_DATE - 29,
+     'Complete',
+     'demo-loc-zzzz', 'demo-insp-1', 'demo-insp-2',
+     false, NOW(), NOW(), '1', '1'),
+    ('demo-sv-02',
+     'V-ZZZZ-' || to_char(CURRENT_DATE, 'YYYY') || '-02',
      CURRENT_DATE + 21,
      CURRENT_DATE + 22,
      'Planned',
@@ -192,7 +210,8 @@ DELETE FROM public.inspected_provider WHERE id LIKE 'demo-%';
 
 INSERT INTO public.inspected_provider (id, service_provider_id, site_visit_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
     ('demo-iprov-ans', 'demo-prov-ans', 'demo-sv-01', false, NOW(), NOW(), '1', '1'),
-    ('demo-iprov-met', 'demo-prov-met', 'demo-sv-01', false, NOW(), NOW(), '1', '1');
+    ('demo-iprov-met', 'demo-prov-met', 'demo-sv-01', false, NOW(), NOW(), '1', '1'),
+    ('demo-iprov-ans-02', 'demo-prov-ans', 'demo-sv-02', false, NOW(), NOW(), '1', '1');
 
 -- ---------------------------------------------------------------------------
 -- 9. Inspections
@@ -200,6 +219,11 @@ INSERT INTO public.inspected_provider (id, service_provider_id, site_visit_id, d
 -- One per inspected provider. `AV-XXXX-T-####` where T is the ActivityType
 -- letter (A = Auditoría, I = Inspección); activity codes are sequenced
 -- independently of the parent site visit's code.
+--
+-- The two past inspections are `Uploaded` (their checklists came in and their canonical
+-- documents exist); the future one is `Assigned`, which is what /inspectionPlan moves to
+-- `Planned` — seeding it as `Planned` would leave the plan walkthrough with no transition
+-- to show.
 -- ---------------------------------------------------------------------------
 DELETE FROM public.inspection WHERE id LIKE 'demo-%';
 
@@ -208,13 +232,19 @@ INSERT INTO public.inspection (id, code, objective, scope, location_id, inspecte
      'AV-ZZZZ-A-0001',
      'Verify compliance with the applicable air navigation service requirements.',
      'Air traffic services and radio navigation aids at Demo International Airport.',
-     'demo-loc-zzzz', 'demo-iprov-ans', 'Planned', 'atype_a',
+     'demo-loc-zzzz', 'demo-iprov-ans', 'Uploaded', 'atype_a',
      false, NOW(), NOW(), '1', '1'),
     ('demo-insp-met-01',
      'AV-ZZZZ-I-0001',
      'Verify compliance with the applicable aeronautical meteorological service requirements.',
      'Aeronautical meteorological service and equipment at Demo International Airport.',
-     'demo-loc-zzzz', 'demo-iprov-met', 'Planned', 'atype_i',
+     'demo-loc-zzzz', 'demo-iprov-met', 'Uploaded', 'atype_i',
+     false, NOW(), NOW(), '1', '1'),
+    ('demo-insp-ans-02',
+     'AV-ZZZZ-A-0002',
+     'Verify compliance with the applicable air navigation service requirements.',
+     'Air traffic services at Demo International Airport - planning walkthrough.',
+     'demo-loc-zzzz', 'demo-iprov-ans-02', 'Assigned', 'atype_a',
      false, NOW(), NOW(), '1', '1');
 
 -- ---------------------------------------------------------------------------
@@ -225,21 +255,24 @@ DELETE FROM public.inspected_service WHERE id LIKE 'demo-%';
 INSERT INTO public.inspected_service (id, inspection_id, location_service_id, inspected_provider_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
     ('demo-isvc-ans-ats', 'demo-insp-ans-01', 'demo-lsvc-ans-ats', 'demo-iprov-ans', false, NOW(), NOW(), '1', '1'),
     ('demo-isvc-ans-nav', 'demo-insp-ans-01', 'demo-lsvc-ans-nav', 'demo-iprov-ans', false, NOW(), NOW(), '1', '1'),
-    ('demo-isvc-met-met', 'demo-insp-met-01', 'demo-lsvc-met-met', 'demo-iprov-met', false, NOW(), NOW(), '1', '1');
+    ('demo-isvc-met-met', 'demo-insp-met-01', 'demo-lsvc-met-met', 'demo-iprov-met', false, NOW(), NOW(), '1', '1'),
+    ('demo-isvc-ans-02', 'demo-insp-ans-02', 'demo-lsvc-ans-ats', 'demo-iprov-ans-02', false, NOW(), NOW(), '1', '1');
 
 DELETE FROM public.inspected_specialty WHERE id LIKE 'demo-%';
 
 INSERT INTO public.inspected_specialty (id, inspected_service_id, specialty_id, inspection_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
     ('demo-ispec-ans-ats', 'demo-isvc-ans-ats', 'spec_ats', 'demo-insp-ans-01', false, NOW(), NOW(), '1', '1'),
     ('demo-ispec-ans-nav', 'demo-isvc-ans-nav', 'spec_nav', 'demo-insp-ans-01', false, NOW(), NOW(), '1', '1'),
-    ('demo-ispec-met-met', 'demo-isvc-met-met', 'spec_met', 'demo-insp-met-01', false, NOW(), NOW(), '1', '1');
+    ('demo-ispec-met-met', 'demo-isvc-met-met', 'spec_met', 'demo-insp-met-01', false, NOW(), NOW(), '1', '1'),
+    ('demo-ispec-ans-02', 'demo-isvc-ans-02', 'spec_ats', 'demo-insp-ans-02', false, NOW(), NOW(), '1', '1');
 
 DELETE FROM public.inspected_specialty_inspector WHERE id LIKE 'demo-%';
 
 INSERT INTO public.inspected_specialty_inspector (id, inspected_specialty_id, inspector_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
     ('demo-ispec-insp-1', 'demo-ispec-ans-ats', 'demo-insp-1', false, NOW(), NOW(), '1', '1'),
     ('demo-ispec-insp-2', 'demo-ispec-ans-nav', 'demo-insp-2', false, NOW(), NOW(), '1', '1'),
-    ('demo-ispec-insp-3', 'demo-ispec-met-met', 'demo-insp-3', false, NOW(), NOW(), '1', '1');
+    ('demo-ispec-insp-3', 'demo-ispec-met-met', 'demo-insp-3', false, NOW(), NOW(), '1', '1'),
+    ('demo-ispec-insp-4', 'demo-ispec-ans-02', 'demo-insp-1', false, NOW(), NOW(), '1', '1');
 
 -- ---------------------------------------------------------------------------
 -- 11. Interview / meeting schedule
@@ -249,15 +282,20 @@ INSERT INTO public.inspected_specialty_inspector (id, inspected_specialty_id, in
 -- gets both ("Opening Meeting" / "Closing Meeting" are contract, not labels).
 -- The ANS audit also gets a mid-visit interview to exercise the loop's
 -- non-meeting branch.
+--
+-- Each schedule sits on its own inspection's visit dates: the past visit's on the past
+-- window, the planning walkthrough's on the future one.
 -- ---------------------------------------------------------------------------
 DELETE FROM public.inspection_schedule WHERE id LIKE 'demo-%';
 
 INSERT INTO public.inspection_schedule (id, name, start_date_time, end_date_time, inspection_id, service_area_id, place, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
-    ('demo-sched-ans-open',  'Opening Meeting', (CURRENT_DATE + 21) + TIME '09:00', (CURRENT_DATE + 21) + TIME '09:30', 'demo-insp-ans-01', 'demo-area-movement', 'Demo International Airport - conference room', false, NOW(), NOW(), '1', '1'),
-    ('demo-sched-ans-interview', 'Interview - air traffic services', (CURRENT_DATE + 21) + TIME '10:00', (CURRENT_DATE + 21) + TIME '12:00', 'demo-insp-ans-01', 'demo-area-ats', 'Demo International Airport - operations centre', false, NOW(), NOW(), '1', '1'),
-    ('demo-sched-ans-close', 'Closing Meeting', (CURRENT_DATE + 22) + TIME '15:00', (CURRENT_DATE + 22) + TIME '16:00', 'demo-insp-ans-01', 'demo-area-movement', 'Demo International Airport - conference room', false, NOW(), NOW(), '1', '1'),
-    ('demo-sched-met-open',  'Opening Meeting', (CURRENT_DATE + 21) + TIME '09:00', (CURRENT_DATE + 21) + TIME '09:30', 'demo-insp-met-01', 'demo-area-ats', 'Demo International Airport - meteorological office', false, NOW(), NOW(), '1', '1'),
-    ('demo-sched-met-close', 'Closing Meeting', (CURRENT_DATE + 22) + TIME '13:00', (CURRENT_DATE + 22) + TIME '14:00', 'demo-insp-met-01', 'demo-area-ats', 'Demo International Airport - meteorological office', false, NOW(), NOW(), '1', '1');
+    ('demo-sched-ans-open',  'Opening Meeting', (CURRENT_DATE - 30) + TIME '09:00', (CURRENT_DATE - 30) + TIME '09:30', 'demo-insp-ans-01', 'demo-area-movement', 'Demo International Airport - conference room', false, NOW(), NOW(), '1', '1'),
+    ('demo-sched-ans-interview', 'Interview - air traffic services', (CURRENT_DATE - 30) + TIME '10:00', (CURRENT_DATE - 30) + TIME '12:00', 'demo-insp-ans-01', 'demo-area-ats', 'Demo International Airport - operations centre', false, NOW(), NOW(), '1', '1'),
+    ('demo-sched-ans-close', 'Closing Meeting', (CURRENT_DATE - 29) + TIME '15:00', (CURRENT_DATE - 29) + TIME '16:00', 'demo-insp-ans-01', 'demo-area-movement', 'Demo International Airport - conference room', false, NOW(), NOW(), '1', '1'),
+    ('demo-sched-met-open',  'Opening Meeting', (CURRENT_DATE - 30) + TIME '09:00', (CURRENT_DATE - 30) + TIME '09:30', 'demo-insp-met-01', 'demo-area-ats', 'Demo International Airport - meteorological office', false, NOW(), NOW(), '1', '1'),
+    ('demo-sched-met-close', 'Closing Meeting', (CURRENT_DATE - 29) + TIME '13:00', (CURRENT_DATE - 29) + TIME '14:00', 'demo-insp-met-01', 'demo-area-ats', 'Demo International Airport - meteorological office', false, NOW(), NOW(), '1', '1'),
+    ('demo-sched-ans02-open',  'Opening Meeting', (CURRENT_DATE + 21) + TIME '09:00', (CURRENT_DATE + 21) + TIME '09:30', 'demo-insp-ans-02', 'demo-area-movement', 'Demo International Airport - conference room', false, NOW(), NOW(), '1', '1'),
+    ('demo-sched-ans02-close', 'Closing Meeting', (CURRENT_DATE + 22) + TIME '15:00', (CURRENT_DATE + 22) + TIME '16:00', 'demo-insp-ans-02', 'demo-area-movement', 'Demo International Airport - conference room', false, NOW(), NOW(), '1', '1');
 
 -- ---------------------------------------------------------------------------
 -- 12. Checklist catalog: topics and questions

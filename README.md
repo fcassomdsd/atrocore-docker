@@ -201,8 +201,10 @@ schema that was never synced fails there rather than four steps later.
 
 It creates one fictional airport (ICAO `ZZZZ` — ICAO's own "unknown aerodrome"
 placeholder), two service providers, three inspectors, their services and
-specialties, a site visit **three weeks ahead of the day you seed**, two
-inspections, the interview schedules the plan generator needs, and a checklist
+specialties, **two site visits dated relative to the day you seed** — one a month behind
+(whose inspections carry the findings walked through closure) and one three weeks ahead
+(the planning walkthrough) — three inspections, the interview schedules the plan generator
+needs, and a checklist
 catalog (three topics, nine questions) with its USOAP citation chain
 (`ChecklistQuestion → Normativa → AcapiteOACI → UsoapProtocolQuestion`) plus the
 per-inspection selections `/checklist` actually reads. Question codes use the

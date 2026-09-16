@@ -192,7 +192,7 @@ if [[ "${SKIP_SEED}" == "0" ]]; then
     && ./scripts/seed-demo-dataset.sh --yes >/dev/null ) \
     || die "seeding failed"
   ( cd "${REPO_DIR}" && docker compose exec -T -u www-data atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" clear cache >/dev/null 2>&1 ) || true
-  ok "82 demo rows across 25 tables (airport ZZZZ, 2 providers, 3 inspectors, 2 inspections, 9 questions + USOAP chain)"
+  ok "90 demo rows across 25 tables (airport ZZZZ, 2 providers, 3 inspectors, 3 inspections, 2 site visits, 9 questions + USOAP chain)"
 else
   step "1. Seeding skipped"
 fi
