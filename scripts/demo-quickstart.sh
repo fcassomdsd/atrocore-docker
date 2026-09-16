@@ -18,14 +18,22 @@
 # the image is hidden) and the seeds fail on missing tables. Skipping it is only correct
 # when the app and the custom tables are already there (`--skip-metadata`).
 #
-# NOTE for a truly clean clone: the tracked metadata/ tree is a *partial overlay*
-# (13 of the 32 entity definitions the running instance has — see metadata/README.md,
-# "Only the files this project actually customises are tracked here"). The operational
-# entities the demo seeds write to — Location, ServiceProvider, SiteVisit, Inspector,
-# ServiceArea, Finding … — come from a provisioned `atrocore.dump`, not from this
-# repository. The preflight below therefore stops before step 0b unless
-# `public.service_area` exists, and prints the restore command; set
-# SCHEMA_PROBE_TABLE to another table to exercise that failure path deliberately.
+# The tracked metadata/ tree is a *partial overlay* (the files this project actually
+# customises — see metadata/README.md). The operational entities the demo seeds write to —
+# Location, ServiceProvider, SiteVisit, Inspector, ServiceArea, Finding … — come from the
+# recovered entity definitions `install-metadata.sh` installs from it, and the tables are
+# built by `sql diff --run`; a clean clone needs no dump. Step 0b fails loudly if that did
+# not happen: the schema probe below reads `public.service_area` (override
+# SCHEMA_PROBE_TABLE to exercise the failure path deliberately).
+
+# The demo dataset dates the site visit relative to the day it is seeded
+# (`CURRENT_DATE + 21` to `+ 22`), but the payloads it imports are ZIPs committed to
+# compliance_import, which freeze their dates the day they are written. The inspection
+# window lives on the Alfresco folder and is copied there from the payload by the canonical
+# import, so importing a stale payload dates the demo's inspection into the wrong week.
+# Step 2 therefore reads the window back from the seeded row and stamps a copy of every
+# payload with it (`compliance_import/scripts/stamp-payload-window.py`); the tracked ZIP
+# stays a template, and step 6 asserts the folder matches the seed.
 #
 # Step 1b seeds the demo identities (compliance_cmis/scripts/seed-demo-identities.sh):
 # the closure review needs the `closure_reviewer` role, and — because an application
@@ -70,6 +78,7 @@ This will:
   1. seed the USOAP vocabularies, the Nomenclatura catalogs and the demo dataset (atrocore-docker)
   1b. seed the demo identities closure.reviewer / demo.inspector1 (compliance_cmis)
   2. import the demo checklist/findings payload, the canonical documents and the follow-up
+     (each payload stamped with the seeded site visit's window)
   3. run the read-only smoke harness and the error-envelope audit
 
 It is additive and idempotent. Run again with --yes to continue.
@@ -188,6 +197,29 @@ else
   step "1. Seeding skipped"
 fi
 
+# The window the seed computed for the demo site visit — the anchor every payload date is
+# derived from (see the note at the top of this file). Read from the database rather than
+# recomputed here, so `--skip-seed` on an already-seeded stack uses the window that seed
+# actually wrote.
+DEMO_SITE_VISIT_ID="${DEMO_SITE_VISIT_ID:-demo-sv-01}"
+demo_window() {
+  local user db
+  user="$(grep -E '^POSTGRES_PIM_USER=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+  db="$(grep -E '^POSTGRES_PIM_DB=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+  [[ -n "${user}" && -n "${db}" ]] || return 1
+  ( cd "${REPO_DIR}" && docker compose exec -T db psql -U "${user}" -d "${db}" -tAc \
+      "select to_char(start_date,'YYYY-MM-DD') || ' ' || to_char(end_date,'YYYY-MM-DD') from public.site_visit where id = '${DEMO_SITE_VISIT_ID}'" 2>/dev/null ) \
+    | tr -s '[:space:]' ' ' | sed -e 's/^ //' -e 's/ $//'
+}
+WINDOW="$(demo_window || true)"
+VISIT_START="${WINDOW%% *}"
+VISIT_END="${WINDOW##* }"
+if [[ ! "${VISIT_START}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ || ! "${VISIT_END}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  die "could not read the demo site visit's window from public.site_visit (id ${DEMO_SITE_VISIT_ID}).
+         Seed the demo dataset first (re-run without --skip-seed)."
+fi
+ok "seeded demo site visit window: ${VISIT_START} -> ${VISIT_END}"
+
 # ---------------------------------------------------------------------------
 step "1b. Seed the demo identities (compliance_cmis)"
 ( cd "${WORKSPACE_ROOT}/compliance_cmis" && ./scripts/seed-demo-identities.sh --yes >/dev/null ) \
@@ -196,13 +228,41 @@ ok "closure.reviewer (closure_reviewer) and demo.inspector1 (inspector) can log 
 
 # ---------------------------------------------------------------------------
 if [[ "${SKIP_IMPORT}" == "0" ]]; then
+  # Payloads are stamped into a scratch directory and imported from there, so the tracked
+  # ZIPs stay pristine templates. The scratch copy is read by the host's curl, not by a
+  # container, so a host /tmp path is fine here.
+  PAYLOAD_DIR="${WORKSPACE_ROOT}/compliance_import/example data"
+  STAMP_SCRIPT="${WORKSPACE_ROOT}/compliance_import/scripts/stamp-payload-window.py"
+  command -v python3 >/dev/null 2>&1 || die "python3 is required to stamp the demo payloads with the seeded window"
+  [[ -f "${STAMP_SCRIPT}" ]] || die "${STAMP_SCRIPT} is missing — are the six repositories checked out side by side?"
+  STAMP_DIR="$(mktemp -d)"
+  trap 'rm -rf "${STAMP_DIR}"' EXIT
+
+  stamp_payload() { # stamp_payload <payload name> -> prints the stamped copy's path
+    # Two statements, not one `local`: bash expands every word of a declaration before it
+    # assigns any of them, so `local name="$1" destination="${STAMP_DIR}/${name}"` reads an
+    # unset `name` (and `set -u` aborts).
+    local name="$1"
+    local destination="${STAMP_DIR}/${name}"
+    if ! python3 "${STAMP_SCRIPT}" "${PAYLOAD_DIR}/${name}" "${destination}" \
+        --start "${VISIT_START}" --end "${VISIT_END}" > "${STAMP_DIR}/${name}.log" 2>&1; then
+      sed 's/^/    /' "${STAMP_DIR}/${name}.log" >&2
+      die "could not stamp ${name} with the seeded window ${VISIT_START} -> ${VISIT_END}"
+    fi
+    # Both streams to stderr: stdout is the return value (the path), so the derivation the
+    # script reports cannot be mistaken for it by the caller's command substitution.
+    sed 's/^/    /' "${STAMP_DIR}/${name}.log" >&2
+    printf '%s' "${destination}"
+  }
+
   TICKET="$(ticket)" || die "could not obtain an Alfresco ticket (check ALFRESCO_USERNAME/PASSWORD in compliance_flow/.env)"
   ok "operator ticket acquired"
 
-  step "2. Import the checklist + findings payload (compliance_import)"
+  step "2. Import the checklist + findings payload, stamped with the seeded window (compliance_import)"
+  ATS_PAYLOAD="$(stamp_payload demo_inspection_payload.zip)"
   RESP=$(curl -s -m 240 -X POST "http://127.0.0.1:8000/inspection-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
-    -F "file=@${WORKSPACE_ROOT}/compliance_import/example data/demo_inspection_payload.zip")
+    -F "file=@${ATS_PAYLOAD}")
   echo "    ${RESP}" | head -c 200; echo
   [[ "$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).status)}catch(e){console.log("")}})')" == "imported" ]] \
     || die "inspection-import failed: ${RESP}"
@@ -223,10 +283,11 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   # which only exists once canonical documents have been imported for it; AtroCore's
   # `inspection` table has no date columns of its own. Without this the MET inspection is a bare
   # record that no provider-history report can date.
-  step "2b. Import the MET checklist payload (compliance_import)"
+  step "2b. Import the MET checklist payload, stamped with the same window (compliance_import)"
+  MET_PAYLOAD="$(stamp_payload demo_met_inspection_payload.zip)"
   RESP=$(curl -s -m 240 -X POST "http://127.0.0.1:8000/inspection-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
-    -F "file=@${WORKSPACE_ROOT}/compliance_import/example data/demo_met_inspection_payload.zip")
+    -F "file=@${MET_PAYLOAD}")
   echo "    ${RESP}" | head -c 200; echo
   [[ "$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).status)}catch(e){console.log("")}})')" == "imported" ]] \
     || die "MET inspection-import failed: ${RESP}"
@@ -242,10 +303,11 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   [[ "${SUCCESS}" == "true" ]] || die "MET canonical import failed: ${RESP}"
   ok "MET inspection folder created with its window (AV-ZZZZ-I-0001)"
 
-  step "4. Import the follow-up (compliance_import)"
+  step "4. Import the follow-up, stamped after the window it reviews (compliance_import)"
+  FOLLOWUP_PAYLOAD="$(stamp_payload demo_followup_payload.zip)"
   RESP=$(curl -s -m 240 -X POST "http://127.0.0.1:8000/followup-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
-    -F "file=@${WORKSPACE_ROOT}/compliance_import/example data/demo_followup_payload.zip")
+    -F "file=@${FOLLOWUP_PAYLOAD}")
   echo "    ${RESP}" | head -c 220; echo
   FOLLOW_UP_FILE=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).followUpFilenames||[""])[0])}catch(e){}})')
   [[ -n "${FOLLOW_UP_FILE}" ]] || die "followup-import failed: ${RESP}"
@@ -274,15 +336,20 @@ ok "open demo findings: ${OPEN}"
 
 # A checklist item is dated by its nearest inspection ancestor, and the inspection window lives on
 # the Alfresco folder (AtroCore's `inspection` table has no date columns), so both seeded
-# inspections must have one or their items drop out of a year-filtered report.
+# inspections must carry one — and it must be the window the seed computed, or the demo's items
+# fall outside the period its reports filter on.
 for code in AV-ZZZZ-A-0001 AV-ZZZZ-I-0001; do
   WINDOW=$(curl -s -m 30 -u "${ALFRESCO_USERNAME}:${ALFRESCO_PASSWORD}" \
     "http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-?relativePath=/Sites/vigilancia-de-la-so/documentLibrary/Vigilancia/Inspecciones/${code}&include=properties" \
-    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=JSON.parse(s).entry.properties;console.log((p["vso:startDate"]||"none")+" -> "+(p["vso:endDate"]||"none"))}catch(e){console.log("missing")}})')
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=JSON.parse(s).entry.properties;const day=v=>v?String(v).slice(0,10):"none";console.log(day(p["vso:startDate"])+" -> "+day(p["vso:endDate"]))}catch(e){console.log("missing")}})')
+  # `vso:startDate` is a `d:date`, so the API answers a full timestamp (`2026-10-07T00:00:00.000+0000`);
+  # only the day is comparable with what the seed wrote into `site_visit.start_date`.
   case "${WINDOW}" in
     *none*|missing) die "${code} has no inspection window (${WINDOW})" ;;
   esac
-  ok "${code} window: ${WINDOW}"
+  [[ "${WINDOW}" == "${VISIT_START} -> ${VISIT_END}" ]] \
+    || die "${code}'s window (${WINDOW}) is not the seeded site visit's (${VISIT_START} -> ${VISIT_END}) — re-run without --skip-import to stamp the payloads onto the current seed"
+  ok "${code} window: ${WINDOW} (matches the seeded site visit)"
 done
 
 # ---------------------------------------------------------------------------
