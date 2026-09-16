@@ -280,8 +280,12 @@ Expected: health-like auth/session diagnostics output.
 
 ## 7. Demo Quickstart — clean clone to a demonstrable system
 
-Verified end to end on 2026-09-15 against the running stack. This is the concrete version
-of the generic flow below it: every command here has been executed, and the intermediate
+Verified end to end against a running stack, and — since 2026-09-16 — **from an empty checkout
+by CI**: `atrocore-docker`'s `demo:verify` job (manual/scheduled, not a merge gate) clones the
+sibling repositories, builds and starts every service and runs the quickstart, green in 7m24s.
+What that run asserts, what the demo deliberately leaves to a human, and the open items it
+surfaced are recorded in `TECHNICAL_DEBT_ANALYSIS.md` §4.8 ("Lean-demo status"); this section is
+how to do the same thing by hand. Every command here has been executed and the intermediate
 results quoted are the ones actually observed. Prerequisites are §3 (shared networks),
 §4 (the `.env` files — four in practice; `compliance_cmis` runs on its defaults), the
 side-by-side layout in §1.1, and a stack started per §5 (which includes §5.1's
