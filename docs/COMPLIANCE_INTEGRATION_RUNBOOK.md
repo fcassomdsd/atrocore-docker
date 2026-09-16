@@ -380,7 +380,22 @@ Both visits are re-dated relative to the day the seed runs, so the demo is coher
 is seeded — that is why the quickstart reads the window back from `demo-sv-01` and stamps the
 payload dates with it rather than embedding dates in the ZIPs.
 
-### 7.3 Demo identities (`compliance_cmis`)
+### 7.3 Demo identities and site content (`compliance_cmis`)
+
+**On a fresh instance, create the site the model lives in — before any import.** Every path the
+webscripts resolve is under one Share site, and nothing tracked used to create it: a clean instance
+came up, installed, seeded and logged in, and then failed its first canonical import with
+*"Destination base folder not found: Sites/vigilancia-de-la-so/documentLibrary/Vigilancia/Inspecciones"*.
+
+    cd compliance_cmis
+    ./scripts/bootstrap-site-content.sh --yes
+
+It creates the site `vigilancia-de-la-so`, the folders `Vigilancia/{Inspecciones, Datos de campo,
+Hallazgos, Template data}` and `Documentos/Formatos`, and uploads the five `.fodt` templates from
+`templates/`. Idempotent — it creates only what is missing — so it is also how you confirm an
+existing instance is complete. The quickstart runs it as step 1c.
+
+Then the demo identities:
 
 One command, idempotent:
 
