@@ -317,8 +317,8 @@ compose_up "${WORKSPACE}/compliance_import"
 compose_up "${WORKSPACE}/compliance_flow"
 compose_up "${WORKSPACE}/compliance_web"
 
-wait_for_any_http() { # wait_for_any_http <label> <url> <attempts>
-  local label="$1" url="$2" attempts="$3" i code
+wait_for_any_http() { # wait_for_any_http <label> <url> <attempts> [container name prefix]
+  local label="$1" url="$2" attempts="$3" prefix="${4:-}" i code
   for i in $(seq 1 "${attempts}"); do
     code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "${url}" 2>/dev/null || true)
     if [[ "${code}" =~ ^[1-5][0-9][0-9]$ ]]; then
@@ -327,11 +327,18 @@ wait_for_any_http() { # wait_for_any_http <label> <url> <attempts>
     fi
     sleep 5
   done
+  if [[ -n "${prefix}" ]]; then
+    docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -E "^${prefix}" | sed 's/^/      /' || true
+    for container in $(docker ps -a --format '{{.Names}}' | grep -E "^${prefix}" || true); do
+      printf '    --- last 30 log lines of %s\n' "${container}"
+      docker logs --tail 30 "${container}" 2>&1 | sed 's/^/      /' || true
+    done
+  fi
   die "${label} is not serving (last HTTP ${code:-none}) — see runbook §8"
 }
 
-wait_for() { # wait_for <label> <url> <acceptable codes> <attempts>
-  local label="$1" url="$2" acceptable="$3" attempts="$4" i code
+wait_for() { # wait_for <label> <url> <acceptable codes> <attempts> [container name prefix]
+  local label="$1" url="$2" acceptable="$3" attempts="$4" prefix="${5:-}" i code
   for i in $(seq 1 "${attempts}"); do
     code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "${url}" 2>/dev/null || true)
     case "${acceptable}" in
@@ -339,6 +346,17 @@ wait_for() { # wait_for <label> <url> <acceptable codes> <attempts>
     esac
     sleep 5
   done
+  # A service that never answers has usually crashed, and `docker compose up -d` does not fail on
+  # a container that starts and then exits — so print what it said before giving up.
+  if [[ -n "${prefix}" ]]; then
+    printf '    --- containers matching %s\n' "${prefix}"
+    docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -E "^${prefix}" | sed 's/^/      /' || true
+    local container
+    for container in $(docker ps -a --format '{{.Names}}' | grep -E "^${prefix}" || true); do
+      printf '    --- last 30 log lines of %s\n' "${container}"
+      docker logs --tail 30 "${container}" 2>&1 | sed 's/^/      /' || true
+    done
+  fi
   die "${label} did not answer (last HTTP ${code:-none}) — see runbook §8"
 }
 
@@ -347,11 +365,11 @@ wait_for() { # wait_for <label> <url> <acceptable codes> <attempts>
 # — and the quickstart probes it properly once that has happened. The readiness signal this script
 # needs is therefore "the web server answers at all". (The quickstart's own preflight skips this
 # probe for exactly the same reason.)
-wait_for_any_http "AtroCore" "http://${DEMO_HOST}/api/v1/App/user" 60
-wait_for "Alfresco"  "http://${DEMO_HOST}:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-" "200" 150
-wait_for "import"    "http://${DEMO_HOST}:8000/health" "200" 40
-wait_for "Node-RED"  "http://${DEMO_HOST}:1880/" "200 401" 40
-wait_for "web API"   "http://${DEMO_HOST}:4000/health" "200" 60
+wait_for_any_http "AtroCore" "http://${DEMO_HOST}/api/v1/App/user" 60 "compliance_atrocore-"
+wait_for "Alfresco"  "http://${DEMO_HOST}:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-" "200" 150 "compliance_cmis-"
+wait_for "import"    "http://${DEMO_HOST}:8000/health" "200" 40 "compliance_import-"
+wait_for "Node-RED"  "http://${DEMO_HOST}:1880/" "200 401" 40 "compliance_flow-"
+wait_for "web API"   "http://${DEMO_HOST}:4000/health" "200" 60 "compliance_web-"
 
 # ---------------------------------------------------------------------------
 step "6. The demo itself"
