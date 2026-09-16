@@ -71,6 +71,9 @@ validate:fresh-install:
     # here, so the job supplies its own. They become the super admin the platform logs in as.
     ATROCORE_USERNAME: ci_admin
     ATROCORE_PASSWORD: ci_admin_password
+    # Published ports live on the dind service, not the job container, so `localhost` does not
+    # reach them here — the service alias does.
+    ATROCORE_BASE_URL: http://docker
   script:
     # `python3` is needed by install-metadata.sh (register-entity-tab.py); the default
     # before_script has already installed bash and written .env.
@@ -106,7 +109,7 @@ validate:fresh-install:
       # The application must be usable, not merely present: `/api/v1/App/user` answers 401 only
       # once it is installed and wants authentication. Before this step existed the job passed
       # with a 500 here.
-      code=$(curl -s -o /dev/null -m 30 -w '%{http_code}' http://localhost/api/v1/App/user)
+      code=$(curl -s -o /dev/null -m 30 -w '%{http_code}' "${ATROCORE_BASE_URL}/api/v1/App/user")
       echo "  /api/v1/App/user = $code"
       [ "$code" = "401" ] || { echo "FAIL: AtroCore is not installed (expected 401, got $code)"; exit 1; }
     - |
