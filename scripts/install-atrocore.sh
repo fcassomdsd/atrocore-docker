@@ -66,6 +66,15 @@ fi
 
 cd "${ROOT_DIR}"
 
+# The caller's ATROCORE_BASE_URL has to win over the one in compliance_flow/.env, which is the
+# *in-network* address (`http://atro-web/api/v1`) — right for Node-RED, wrong for this script,
+# which installs over the published port from wherever it runs (a developer's host, or the dind
+# service alias on a CI runner). Without this the wizard is sent to `http://atro-web/api/v1` and
+# fails with "did not answer; is the stack up?" on a stack that is perfectly up. It only looked
+# fine before because the existing CI job does not check out the flow repository, so nothing
+# overwrote its job variable.
+CALLER_ATROCORE_BASE_URL="${ATROCORE_BASE_URL:-}"
+
 DOMAIN="localhost"
 set -a
 # shellcheck disable=SC1090
@@ -87,7 +96,7 @@ if [[ -z "${ATROCORE_USERNAME:-}" || -z "${ATROCORE_PASSWORD:-}" ]]; then
 fi
 
 LANGUAGE="${ATROCORE_LANGUAGE:-es_DO}"
-BASE_URL="${ATROCORE_BASE_URL:-http://localhost}"
+BASE_URL="${CALLER_ATROCORE_BASE_URL:-${ATROCORE_BASE_URL:-http://localhost}}"
 SYSCONFIG="${ROOT_DIR}/web-data/${DOMAIN}/data/config.php"
 
 if [[ -f "${SYSCONFIG}" ]] && grep -q "'isInstalled' => true" "${SYSCONFIG}"; then
