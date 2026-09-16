@@ -56,6 +56,10 @@ WORKSPACE_ROOT="$(cd "${REPO_DIR}/.." && pwd)"
 ATROCORE_DOMAIN="$(grep -E '^PRODUCTION_DOMAIN=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'" || true)"
 ATROCORE_DOMAIN="${ATROCORE_DOMAIN:-localhost}"
 
+# The database settings the seed scripts use, read once for the status assertions below.
+POSTGRES_PIM_USER="$(grep -E '^POSTGRES_PIM_USER=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+POSTGRES_PIM_DB="$(grep -E '^POSTGRES_PIM_DB=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+
 CONFIRMED=0
 SKIP_METADATA=0
 SKIP_SEED=0
@@ -80,6 +84,8 @@ This will:
   2. import the demo checklist/findings payload, the canonical documents and the follow-up
      (each payload stamped with the seeded site visit's window)
   3. run the read-only smoke harness and the error-envelope audit
+  4. generate the oversight artifacts — plan, inspection report, provider history and the
+     USOAP CE-evidence report — and assert each one exists
 
 It is additive and idempotent. Run again with --yes to continue.
 Usage: demo-quickstart.sh --yes [--skip-metadata] [--skip-seed] [--skip-import]
@@ -351,6 +357,100 @@ for code in AV-ZZZZ-A-0001 AV-ZZZZ-I-0001; do
     || die "${code}'s window (${WINDOW}) is not the seeded site visit's (${VISIT_START} -> ${VISIT_END}) — re-run without --skip-import to stamp the payloads onto the current seed"
   ok "${code} window: ${WINDOW} (matches the seeded site visit)"
 done
+
+# ---------------------------------------------------------------------------
+if [[ "${SKIP_IMPORT}" == "0" ]]; then
+  # -------------------------------------------------------------------------
+  # The reporting half. Until this existed the quickstart populated the work products and ran
+  # the read-only flow checks, but never produced a single oversight artifact — so the plan,
+  # the inspection report, the provider history and the USOAP CE-evidence report could all
+  # regress without anything here noticing.
+  #
+  # Two visits are involved (§7.2): the plan belongs to the visit that has not happened yet,
+  # the report and history to the one that has.
+  # -------------------------------------------------------------------------
+  VISIT_PAST="V-ZZZZ-$(date +%Y)-01"
+  VISIT_FUTURE="V-ZZZZ-$(date +%Y)-02"
+
+  # The transform service is cold for the first call or two after a repository restart
+  # ("PDF transformation failed"), so retry instead of reporting a false failure.
+  retry_json() { # retry_json <attempts> <url>
+    local attempt response=""
+    for attempt in $(seq 1 "$1"); do
+      response=$(curl -s -m 180 "$2")
+      case "${response}" in
+        *'"status": "success"'*|*'"status":"success"'*) printf '%s' "${response}"; return 0 ;;
+      esac
+      [ "${attempt}" -lt "$1" ] && sleep 10
+    done
+    printf '%s' "${response}"
+  }
+
+  # JSON arrives on stdin: the inspection report answers with ~1 MB (it echoes its input and
+  # the rendered report data), which overflows an argv entry if it is passed as an argument.
+  json_field() { # json_field <expression over `j`>  (JSON on stdin)
+    node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(new Function("j","return ("+process.argv[1]+")")(j))}catch(e){console.log("")}})' "$1"
+  }
+
+  alfresco_node() { # alfresco_node <repository display path> -> "<id> <name>", or empty
+    local relative encoded
+    # The webscripts report a display path starting at /Company Home, which is exactly what the
+    # nodes API calls `-root-`, so that prefix has to come off before it is used as a
+    # relativePath (the API answers 404 otherwise).
+    relative="${1#/Company Home}"
+    encoded=$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "${relative}")
+    curl -s -m 30 -u "${ALFRESCO_USERNAME}:${ALFRESCO_PASSWORD}" \
+      "http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/-root-?relativePath=${encoded}&include=properties" \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const e=JSON.parse(s).entry;console.log(e.id+" "+e.name)}catch(e){}})'
+  }
+
+  step "7. Generate the oversight artifacts (compliance_flow + compliance_cmis)"
+
+  # 7a. Plan, on the visit that has not happened yet. This is also what moves the inspection
+  #     from Assigned to Planned, which the last line of this step asserts.
+  PLAN=$(retry_json 4 "http://localhost:1880/inspectionPlan?siteVisit=${VISIT_FUTURE}&provider=demo-iprov-ans-02&locale=es")
+  PLAN_PATH=$(printf '%s' "${PLAN}" | json_field 'j.generatedFile.path')
+  [ -n "${PLAN_PATH}" ] || die "inspectionPlan failed: $(printf '%s' "${PLAN}" | head -c 200)"
+  [ -n "$(alfresco_node "${PLAN_PATH}")" ] || die "the plan was reported at ${PLAN_PATH} but no such document exists"
+  ok "plan filed: ${PLAN_PATH}"
+
+  # 7b. Inspection report, on the visit that has happened.
+  REPORT=$(retry_json 4 "http://localhost:1880/inspectionReport?siteVisit=${VISIT_PAST}&provider=demo-prov-ans&locale=es")
+  REPORT_PATH=$(printf '%s' "${REPORT}" | json_field 'j.generatedFile.path')
+  [ -n "${REPORT_PATH}" ] || die "inspectionReport failed: $(printf '%s' "${REPORT}" | head -c 200)"
+  [ -n "$(alfresco_node "${REPORT_PATH}")" ] || die "the report was reported at ${REPORT_PATH} but no such document exists"
+  ok "inspection report filed: ${REPORT_PATH}"
+
+  # 7c. Provider history. It filters by year, which is why a checklist item needs a dated
+  #     inspection ancestor — a zero here means the inspection window is missing.
+  HISTORY=$(curl -s -m 120 -X POST \
+    "http://localhost:8080/alfresco/s/api/providers/provider-history-report?alf_ticket=${TICKET}" \
+    -H 'Content-Type: application/json' \
+    -d "{\"providerId\":\"demo-prov-ans\",\"year\":\"$(date +%Y)\"}")
+  HISTORY_TOTAL=$(printf '%s' "${HISTORY}" | json_field 'j.summary.total')
+  [ -n "${HISTORY_TOTAL}" ] || die "provider-history-report failed: $(printf '%s' "${HISTORY}" | head -c 200)"
+  [ "${HISTORY_TOTAL%%.*}" -gt 0 ] 2>/dev/null \
+    || die "the provider history for $(date +%Y) is empty — the inspection window or the imported dates are missing"
+  ok "provider history for demo-prov-ans: ${HISTORY_TOTAL%%.*} artifacts (findings, checklist items, follow-ups)"
+
+  # 7d. USOAP CE evidence report. Its artifacts are the chain tags the canonical import writes
+  #     onto checklist items and findings, so a zero means the payload carried no reference and
+  #     the documents imported untagged.
+  CE=$(curl -s -m 120 -X POST \
+    "http://localhost:8080/alfresco/s/api/usoap/ce-evidence-report?alf_ticket=${TICKET}" \
+    -H 'Content-Type: application/json' \
+    -d "{\"ce\":\"CE-5\",\"year\":\"$(date +%Y)\",\"populationQueries\":[{\"pqCode\":\"PQ 99.001\",\"artifactCategory\":\"Checklist\",\"specialtyCode\":\"ATS\",\"monthsBack\":24}]}")
+  CE_TOTAL=$(printf '%s' "${CE}" | json_field 'j.summary.total')
+  CE_PQ=$(printf '%s' "${CE}" | json_field 'Object.keys(j.summary.byPq).join(",")')
+  [ -n "${CE_TOTAL}" ] || die "ce-evidence-report failed: $(printf '%s' "${CE}" | head -c 200)"
+  [ "${CE_TOTAL%%.*}" -gt 0 ] 2>/dev/null \
+    || die "the CE-5 evidence report found no artifacts — the imported documents are not USOAP-tagged (did the payload keep its reference.usoapPqReference?)"
+  ok "USOAP CE-5 evidence: ${CE_TOTAL%%.*} artifacts under ${CE_PQ:-?}, plus its gap analysis of missing evidence"
+
+  ok "the planning walkthrough moved AV-ZZZZ-A-0002 to $(docker compose exec -T db psql -U "${POSTGRES_PIM_USER}" -d "${POSTGRES_PIM_DB}" -tAc "select status from inspection where code='AV-ZZZZ-A-0002'" | tr -d '[:space:]')"
+else
+  step "7. Reporting walkthrough skipped (it needs the imported work products)"
+fi
 
 # ---------------------------------------------------------------------------
 step "Next: the closure review (identities are seeded in step 1b)"
