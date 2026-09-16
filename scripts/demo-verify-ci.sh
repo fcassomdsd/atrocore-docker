@@ -41,6 +41,16 @@ done
 SIBLING_REF="${SIBLING_REF:-develop}"
 GITLAB_HOST="${GITLAB_HOST:-gitlab.com}"
 
+# The quickstart needs these, and a missing one otherwise fails several minutes in, deep inside a
+# demo step with an opaque message (`node: command not found` after the app is installed and the
+# dataset seeded). Check up front.
+for tool in docker curl python3 node git; do
+  command -v "${tool}" >/dev/null 2>&1 || {
+    echo "demo-verify-ci: '${tool}' is required (runbook §1.1 lists the host prerequisites)" >&2
+    exit 1
+  }
+done
+
 # On a CI runner the published ports live on the dind service, not on this container's own
 # localhost, so every service URL is built from this. The quickstart takes it as DEMO_HOST for
 # exactly that reason; ATROCORE_BASE_URL and ALFRESCO_URL are what the scripts it calls read.
