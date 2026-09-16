@@ -154,18 +154,26 @@ Quick check:
 
     curl -f http://localhost || echo "AtroCore web not ready yet"
 
-**Then install the application and its metadata — this is not optional on a clean clone.**
+**Then install the application, then its metadata — neither is optional on a clean clone.**
 `./web-data` is bind-mounted over `/var/www/`, and a bind mount does not inherit the
 image's contents, so the AtroCore app that `prepare-pim.sh` installed during the build is
-invisible. `install-metadata.sh` calls `bootstrap-web-data.sh` when `web-data/<domain>/`
-is missing, which copies the app out of the image; then the schema is created:
+invisible. `install-atrocore.sh` bootstraps the files out of the image and then completes
+AtroCore's own installation — the scaffold is not the installation: without it
+`'isInstalled' => false`, the `user` table is empty, `/api/v1/App/user` answers `500` and
+every consumer sees a broken AtroCore. `install-metadata.sh` then copies the tracked model
+and the schema is created:
 
-    ./scripts/install-metadata.sh          # bootstraps web-data/ when empty, then copies metadata/
-    docker compose exec atro-web php /var/www/localhost/console.php clear cache
-    docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+    ./scripts/install-atrocore.sh --yes    # bootstrap web-data/ + install (rebuilds the DB)
+    ./scripts/install-metadata.sh          # copy the tracked model into web-data/
+    docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+    docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
 
-Without this, `http://localhost` has no DocumentRoot and every seed fails on missing
-tables. §7.2 repeats it in the demo context.
+Without this, `http://localhost` has no DocumentRoot, the API answers `500`, and every seed
+fails on missing tables. §7.2 repeats it in the demo context.
+
+Console commands must run as **`www-data`** (`-u www-data`). `docker compose exec` defaults
+to root, and root-owned files in `data/cache` make the web process fail on its next cache
+write — a `500` on every API route, with nothing in the Apache log to explain it.
 
 ### 5.2 Start CMIS/Alfresco
 
@@ -303,11 +311,12 @@ unreachable from the host, so every `localhost:4000` call fails with a connectio
 rather than an HTTP status; without the profile there is no UI. `docs/shared/operations/DOCKER_SETUP.md`
 is the canonical guide for both profiles.
 
-### 7.2 Metadata and demo data (`atrocore-docker`)
+### 7.2 Install the application, the metadata and the demo data (`atrocore-docker`)
 
-    ./scripts/install-metadata.sh                # bootstraps web-data/ first when it is empty
-    docker compose exec atro-web php /var/www/localhost/console.php clear cache
-    docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+    ./scripts/install-atrocore.sh --yes          # bootstrap web-data/ + AtroCore's own install
+    ./scripts/install-metadata.sh                # copy the tracked model into web-data/
+    docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+    docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
     ./scripts/seed-usoap-vocabularies.sh --yes   # required: the enums the catalog points at
     ./scripts/seed-nomenclatura.sh --yes         # spec_* / atype_* reference rows
     ./scripts/seed-demo-dataset.sh --yes         # the demo dataset

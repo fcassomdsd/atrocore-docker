@@ -14,8 +14,8 @@
 #
 #   docker compose up -d
 #   ./scripts/install-metadata.sh
-#   docker compose exec atro-web php /var/www/localhost/console.php clear cache
-#   docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+#   docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+#   docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
 #   ./scripts/seed-usoap-vocabularies.sh --yes
 #   ./scripts/seed-nomenclatura.sh --yes
 #   ./scripts/seed-demo-dataset.sh --yes

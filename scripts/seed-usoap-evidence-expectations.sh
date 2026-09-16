@@ -6,8 +6,8 @@
 # schema from web-data/<domain>/data/metadata/ (see metadata/README.md):
 #
 #   ./scripts/install-metadata.sh
-#   docker compose exec atro-web php /var/www/localhost/console.php clear cache
-#   docker compose exec atro-web php /var/www/localhost/console.php sql diff --run
+#   docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+#   docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
 #
 # That is what creates the `usoap_evidence_expectation` table; this script
 # only fills in rows. It also requires the UsoapProtocolQuestion catalog to

@@ -69,9 +69,9 @@ tracked definition disappears.
 
 ```bash
 ./scripts/install-metadata.sh                 # copy into web-data/ (+ register tabs)
-docker compose exec atro-web php /var/www/localhost/console.php clear cache
-docker compose exec atro-web php /var/www/localhost/console.php sql diff --show   # review
-docker compose exec atro-web php /var/www/localhost/console.php sql diff --run    # apply
+docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --show   # review
+docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run    # apply
 ./scripts/seed-nomenclatura.sh --yes          # load the reference rows
 ./scripts/seed-usoap-evidence-expectations.sh --yes   # load the USOAP evidence-expectation catalog
 ```

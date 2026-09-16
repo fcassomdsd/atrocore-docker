@@ -59,12 +59,18 @@ validate:metadata:
 # The fresh-install check. This job used to assert only that PostgreSQL answered and a
 # backup could be written, which said nothing about whether a new user gets a working
 # system — and it passed throughout the period when a clean clone could not build its
-# application or its schema at all. It now walks the README's steps 3–7 on an empty
-# database: build, bootstrap the application out of the image, install the tracked model,
-# sync the schema, seed, and check the result. `web-data/` and `db-data/` are deleted
-# first, so this is exactly what `git clone` + `docker compose up` gives someone.
+# application or its schema at all. It now walks the README's steps 3–8 on an empty
+# database: build, bootstrap the application out of the image, run AtroCore's own install,
+# install the tracked model, sync the schema, seed, and check the result. `web-data/` and
+# `db-data/` are deleted first, so this is exactly what `git clone` + `docker compose up`
+# gives someone.
 validate:fresh-install:
   stage: validate
+  variables:
+    # `install-atrocore.sh` takes these from ../compliance_flow/.env, which is not checked out
+    # here, so the job supplies its own. They become the super admin the platform logs in as.
+    ATROCORE_USERNAME: ci_admin
+    ATROCORE_PASSWORD: ci_admin_password
   script:
     # `python3` is needed by install-metadata.sh (register-entity-tab.py); the default
     # before_script has already installed bash and written .env.
@@ -87,12 +93,22 @@ validate:fresh-install:
         sleep 2
       done
     - ./scripts/bootstrap-web-data.sh
+    - ./scripts/install-atrocore.sh --yes
+    # Console as www-data: exec defaults to root, and root-owned cache files break the web
+    # process on its next write (HTTP 500 on every API route).
     - ./scripts/install-metadata.sh
-    - docker compose exec -T atro-web php /var/www/localhost/console.php clear cache
-    - docker compose exec -T atro-web php /var/www/localhost/console.php sql diff --run
+    - docker compose exec -T -u www-data atro-web php /var/www/localhost/console.php clear cache
+    - docker compose exec -T -u www-data atro-web php /var/www/localhost/console.php sql diff --run
     - ./scripts/seed-usoap-vocabularies.sh --yes
     - ./scripts/seed-nomenclatura.sh --yes
     - ./scripts/seed-demo-dataset.sh --yes
+    - |
+      # The application must be usable, not merely present: `/api/v1/App/user` answers 401 only
+      # once it is installed and wants authentication. Before this step existed the job passed
+      # with a 500 here.
+      code=$(curl -s -o /dev/null -m 30 -w '%{http_code}' http://localhost/api/v1/App/user)
+      echo "  /api/v1/App/user = $code"
+      [ "$code" = "401" ] || { echo "FAIL: AtroCore is not installed (expected 401, got $code)"; exit 1; }
     - |
       check() { # check <sql> <label> <expected>
         got=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -tAc "$1")
@@ -104,6 +120,7 @@ validate:fresh-install:
       check "select count(*) from inspector where id like 'demo-%'"        "demo inspectors"    3
       check "select count(*) from inspection where id like 'demo-%'"       "demo inspections"   2
       check "select count(*) from specialty"                                "specialties"       16
+      check "select count(*) from \"user\" where id='1' and is_admin"       "super admin"        1
       check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7
       # Tables that only exist if the recovered operational model was installed.
       check "select count(*) from information_schema.tables where table_schema='public' and table_name in ('service_area','site_visit','finding','corrective_action','documento_o_a_c_i')" "operational tables" 5
