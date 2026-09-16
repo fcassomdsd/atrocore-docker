@@ -301,7 +301,7 @@ so no dump is needed. Read on when something fails — §7.7 lists the traps.
 
 ### 7.1 Start the stack
 
-**One preparation step first, on a fresh checkout.** `compliance_cmis` writes its content store
+**Two preparation steps first, on a fresh checkout.** `compliance_cmis` writes its content store
 into `./data/alf_data`, a bind mount that is gitignored — so a clone has no such directory,
 Docker creates it `root:root 0755`, and the container (uid 33000) cannot create
 `contentstore.deleted` inside it. Alfresco's `FileContentStore` then fails
@@ -310,6 +310,11 @@ deploys, and the container reports `unhealthy` — which reads like a model or d
 One command creates it with the ownership the container needs:
 
     cd compliance_cmis && ./scripts/bootstrap-alf-data.sh
+
+and, for the same reason (a bind mount of a tracked directory, written by a container that does not
+run as your user), the Node-RED data directory:
+
+    cd compliance_flow && ./scripts/bootstrap-node-red-data.sh
 
 Per §5, with one trap: **`compliance_web`'s base compose file publishes no ports.** The dev
 override is what exposes the auth backend on `:4000`, and the `dev` profile is what starts

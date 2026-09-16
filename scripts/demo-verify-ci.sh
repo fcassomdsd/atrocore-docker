@@ -314,6 +314,11 @@ compose_up "${REPO_DIR}" db atro-web
   || die "could not prepare the Alfresco content store"
 compose_up "${WORKSPACE}/compliance_cmis"
 compose_up "${WORKSPACE}/compliance_import"
+# Node-RED runs as uid 1000 and writes node_modules into its bind-mounted data/ directory; on a
+# checkout owned by anyone else it exits with EACCES and the port never answers (see
+# compliance_flow/scripts/bootstrap-node-red-data.sh).
+( cd "${WORKSPACE}/compliance_flow" && ./scripts/bootstrap-node-red-data.sh ) \
+  || die "could not prepare the Node-RED data directory"
 compose_up "${WORKSPACE}/compliance_flow"
 compose_up "${WORKSPACE}/compliance_web"
 
