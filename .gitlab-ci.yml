@@ -183,9 +183,10 @@ demo:verify:
   variables:
     SIBLING_REF: develop
   script:
-    # `git` for the sibling clones and `python3` for the .env merge; bash and curl come from the
-    # default before_script, which also writes this project's .env from the pipeline variables.
-    - apk add --no-cache python3 curl git
+    # `git` for the sibling clones, `python3` for the .env merge and `nodejs` because the quickstart
+    # parses every JSON response with `node` (runbook §1.1 lists it as a host prerequisite); bash and
+    # curl come from the default before_script, which also writes this project's .env.
+    - apk add --no-cache python3 curl git nodejs
     - ./scripts/demo-verify-ci.sh
   after_script:
     # Runs even when the demo fails, so a failed job does not leave five stacks and their volumes
