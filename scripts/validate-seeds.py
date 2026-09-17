@@ -178,6 +178,46 @@ else:
     if re.search(r"TRUNCATE|DELETE\s+FROM", vocab, re.IGNORECASE):
         problems.append(f"{VOCAB_FILE.name} must be additive (it is required infrastructure)")
 
+
+# ---------------------------------------------------------------------------
+# The ICAO reference-data seed (Annex documents/paragraphs/Protocol Questions)
+# is required infrastructure too: sql/seed-usoap-evidence-expectations.sql
+# resolves each row's parent PQ by `code`, which silently resolves to NULL
+# without this. It must stay additive, and its row count is the only thing
+# tying the committed file to what was actually verified against a live
+# instance (see CHANGELOG.md) — a change here should update both together.
+# ---------------------------------------------------------------------------
+ICAO_FILE = ROOT / "sql" / "seed-icao-reference-data.sql"
+EXPECTED_ICAO_ROWS = {
+    "documento_o_a_c_i": 15,
+    "acapite_o_a_c_i": 1890,
+    "usoap_protocol_question": 281,
+    "usoap_protocol_question_acapite_o_a_c_i": 439,
+}
+
+if not ICAO_FILE.is_file():
+    problems.append(f"{ICAO_FILE.name} is missing")
+else:
+    icao = ICAO_FILE.read_text(encoding="utf-8")
+
+    if re.search(r"TRUNCATE|DELETE\s+FROM", icao, re.IGNORECASE):
+        problems.append(f"{ICAO_FILE.name} must be additive (it is required infrastructure)")
+
+    for table, expected in EXPECTED_ICAO_ROWS.items():
+        match = re.search(
+            rf"INSERT\s+INTO\s+public\.{table}\s*\([^)]*\)\s*VALUES\s*(.*?)ON CONFLICT",
+            icao, re.IGNORECASE | re.DOTALL,
+        )
+        if not match:
+            problems.append(f"{ICAO_FILE.name} has no INSERT INTO public.{table}")
+            continue
+        counted = len(re.findall(r"^\s*\(", match.group(1), re.MULTILINE))
+        if counted != expected:
+            problems.append(
+                f"{ICAO_FILE.name}: expected {expected} rows for {table}, counted {counted} — "
+                "update EXPECTED_ICAO_ROWS, the SQL header and the CHANGELOG together"
+            )
+
 if problems:
     print(f"FAIL: {len(problems)} problem(s) in the seed datasets:")
     for problem in problems:

@@ -36,7 +36,7 @@ Use this checklist if you are running the project for the first time:
 
 7. Open http://localhost.
 
-8. Optional: load the synthetic demo dataset (next section) with `./scripts/seed-usoap-vocabularies.sh --yes && ./scripts/seed-nomenclatura.sh --yes && ./scripts/seed-demo-dataset.sh --yes`, or restore a real authority's data with `./scripts/seed-demo-db.sh <dump-file> --yes`.
+8. Optional: load the synthetic demo dataset (next section) with `./scripts/seed-usoap-vocabularies.sh --yes && ./scripts/seed-icao-reference-data.sh --yes && ./scripts/seed-nomenclatura.sh --yes && ./scripts/seed-demo-dataset.sh --yes`, or restore a real authority's data with `./scripts/seed-demo-db.sh <dump-file> --yes`.
 
 Everything above is also available as one command once the stack is up — see "End-to-end demo quickstart" below.
 
@@ -190,9 +190,10 @@ that already holds real records. Restore a real authority's data instead (or on 
 schema that was never synced fails there rather than four steps later.
 
 ```bash
-./scripts/seed-usoap-vocabularies.sh --yes  # risk / USOAP extensible enums (required)
-./scripts/seed-nomenclatura.sh --yes        # spec_* / atype_* reference rows
-./scripts/seed-demo-dataset.sh --yes        # the demo dataset
+./scripts/seed-usoap-vocabularies.sh --yes    # risk / USOAP extensible enums (required)
+./scripts/seed-icao-reference-data.sh --yes   # ICAO Annex documents/paragraphs/PQs (required)
+./scripts/seed-nomenclatura.sh --yes          # spec_* / atype_* reference rows
+./scripts/seed-demo-dataset.sh --yes          # the demo dataset
 # or: make db-seed-demo YES=1
 
 ./scripts/seed-demo-dataset.sh --remove --yes   # delete every demo- row
@@ -225,6 +226,18 @@ only). They therefore existed only in the database: without them a fresh install
 USOAP Critical Element / area to nothing. The seed recreates 7 enums and their 47 option bindings, is additive
 (`INSERT ... ON CONFLICT DO NOTHING`, so customised vocabularies are never overwritten) and is deliberately
 **not** removed by `--remove`.
+
+**Also required before the demo dataset: `scripts/seed-icao-reference-data.sh`.** The USOAP citation chain
+(`ChecklistQuestion → Normativa → AcapiteOACI → UsoapProtocolQuestion`) has no ICAO Annex documents, Annex
+paragraphs or Protocol Questions on a fresh install — only the three synthetic `PQ 99.x` rows the demo dataset
+itself creates. This seed loads the real ICAO-standard catalog: **15 Annex documents, 1,890 Annex paragraphs,
+281 USOAP Protocol Questions and 439 PQ → paragraph citations**, extracted from a legacy database snapshot and
+filtered to real (non-demo) rows. Unlike `Normativa` — a specific country's national regulation, which this project deliberately never seeds
+(each adopting authority enters their own) — this content is ICAO-standard and CAA-independent, so it belongs
+in every install, not something each adopting authority has to re-enter by hand.
+`sql/seed-usoap-evidence-expectations.sql` depends on it: it resolves each row's parent Protocol Question by
+`code`, which otherwise resolves to `NULL`. Additive (`INSERT ... ON CONFLICT DO NOTHING`) and, like the
+vocabularies seed, deliberately **not** removed by `--remove`.
 
 ### End-to-end demo quickstart (whole platform)
 
@@ -384,7 +397,7 @@ Common CI variables you can override:
 
 - `scripts/` - Backup, restore, demo seed, metadata install, and catalog seed helpers
 - `metadata/` - Version-controlled AtroCore entity metadata (installed into `web-data/`)
-- `sql/` - Reference-catalog, vocabulary and demo-dataset seed scripts (`seed-nomenclatura-catalog.sql`, `seed-usoap-vocabularies.sql`, `seed-demo-dataset.sql`, `seed-usoap-evidence-expectations.sql`)
+- `sql/` - Reference-catalog, vocabulary and demo-dataset seed scripts (`seed-nomenclatura-catalog.sql`, `seed-usoap-vocabularies.sql`, `seed-icao-reference-data.sql`, `seed-demo-dataset.sql`, `seed-usoap-evidence-expectations.sql`)
 - `db-dumps/` - Generated dump files (gitignored, never committed)
 - `db-data/` - PostgreSQL persistent data
 - `web-data/` - AtroCore web and application data
