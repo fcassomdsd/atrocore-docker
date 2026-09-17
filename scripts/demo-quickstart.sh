@@ -430,8 +430,23 @@ step "6. Verify"
 # Both harnesses default to http://localhost:1880, which is the machine they run *on* — this host
 # locally, the CI job container on a runner (where the stack is behind the dind alias), so every
 # check fails there without BASE. They already accept it from the environment.
-( cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/smoke-flows.mjs ) | tail -1 || die "smoke harness failed"
-( cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/audit-error-envelope.mjs --enforce ) | tail -1 || die "error-envelope audit failed"
+#
+# Both print one `ok`/`FAIL`/`SKIP` line per check plus a summary line. On success only the
+# summary is worth showing; on failure the per-check lines are exactly what identifies which
+# check broke, so print the full output rather than just the summary — piping straight through
+# `tail -1` used to hide that even in CI logs, making a real failure indistinguishable from a
+# passing run except for the exit code.
+if ! smoke_output="$(cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/smoke-flows.mjs)"; then
+  printf '%s\n' "${smoke_output}"
+  die "smoke harness failed"
+fi
+printf '%s\n' "${smoke_output}" | tail -1
+
+if ! envelope_output="$(cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/audit-error-envelope.mjs --enforce)"; then
+  printf '%s\n' "${envelope_output}"
+  die "error-envelope audit failed"
+fi
+printf '%s\n' "${envelope_output}" | tail -1
 OPEN_RESP=$(curl -s -m 60 "${FLOW_AUTH_HEADER[@]}" "http://${DEMO_HOST}:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS")
 OPEN=$(printf '%s' "${OPEN_RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).length)}catch(e){console.log("?")}})')
 [[ "${OPEN}" =~ ^[0-9]+$ ]] || die "findings/open did not return a list: $(printf '%s' "${OPEN_RESP}" | head -c 200)"

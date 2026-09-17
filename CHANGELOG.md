@@ -6,6 +6,10 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Fixed
+
+- **`demo-quickstart.sh`'s verify step no longer hides which check actually failed.** The smoke harness and the error-envelope audit each print one `ok`/`FAIL`/`SKIP` line per check plus a summary — piping straight through `tail -1` kept only the summary, even on failure, so a CI log showing "14 passed, 1 failed" gave no way to tell which of the 15 checks broke. Found diagnosing a `demo:verify` failure that turned out to be a pre-existing, unrelated `/findings/open` search-index-lag flake (already documented in the runbook) — confirming that took reproducing the run locally, which shouldn't have been necessary. Both calls now print their full output on failure (and still just the summary on success).
+
 ### Added
 
 - **`THIRD_PARTY_LICENSES.md`, with a major finding: AtroCore's core packages are GPL-3.0-only.** `atrocore/core`, `atrocore/atrocore-legacy`, `atrocore/export`, `atrocore/import`, `atrocore/export-http` and `atrocore/import-http` are all GPL-3.0-only (confirmed by reading each package's bundled `LICENSE.txt` — `composer.json`'s `license` field is absent on most of them, so that file was the only reliable source; only `atrocore/slim` is MIT). These packages are compiled into the built `atro-web` image, not merely referenced the way `compliance_cmis`'s Alfresco containers are, which makes this a materially bigger open item for legal review than the already-flagged Alfresco LGPL question — GPL-3.0 is strong copyleft on the actual application core, not weak copyleft on referenced infrastructure. Specific questions for counsel are recorded in the new file.
