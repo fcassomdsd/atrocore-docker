@@ -241,6 +241,10 @@ vocabularies seed, deliberately **not** removed by `--remove`.
 
 ### End-to-end demo quickstart (whole platform)
 
+First time running this platform? See the root-level
+[`GETTING_STARTED_FOR_ADOPTERS.md`](../GETTING_STARTED_FOR_ADOPTERS.md) for hardware
+requirements, timing expectations, and what the demo dataset actually is before diving in.
+
 `scripts/demo-quickstart.sh` drives the rest of the platform from a stack that is
 already running: it bootstraps the app into `web-data/`, installs the metadata and
 syncs the schema, seeds the USOAP vocabularies, the Nomenclatura catalogs and the
