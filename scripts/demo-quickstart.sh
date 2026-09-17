@@ -66,6 +66,13 @@ DEMO_HOST="${DEMO_HOST:-localhost}"
 POSTGRES_PIM_USER="$(grep -E '^POSTGRES_PIM_USER=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
 POSTGRES_PIM_DB="$(grep -E '^POSTGRES_PIM_DB=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
 
+# compliance_import gates every route except /health with X-API-Key when IMPORT_API_KEY is set
+# (the shipped default) — the quickstart's own import calls below need to send it too, or a
+# correctly-hardened stack fails its own demo. Read once here; empty when auth is off (dev mode).
+IMPORT_API_KEY="$(grep -E '^IMPORT_API_KEY=' "${WORKSPACE_ROOT}/compliance_import/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+IMPORT_AUTH_HEADER=()
+[[ -n "${IMPORT_API_KEY}" ]] && IMPORT_AUTH_HEADER=(-H "X-API-Key: ${IMPORT_API_KEY}")
+
 CONFIRMED=0
 SKIP_METADATA=0
 SKIP_SEED=0
@@ -128,6 +135,22 @@ probe "Node-RED"        "http://${DEMO_HOST}:1880/" "200 401"
 probe "import service"  "http://${DEMO_HOST}:8000/health" "200"
 probe "web backend"     "http://${DEMO_HOST}:4000/health" "200"
 
+# Alfresco's own readiness probe above can answer 200 while a dependency behind it is down:
+# a dead ActiveMQ does not fail anything synchronous, it makes specific operations (replanning
+# an existing document) hang indefinitely with no error (FOOTPRINT_AUDIT.md, 2026-09-15) — the
+# worst failure mode for an unattended install, because nothing surfaces and no timeout fires.
+# Check container health directly for the services whose failure mode is silent rather than a
+# clean HTTP error: Alfresco, Solr, ActiveMQ and the transform service.
+( cd "${WORKSPACE_ROOT}/compliance_cmis" \
+  && unhealthy="$(docker compose ps --format '{{.Name}} {{.Health}}' 2>/dev/null \
+       | awk '$1 ~ /-(alfresco|solr6|activemq|transform-core-aio)-[0-9]+$/ && $2 == "unhealthy" {print $1}')" \
+  && if [[ -n "${unhealthy}" ]]; then
+       echo "FAIL: unhealthy container(s): ${unhealthy}" >&2
+       exit 1
+     fi ) \
+  || die "one or more of Alfresco/Solr/ActiveMQ/transform-core-aio is unhealthy — check 'docker compose ps' and container logs in compliance_cmis before continuing (a dead ActiveMQ in particular will not fail cleanly later, it will hang)"
+ok "Alfresco/Solr/ActiveMQ/transform-core-aio container health checked"
+
 # compliance_flow/.env holds the *in-network* AtroCore address (`http://atro-web/api/v1`), which is
 # right for Node-RED and wrong for anything this script runs against the published port — the
 # install wizard in particular, which would then be told to reach a host it cannot resolve
@@ -149,6 +172,12 @@ set +a
 if [[ -n "${CALLER_ATROCORE_BASE_URL}" ]]; then
   export ATROCORE_BASE_URL="${CALLER_ATROCORE_BASE_URL}"
 fi
+
+# Node-RED gates every REST endpoint with X-API-Key when API_KEY is set (the shipped default) —
+# smoke-flows.mjs/audit-error-envelope.mjs already read it from this sourced .env, but this
+# script's own plain `curl` calls to :1880 (below) do not unless they carry the header too.
+FLOW_AUTH_HEADER=()
+[[ -n "${API_KEY:-}" ]] && FLOW_AUTH_HEADER=(-H "X-API-Key: ${API_KEY}")
 
 ticket() {
   curl -s -m 30 -X POST \
@@ -308,6 +337,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   ATS_PAYLOAD="$(stamp_payload demo_inspection_payload.zip)"
   RESP=$(curl -s -m 240 -X POST "http://${DEMO_HOST}:8000/inspection-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
+    "${IMPORT_AUTH_HEADER[@]}" \
     -F "file=@${ATS_PAYLOAD}")
   echo "    ${RESP}" | head -c 200; echo
   [[ "$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).status)}catch(e){console.log("")}})')" == "imported" ]] \
@@ -333,6 +363,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   MET_PAYLOAD="$(stamp_payload demo_met_inspection_payload.zip)"
   RESP=$(curl -s -m 240 -X POST "http://${DEMO_HOST}:8000/inspection-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
+    "${IMPORT_AUTH_HEADER[@]}" \
     -F "file=@${MET_PAYLOAD}")
   echo "    ${RESP}" | head -c 200; echo
   [[ "$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).status)}catch(e){console.log("")}})')" == "imported" ]] \
@@ -353,6 +384,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   FOLLOWUP_PAYLOAD="$(stamp_payload demo_followup_payload.zip)"
   RESP=$(curl -s -m 240 -X POST "http://${DEMO_HOST}:8000/followup-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
+    "${IMPORT_AUTH_HEADER[@]}" \
     -F "file=@${FOLLOWUP_PAYLOAD}")
   echo "    ${RESP}" | head -c 220; echo
   FOLLOW_UP_FILE=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).followUpFilenames||[""])[0])}catch(e){}})')
@@ -400,8 +432,9 @@ step "6. Verify"
 # check fails there without BASE. They already accept it from the environment.
 ( cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/smoke-flows.mjs ) | tail -1 || die "smoke harness failed"
 ( cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/audit-error-envelope.mjs --enforce ) | tail -1 || die "error-envelope audit failed"
-OPEN=$(curl -s -m 60 "http://${DEMO_HOST}:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS" \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).length)}catch(e){console.log("?")}})')
+OPEN_RESP=$(curl -s -m 60 "${FLOW_AUTH_HEADER[@]}" "http://${DEMO_HOST}:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS")
+OPEN=$(printf '%s' "${OPEN_RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).length)}catch(e){console.log("?")}})')
+[[ "${OPEN}" =~ ^[0-9]+$ ]] || die "findings/open did not return a list: $(printf '%s' "${OPEN_RESP}" | head -c 200)"
 ok "open demo findings: ${OPEN}"
 
 # A checklist item is dated by its nearest inspection ancestor, and the inspection window lives on
@@ -443,7 +476,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   retry_json() { # retry_json <attempts> <url>
     local attempt response=""
     for attempt in $(seq 1 "$1"); do
-      response=$(curl -s -m 180 "$2")
+      response=$(curl -s -m 180 "${FLOW_AUTH_HEADER[@]}" "$2")
       case "${response}" in
         *'"status": "success"'*|*'"status":"success"'*) printf '%s' "${response}"; return 0 ;;
       esac
@@ -546,4 +579,20 @@ cat <<'REVIEW'
       -d '{"decision":"approve"}'
 REVIEW
 
-printf '\ndemo-quickstart: done\n'
+cat <<'WARNING'
+
+================================================================================
+ DEMO CREDENTIALS -- DO NOT DEPLOY THIS AS-IS ANYWHERE PUBLICLY REACHABLE
+================================================================================
+ This stack is now running with demo-only defaults committed to the six
+ repos: the gateway API_KEY / NODE_RED_API_KEY / IMPORT_API_KEY are all the
+ same public placeholder value, and closure.reviewer / demo.inspector1 are
+ demo identities with printed passwords. None of this is production
+ hardening (Vault, Keycloak, observability, replication are all still open
+ work) -- see docs/COMPLIANCE_INTEGRATION_RUNBOOK.md Sec.10 before this
+ instance is reachable by anyone you do not trust.
+================================================================================
+
+WARNING
+
+printf 'demo-quickstart: done\n'
