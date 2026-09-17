@@ -66,6 +66,13 @@ DEMO_HOST="${DEMO_HOST:-localhost}"
 POSTGRES_PIM_USER="$(grep -E '^POSTGRES_PIM_USER=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
 POSTGRES_PIM_DB="$(grep -E '^POSTGRES_PIM_DB=' "${REPO_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
 
+# compliance_import gates every route except /health with X-API-Key when IMPORT_API_KEY is set
+# (the shipped default) — the quickstart's own import calls below need to send it too, or a
+# correctly-hardened stack fails its own demo. Read once here; empty when auth is off (dev mode).
+IMPORT_API_KEY="$(grep -E '^IMPORT_API_KEY=' "${WORKSPACE_ROOT}/compliance_import/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"' | tr -d "'")"
+IMPORT_AUTH_HEADER=()
+[[ -n "${IMPORT_API_KEY}" ]] && IMPORT_AUTH_HEADER=(-H "X-API-Key: ${IMPORT_API_KEY}")
+
 CONFIRMED=0
 SKIP_METADATA=0
 SKIP_SEED=0
@@ -322,6 +329,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   ATS_PAYLOAD="$(stamp_payload demo_inspection_payload.zip)"
   RESP=$(curl -s -m 240 -X POST "http://${DEMO_HOST}:8000/inspection-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
+    "${IMPORT_AUTH_HEADER[@]}" \
     -F "file=@${ATS_PAYLOAD}")
   echo "    ${RESP}" | head -c 200; echo
   [[ "$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).status)}catch(e){console.log("")}})')" == "imported" ]] \
@@ -347,6 +355,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   MET_PAYLOAD="$(stamp_payload demo_met_inspection_payload.zip)"
   RESP=$(curl -s -m 240 -X POST "http://${DEMO_HOST}:8000/inspection-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
+    "${IMPORT_AUTH_HEADER[@]}" \
     -F "file=@${MET_PAYLOAD}")
   echo "    ${RESP}" | head -c 200; echo
   [[ "$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).status)}catch(e){console.log("")}})')" == "imported" ]] \
@@ -367,6 +376,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   FOLLOWUP_PAYLOAD="$(stamp_payload demo_followup_payload.zip)"
   RESP=$(curl -s -m 240 -X POST "http://${DEMO_HOST}:8000/followup-import" \
     -H "X-Alfresco-Ticket: ${TICKET}" \
+    "${IMPORT_AUTH_HEADER[@]}" \
     -F "file=@${FOLLOWUP_PAYLOAD}")
   echo "    ${RESP}" | head -c 220; echo
   FOLLOW_UP_FILE=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).followUpFilenames||[""])[0])}catch(e){}})')
