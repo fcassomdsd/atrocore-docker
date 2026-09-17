@@ -173,6 +173,12 @@ if [[ -n "${CALLER_ATROCORE_BASE_URL}" ]]; then
   export ATROCORE_BASE_URL="${CALLER_ATROCORE_BASE_URL}"
 fi
 
+# Node-RED gates every REST endpoint with X-API-Key when API_KEY is set (the shipped default) —
+# smoke-flows.mjs/audit-error-envelope.mjs already read it from this sourced .env, but this
+# script's own plain `curl` calls to :1880 (below) do not unless they carry the header too.
+FLOW_AUTH_HEADER=()
+[[ -n "${API_KEY:-}" ]] && FLOW_AUTH_HEADER=(-H "X-API-Key: ${API_KEY}")
+
 ticket() {
   curl -s -m 30 -X POST \
     "http://${DEMO_HOST}:8080/alfresco/api/-default-/public/authentication/versions/1/tickets" \
@@ -424,8 +430,9 @@ step "6. Verify"
 # check fails there without BASE. They already accept it from the environment.
 ( cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/smoke-flows.mjs ) | tail -1 || die "smoke harness failed"
 ( cd "${WORKSPACE_ROOT}/compliance_flow" && BASE="http://${DEMO_HOST}:1880" node scripts/audit-error-envelope.mjs --enforce ) | tail -1 || die "error-envelope audit failed"
-OPEN=$(curl -s -m 60 "http://${DEMO_HOST}:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS" \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).length)}catch(e){console.log("?")}})')
+OPEN_RESP=$(curl -s -m 60 "${FLOW_AUTH_HEADER[@]}" "http://${DEMO_HOST}:1880/findings/open?locationCode=ZZZZ&specialtyCode=ATS")
+OPEN=$(printf '%s' "${OPEN_RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).length)}catch(e){console.log("?")}})')
+[[ "${OPEN}" =~ ^[0-9]+$ ]] || die "findings/open did not return a list: $(printf '%s' "${OPEN_RESP}" | head -c 200)"
 ok "open demo findings: ${OPEN}"
 
 # A checklist item is dated by its nearest inspection ancestor, and the inspection window lives on
@@ -467,7 +474,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   retry_json() { # retry_json <attempts> <url>
     local attempt response=""
     for attempt in $(seq 1 "$1"); do
-      response=$(curl -s -m 180 "$2")
+      response=$(curl -s -m 180 "${FLOW_AUTH_HEADER[@]}" "$2")
       case "${response}" in
         *'"status": "success"'*|*'"status":"success"'*) printf '%s' "${response}"; return 0 ;;
       esac
