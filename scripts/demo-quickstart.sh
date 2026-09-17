@@ -246,11 +246,13 @@ if [[ "${SKIP_SEED}" == "0" ]]; then
   step "1. Seed the reference catalogs and the demo dataset (atrocore-docker)"
   ( cd "${REPO_DIR}" \
     && ./scripts/seed-usoap-vocabularies.sh --yes >/dev/null \
+    && ./scripts/seed-icao-reference-data.sh --yes >/dev/null \
     && ./scripts/seed-nomenclatura.sh --yes >/dev/null \
     && ./scripts/seed-demo-dataset.sh --yes >/dev/null ) \
     || die "seeding failed"
   ( cd "${REPO_DIR}" && docker compose exec -T -u www-data atro-web php "/var/www/${ATROCORE_DOMAIN}/console.php" clear cache >/dev/null 2>&1 ) || true
   ok "90 demo rows across 25 tables (airport ZZZZ, 2 providers, 3 inspectors, 3 inspections, 2 site visits, 9 questions + USOAP chain)"
+  ok "2,625 ICAO reference rows (15 Annex documents, 1,890 Annex paragraphs, 281 USOAP Protocol Questions, 439 citations)"
 else
   step "1. Seeding skipped"
 fi

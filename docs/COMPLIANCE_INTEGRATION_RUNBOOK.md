@@ -340,6 +340,7 @@ is the canonical guide for both profiles.
     docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
     docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
     ./scripts/seed-usoap-vocabularies.sh --yes   # required: the enums the catalog points at
+    ./scripts/seed-icao-reference-data.sh --yes  # required: ICAO Annex documents/paragraphs/PQs
     ./scripts/seed-nomenclatura.sh --yes         # spec_* / atype_* reference rows
     ./scripts/seed-demo-dataset.sh --yes         # the demo dataset
     # or: make bootstrap / make metadata-install / make db-seed-vocabularies YES=1 …
@@ -367,10 +368,21 @@ definitions reference the risk-level and USOAP extensible enums by hard-coded id
 AtroCore's extensible enums have no home in `metadata/`. Without it a fresh install
 resolves every risk level and USOAP Critical Element / area to nothing.
 
-Result: **90 rows across 25 tables** — one fictional airport, two service providers, three
-inspectors, **two site visits**, three inspections, the interview schedules the plan generator
-needs, a checklist catalog (three topics, nine questions) with its USOAP citation chain, and the
-per-inspection selections `/checklist` actually reads.
+`seed-icao-reference-data.sh` is likewise not demo data: it loads the real ICAO Annex
+documents, Annex paragraphs and USOAP Protocol Questions the citation chain
+(`ChecklistQuestion → Normativa → AcapiteOACI → UsoapProtocolQuestion`) is built on top of —
+without it, only the synthetic `PQ 99.x` chain the demo dataset itself creates exists, and
+`sql/seed-usoap-evidence-expectations.sql` (which resolves its rows' parent PQ by `code`)
+silently resolves every row to `NULL`. Unlike `Normativa` — a specific country's national
+regulation, which each adopting authority enters on its own — this catalog is ICAO-standard
+and belongs in every install: **15 Annex documents, 1,890 Annex paragraphs, 281 Protocol
+Questions, 439 citations.**
+
+Result: **90 demo rows across 25 tables**, plus **2,625 ICAO reference rows** — one fictional
+airport, two service providers, three inspectors, **two site visits**, three inspections, the
+interview schedules the plan generator needs, a checklist catalog (three topics, nine
+questions) with its USOAP citation chain, the per-inspection selections `/checklist` actually
+reads, and the full ICAO Annex/Protocol Question catalog underneath it.
 
 **The two visits exist because the demo walks two halves of the lifecycle that cannot share a
 date** (§7.4 — the payload dates are derived from the visit the inspection belongs to):

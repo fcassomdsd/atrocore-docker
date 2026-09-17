@@ -103,6 +103,7 @@ validate:fresh-install:
     - docker compose exec -T -u www-data atro-web php /var/www/localhost/console.php clear cache
     - docker compose exec -T -u www-data atro-web php /var/www/localhost/console.php sql diff --run
     - ./scripts/seed-usoap-vocabularies.sh --yes
+    - ./scripts/seed-icao-reference-data.sh --yes
     - ./scripts/seed-nomenclatura.sh --yes
     - ./scripts/seed-demo-dataset.sh --yes
     - |
@@ -127,6 +128,12 @@ validate:fresh-install:
       check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7
       # Tables that only exist if the recovered operational model was installed.
       check "select count(*) from information_schema.tables where table_schema='public' and table_name in ('service_area','site_visit','finding','corrective_action','documento_o_a_c_i')" "operational tables" 5
+      # The ICAO reference catalog (documents/paragraphs/protocol questions/citations) — real
+      # rows only, excluding the demo dataset's own demo-doc-a10v3 / demo-pq-* / demo-acapite-*.
+      check "select count(*) from documento_o_a_c_i where id not like 'demo-%'"                     "ICAO Annex documents"   15
+      check "select count(*) from acapite_o_a_c_i where id not like 'demo-%'"                        "ICAO Annex paragraphs"  1890
+      check "select count(*) from usoap_protocol_question where id not like 'demo-%'"                 "ICAO Protocol Questions" 281
+      check "select count(*) from usoap_protocol_question_acapite_o_a_c_i where id not like 'demo-%'" "ICAO PQ citations"      439
     - ./scripts/backup-db.sh
     - test -n "$(find db-dumps -maxdepth 1 -type f -name '*.dump' -size +0c | head -n 1)"
   after_script:
@@ -138,7 +145,7 @@ validate:fresh-install:
 
 # The live seed run now happens in `validate:fresh-install` above, which deletes
 # `web-data`/`db-data`, builds, installs the tracked model, syncs the schema and runs all
-# three seeds. This job stays as the fast, container-free companion: it validates the
+# four seeds. This job stays as the fast, container-free companion: it validates the
 # seed's invariants — additive-only (every DELETE scoped to demo- rows), no TRUNCATE,
 # every row id namespaced, the row count matching its documentation, `--remove` covering
 # every table the seed writes, and every extensible enum the tracked entity definitions
