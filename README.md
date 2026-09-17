@@ -24,7 +24,7 @@ Use this checklist if you are running the project for the first time:
    ./scripts/install-atrocore.sh --yes    # bootstraps web-data/, then installs (rebuilds the DB)
    ```
 
-6. Install the tracked metadata and create the schema — **on a clean clone the bootstrap inside step 5 is what first puts the application into `web-data/`** (that directory is bind-mounted over `/var/www`, so the copy baked into the image is hidden until it is copied out). The tracked model is complete, so this creates every operational table (`location`, `service_provider`, `site_visit`, `service_area`, `finding`, …):
+6. Install the tracked metadata and create the schema — **on a clean clone the bootstrap inside step 5 is what first installs the application into `web-data/`** (that directory is bind-mounted over `/var/www`, and the `atro-web` image contains no AtroCore application to begin with — it's installed directly into the bind-mounted directory, not baked into the image, so a pre-built copy of this image never carries AtroCore's GPL-3.0 source). The tracked model is complete, so this creates every operational table (`location`, `service_provider`, `site_visit`, `service_area`, `finding`, …):
 
    ```bash
    ./scripts/install-metadata.sh          # copies metadata/ into web-data/
@@ -300,12 +300,14 @@ AtroCore's live metadata lives under `web-data/<domain>/data/`, which is
 **gitignored and disposable** — CI recreates it from scratch on every run.
 Customisations therefore cannot be edited there and kept.
 
-`web-data/` is also a **bind mount** (`./web-data:/var/www/`), and a bind mount does
-not inherit the image's contents: the AtroCore application that `prepare-pim.sh`
-installs during the image build is hidden until something copies it out. On a clean
-clone that is `scripts/bootstrap-web-data.sh`, which `install-metadata.sh` runs for
-you when `web-data/<domain>/` is missing (`make bootstrap` runs it on its own).
-Without it, `atro-web` starts with a DocumentRoot that does not exist.
+`web-data/` is also a **bind mount** (`./web-data:/var/www/`), and the `atro-web` image
+contains no AtroCore application to begin with — it's installed directly into `web-data/`
+at first run (`scripts/bootstrap-web-data.sh`, which runs `prepare-pim.sh` inside a
+throwaway container against the bind-mounted directory) rather than baked into the image's
+build layers, specifically so a pre-built `atro-web` image never contains AtroCore's
+GPL-3.0 source. `install-metadata.sh` runs `bootstrap-web-data.sh` for you when
+`web-data/<domain>/` is missing (`make bootstrap` runs it on its own). Without it, `atro-web`
+starts with a DocumentRoot that does not exist.
 
 Instead, the version-controlled source of truth is:
 

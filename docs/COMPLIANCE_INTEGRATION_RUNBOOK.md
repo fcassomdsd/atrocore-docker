@@ -158,10 +158,11 @@ Quick check:
     curl -f http://localhost || echo "AtroCore web not ready yet"
 
 **Then install the application, then its metadata — neither is optional on a clean clone.**
-`./web-data` is bind-mounted over `/var/www/`, and a bind mount does not inherit the
-image's contents, so the AtroCore app that `prepare-pim.sh` installed during the build is
-invisible. `install-atrocore.sh` bootstraps the files out of the image and then completes
-AtroCore's own installation — the scaffold is not the installation: without it
+`./web-data` is bind-mounted over `/var/www/`, and the `atro-web` image contains no AtroCore
+application to shadow — it's installed directly into `web-data/` on first run, not baked
+into the image (see §7.2 for why). `install-atrocore.sh` installs the application files
+(via `bootstrap-web-data.sh`) and then completes AtroCore's own installation — the scaffold
+is not the installation: without it
 `'isInstalled' => false`, the `user` table is empty, `/api/v1/App/user` answers `500` and
 every consumer sees a broken AtroCore. `install-metadata.sh` then copies the tracked model
 and the schema is created:
@@ -346,13 +347,16 @@ is the canonical guide for both profiles.
     # or: make bootstrap / make metadata-install / make db-seed-vocabularies YES=1 …
 
 On a **clean clone the first command is doing two jobs.** `./web-data` is bind-mounted over
-`/var/www/`, and a bind mount does not inherit the image's contents, so the AtroCore app
-installed at image-build time is hidden: `atro-web` serves nothing and this script used to
-abort with "start the stack first so AtroCore creates web-data/", which the stack cannot do.
-`install-metadata.sh` now detects the missing `web-data/<domain>/` and calls
-`scripts/bootstrap-web-data.sh`, which copies the app out of the image; `sql diff --run`
-then creates the schema. Run `make bootstrap` (or the script directly) if you want that step
-on its own.
+`/var/www/`, and the `atro-web` image contains no AtroCore application at all — it's
+installed directly into `web-data/` at bootstrap time (`scripts/bootstrap-web-data.sh` runs
+`prepare-pim.sh`, the same install sequence the Dockerfile used to run at build time, inside
+a throwaway container against the bind-mounted directory), rather than baked into the
+image's build layers. This is deliberate: AtroCore's core packages are GPL-3.0-only, and
+installing them at build time would mean any pre-built copy of this image carried GPL-3.0
+source — installing at bootstrap time instead means the image itself never contains it, only
+the generic PHP+Apache base. `install-metadata.sh` detects the missing `web-data/<domain>/`
+and calls `scripts/bootstrap-web-data.sh` for you; `sql diff --run` then creates the schema.
+Run `make bootstrap` (or the script directly) if you want that step on its own.
 
 > **A clean clone needs no dump.** The whole operational model is tracked (all 32 entities with
 > their `clientDefs`, `scopes` and `layouts`), so `install-metadata.sh` + `sql diff --run` above
@@ -607,12 +611,14 @@ inspection ancestor and an item outside the period a report filters on simply di
   `followup-reports.json` **and** `prior-findings.json` (both bare arrays) plus a
   `FollowUpEvidence/` folder — not `Evidence/`, which is the inspection-import folder name.
 - Application role ≠ Alfresco permission (§7.3).
-- **A bind mount hides the image's contents.** `./web-data:/var/www/` shadows the AtroCore
-  app the image was built with, so a clean clone starts with an empty `/var/www`, no
-  DocumentRoot, and a metadata install that fails with advice the stack cannot satisfy.
+- **A bind mount hides the image's contents, and the image no longer has AtroCore in it
+  anyway.** `./web-data:/var/www/` means a clean clone starts with an empty `/var/www`, no
+  DocumentRoot, and a metadata install that fails with advice the stack cannot satisfy — this
+  was a named volume until commit `25affed`, which Docker *does* populate from the image.
   `scripts/bootstrap-web-data.sh` (run for you by `install-metadata.sh`, or `make bootstrap`)
-  copies the app out of the image; this was a named volume until commit `25affed`, which
-  Docker *does* populate from the image. (§5.1, §7.2.)
+  installs AtroCore directly into `web-data/` at first run instead of copying it out of the
+  image, since the image is deliberately built without AtroCore's GPL-3.0 source baked in.
+  (§5.1, §7.2.)
 - `/findings/open` is **search-backed** (AFTS/Solr), so it lags a few seconds behind a status
   change. Re-query before concluding a transition did not happen: the quickstart's final count read
   `0` immediately after a finding had moved to `Pending Closure Approval`, and `1` a moment later.
