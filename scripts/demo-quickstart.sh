@@ -128,6 +128,22 @@ probe "Node-RED"        "http://${DEMO_HOST}:1880/" "200 401"
 probe "import service"  "http://${DEMO_HOST}:8000/health" "200"
 probe "web backend"     "http://${DEMO_HOST}:4000/health" "200"
 
+# Alfresco's own readiness probe above can answer 200 while a dependency behind it is down:
+# a dead ActiveMQ does not fail anything synchronous, it makes specific operations (replanning
+# an existing document) hang indefinitely with no error (FOOTPRINT_AUDIT.md, 2026-09-15) — the
+# worst failure mode for an unattended install, because nothing surfaces and no timeout fires.
+# Check container health directly for the services whose failure mode is silent rather than a
+# clean HTTP error: Alfresco, Solr, ActiveMQ and the transform service.
+( cd "${WORKSPACE_ROOT}/compliance_cmis" \
+  && unhealthy="$(docker compose ps --format '{{.Name}} {{.Health}}' 2>/dev/null \
+       | awk '$1 ~ /-(alfresco|solr6|activemq|transform-core-aio)-[0-9]+$/ && $2 == "unhealthy" {print $1}')" \
+  && if [[ -n "${unhealthy}" ]]; then
+       echo "FAIL: unhealthy container(s): ${unhealthy}" >&2
+       exit 1
+     fi ) \
+  || die "one or more of Alfresco/Solr/ActiveMQ/transform-core-aio is unhealthy — check 'docker compose ps' and container logs in compliance_cmis before continuing (a dead ActiveMQ in particular will not fail cleanly later, it will hang)"
+ok "Alfresco/Solr/ActiveMQ/transform-core-aio container health checked"
+
 # compliance_flow/.env holds the *in-network* AtroCore address (`http://atro-web/api/v1`), which is
 # right for Node-RED and wrong for anything this script runs against the published port — the
 # install wizard in particular, which would then be told to reach a host it cannot resolve
@@ -544,4 +560,20 @@ cat <<'REVIEW'
       -d '{"decision":"approve"}'
 REVIEW
 
-printf '\ndemo-quickstart: done\n'
+cat <<'WARNING'
+
+================================================================================
+ DEMO CREDENTIALS -- DO NOT DEPLOY THIS AS-IS ANYWHERE PUBLICLY REACHABLE
+================================================================================
+ This stack is now running with demo-only defaults committed to the six
+ repos: the gateway API_KEY / NODE_RED_API_KEY / IMPORT_API_KEY are all the
+ same public placeholder value, and closure.reviewer / demo.inspector1 are
+ demo identities with printed passwords. None of this is production
+ hardening (Vault, Keycloak, observability, replication are all still open
+ work) -- see docs/COMPLIANCE_INTEGRATION_RUNBOOK.md Sec.10 before this
+ instance is reachable by anyone you do not trust.
+================================================================================
+
+WARNING
+
+printf 'demo-quickstart: done\n'
