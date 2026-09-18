@@ -6,6 +6,8 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+## [2026-09-18]
+
 ### Fixed
 
 - **`demo-quickstart.sh`'s verify step no longer hides which check actually failed.** The smoke harness and the error-envelope audit each print one `ok`/`FAIL`/`SKIP` line per check plus a summary — piping straight through `tail -1` kept only the summary, even on failure, so a CI log showing "14 passed, 1 failed" gave no way to tell which of the 15 checks broke. Found diagnosing a `demo:verify` failure that turned out to be a pre-existing, unrelated `/findings/open` search-index-lag flake (already documented in the runbook) — confirming that took reproducing the run locally, which shouldn't have been necessary. Both calls now print their full output on failure (and still just the summary on success).
