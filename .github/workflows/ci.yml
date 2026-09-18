@@ -4,15 +4,20 @@ name: CI
 # visibility (GitLab remains the source of truth for development — see CONTRIBUTING.md). Only
 # the correctness-signal jobs are mirrored here; release automation stays GitLab-only.
 #
-# demo:verify (the whole-platform demo guard) is deliberately NOT mirrored yet — it clones the
-# other five repositories as siblings, which first needs all of them mirrored to GitHub too.
-# It'll follow once that's in place.
+# demo-verify (below) clones the other five repositories as siblings from GitLab, not from
+# their own GitHub mirrors — GitHub's role here is visibility, not a second source of truth,
+# so this job proves "does the demo work on today's integration branches" the same way
+# GitLab's own demo:verify does, just running on GitHub's infrastructure.
 
 on:
   push:
     branches: [develop, main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Matches GitLab's demo:verify: never a merge gate, checked unattended on a schedule so it
+    # doesn't depend on someone remembering to press the button. Mondays, early UTC.
+    - cron: '17 6 * * 1'
 
 jobs:
   validate-metadata:
@@ -152,3 +157,62 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v || true
+
+  demo-verify:
+    # The whole-platform demo. validate-fresh-install above covers AtroCore and the three
+    # seeds; everything after that — identities, imports, the closure walkthrough, the
+    # oversight artifacts — needs the other five repositories side by side, which
+    # scripts/demo-verify-ci.sh assembles by cloning them (from GitLab, not their GitHub
+    # mirrors — GitHub's role here is visibility, not a second source of truth).
+    #
+    # Deliberately never a merge gate — it builds five projects and boots Alfresco, Solr,
+    # ActiveMQ, the transform service, Node-RED and two Node services, so it takes on the
+    # order of twenty minutes. Runs on workflow_dispatch (the button) or the weekly schedule
+    # above, matching GitLab's own demo:verify job design exactly.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      SKELETON_VARIANT: atrocore
+      BUILD_VARIANT: base
+      PRODUCTION_DOMAIN: localhost
+      PRODUCTION_STABILITY: stable
+      TESTING_DOMAIN: ''
+      TESTING_STABILITY: rc
+      POSTGRES_PASSWORD: ci_postgres_password
+      POSTGRES_PIM_USER: ci_user
+      POSTGRES_PIM_PASSWORD: ci_password
+      POSTGRES_PIM_DB: atrocore
+      POSTGRES_PIM_DB_TEST: ''
+      # demo-verify-ci.sh auto-sets DEMO_HOST=docker whenever $CI is set, unless DEMO_HOST is
+      # already set — that default is GitLab's dind service alias, which doesn't exist here.
+      # ubuntu-latest runs Docker natively on the same host, so published ports really are on
+      # localhost, same as a local (non-CI) run.
+      DEMO_HOST: localhost
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Write .env
+        run: |
+          cat > .env <<EOF
+          SKELETON_VARIANT=${SKELETON_VARIANT}
+          BUILD_VARIANT=${BUILD_VARIANT}
+          PRODUCTION_DOMAIN=${PRODUCTION_DOMAIN}
+          PRODUCTION_STABILITY=${PRODUCTION_STABILITY}
+          TESTING_DOMAIN=${TESTING_DOMAIN}
+          TESTING_STABILITY=${TESTING_STABILITY}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PIM_USER=${POSTGRES_PIM_USER}
+          POSTGRES_PIM_PASSWORD=${POSTGRES_PIM_PASSWORD}
+          POSTGRES_PIM_DB=${POSTGRES_PIM_DB}
+          POSTGRES_PIM_DB_TEST=${POSTGRES_PIM_DB_TEST}
+          EOF
+
+      - run: ./scripts/demo-verify-ci.sh
+
+      - name: Tear down
+        if: always()
+        run: ./scripts/demo-verify-ci.sh --teardown || true
