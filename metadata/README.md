@@ -25,7 +25,29 @@ The structure mirrors what AtroCore expects, so the mapping is one-to-one:
 | `entityDefs/*.json` | `web-data/<domain>/data/metadata/entityDefs/` |
 | `clientDefs/*.json` | `web-data/<domain>/data/metadata/clientDefs/` |
 | `scopes/*.json` | `web-data/<domain>/data/metadata/scopes/` |
-| `layouts/<Entity>/*.json` | `web-data/<domain>/data/layouts/<Entity>/` |
+| `layouts/<Entity>/*.json` | materialised into the `layout` DB table for the default profile (see below) |
+
+`install-metadata.sh` also *copies* `layouts/` to `web-data/<domain>/data/layouts/`, but
+**this AtroCore version never reads that directory** — `Atro\Core\LayoutManager` resolves a
+layout from the `layout` database table (per layout profile), then the core/module resource
+trees, and falls back to the entity type's default. `data/layouts/` is written only by the
+Entity Manager when it creates a new entity. The copy is therefore kept for reference and for
+`export-instance-metadata.py`, which reads it back — not because it drives the UI.
+
+To make the tracked layouts actually render, `scripts/install-layouts.sh` sends each
+`layouts/<Entity>/{list,detail,kanban,relationships}.json` to AtroCore itself:
+
+```
+PUT /api/v1/<Entity>/layout/<view>?layoutProfileId=default   (body = the layout JSON)
+```
+
+That uses AtroCore's own normaliser (`Layout::saveContent`, which writes `layout_list_item` /
+`layout_section` + `layout_row_item` / `layout_relationship_item`) instead of reimplementing
+the child-table mapping here. `listDashlet` files are deliberately not sent: that view type
+has no case in `saveContent`, so writing it would store an *empty* custom layout and hide
+AtroCore's own default. `scripts/install-layouts.sh` also seeds the default profile's
+navigation (`sql/seed-layout-profile.sql`) — the menu is what makes an entity reachable in
+the UI at all, and the stock installer's menu contains none of this platform's entities.
 
 The **whole operational model** is tracked here — all 32 entities with their
 `clientDefs`, `scopes` and `layouts` — not only the entities a recent change

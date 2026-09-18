@@ -1,4 +1,4 @@
-.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao metadata-install metadata-export metadata-drift db-seed-nomenclatura
+.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao metadata-install metadata-export metadata-drift db-seed-nomenclatura install-layouts
 
 help:
 	@echo "Available targets:"
@@ -25,9 +25,12 @@ help:
 	@echo "  make metadata-export           Copy the instance's metadata back into metadata/"
 	@echo "                                (for an entity edited through the admin UI)"
 	@echo "  make db-seed-nomenclatura [DB=...] YES=1"
-	@echo "                                Seed Specialty/ActivityType catalogs (destructive)"
+	@echo "                                Seed Specialty/ActivityType/FindingSeverity catalogs"
+	@echo "  make install-layouts YES=1"
+	@echo "                                Seed the default layout profile's menu and materialise"
+	@echo "                                metadata/layouts/ into it (needs the stack up)"
 	@echo ""
-	@echo "Quickstart order: up -> metadata-install -> db-seed-vocabularies -> db-seed-icao -> db-seed-nomenclatura -> db-seed-demo"
+	@echo "Quickstart order: up -> metadata-install -> db-seed-vocabularies -> db-seed-icao -> db-seed-nomenclatura -> db-seed-demo -> install-layouts"
 	@echo "(metadata-install bootstraps web-data/ itself when it is empty)"
 
 up:
@@ -61,6 +64,13 @@ metadata-drift:
 
 metadata-export:
 	./scripts/export-instance-metadata.py
+
+install-layouts:
+	@if [ "$(YES)" != "1" ]; then \
+		echo "Usage: make install-layouts YES=1"; \
+		exit 1; \
+	fi
+	./scripts/install-layouts.sh --yes
 
 db-seed-nomenclatura:
 	@if [ "$(YES)" != "1" ]; then \
