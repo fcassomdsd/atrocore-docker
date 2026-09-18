@@ -4,8 +4,10 @@
 -- Brings the controlled vocabularies in line with the client's new
 -- abbreviation/code standard:
 --
---   * public.specialty     -> flat catalog of 16 codes, no domain grouping
---   * public.activity_type -> new 5-row oversight-activity-type catalog
+--   * public.specialty         -> flat catalog of 16 codes, no domain grouping
+--   * public.activity_type     -> new 5-row oversight-activity-type catalog
+--   * public.finding_severity  -> 3-row A/B/C catalog (7/30/90 days), read live
+--                                 by compliance_web to derive finding deadlines
 --
 -- WHY A SCRIPT AND NOT A DUMP EDIT
 -- --------------------------------
@@ -250,6 +252,39 @@ BEGIN
 END
 $$;
 
+-- ---------------------------------------------------------------------------
+-- Finding-severity reference catalog (A/B/C)
+--
+-- compliance_web's server/findings/severityDeadlines.cjs queries this entity
+-- live to derive a finding's submission and resolution deadlines, and throws
+-- when there is no record for the severity. The day counts match the field
+-- app's own configuration (compliance_checklist/app.config.json: A=7, B=30,
+-- C=90 days to solution), so the two ends agree on the baseline.
+--
+-- daysToSubmission has no authoritative source in the platform yet -- the
+-- field app only ever modelled daysToSolution -- so it is seeded equal to the
+-- solution window as an editable placeholder. Change it to the authority's CAP
+-- submission rule; the web service reads whatever is in the table.
+--
+-- Upsert, deliberately not delete-and-insert: unlike Specialty/ActivityType,
+-- an administrator may have tuned these values, and re-running this script
+-- must not wipe them.
+-- ---------------------------------------------------------------------------
+INSERT INTO public.finding_severity (
+    id, name, description, days_to_solution, days_to_submission,
+    deleted, created_at, modified_at, created_by_id, modified_by_id
+)
+VALUES
+    ('severity_a', 'A', 'Severity A', 7,  7,  false, NOW(), NOW(), '1', '1'),
+    ('severity_b', 'B', 'Severity B', 30, 30, false, NOW(), NOW(), '1', '1'),
+    ('severity_c', 'C', 'Severity C', 90, 90, false, NOW(), NOW(), '1', '1')
+ON CONFLICT (id) DO UPDATE
+    SET name             = EXCLUDED.name,
+        description      = EXCLUDED.description,
+        days_to_solution = EXCLUDED.days_to_solution,
+        days_to_submission = EXCLUDED.days_to_submission,
+        modified_at      = NOW();
+
 COMMIT;
 
-\echo 'Nomenclatura catalog seeded: 16 specialties, 5 activity types.'
+\echo 'Nomenclatura catalog seeded: 16 specialties, 5 activity types, 3 finding severities (A/B/C).'

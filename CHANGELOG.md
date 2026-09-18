@@ -6,6 +6,10 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Added
+
+- **The Nomenclatura seed now also populates `FindingSeverity` (A/B/C).** `compliance_web`'s `server/findings/severityDeadlines.cjs` queries this entity live to derive a finding's submission and resolution deadlines, and throws when the severity has no record — so on a fresh install the review action could not set a severity at all. The day counts match the field app's `app.config.json` (A=7, B=30, C=90 to solution). `daysToSubmission` has no authoritative source in the platform yet, so it is seeded equal to the solution window as a documented, editable placeholder. Unlike Specialty/ActivityType this is an upsert, not a replace, so an administrator's tuned values survive a re-run.
+
 ### Changed
 
 - **The tracked model now reflects the instance's link cleanup: the unused entity cluster is disconnected.** `ActingInspector`, `Finding`, `CorrectiveAction`, `CorrectiveActionPlan` and `CorrectiveActionFollowUp` had their relations removed on the running instance — `Inspector.actingInspectors`, `Finding.{correctiveActions,inspectedService,inspectionQuestions}`, `CorrectiveAction.{correctiveActionFollowUps,correctiveActionPlan,findings}`, `CorrectiveActionPlan.{correctiveActions,inspectedServcies}`, `CorrectiveActionFollowUp.correctiveAction`, `InspectedService.{correctiveActionPlan,findings}` and `InspectionQuestion.findings` — and `sql diff --run` dropped the corresponding columns. The entity definitions remain (so the tables and, where relevant, the framework fields stay), but nothing links to or from them. Captured with `make metadata-export`; `make metadata-drift` is clean again. **Note:** the definitions are still `entity: true, tab: true, disabled: false`, so they remain visible in the AtroCore UI until a navigation/layout decision says otherwise.

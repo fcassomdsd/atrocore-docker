@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Seed the Nomenclatura reference catalogs (Specialty, ActivityType) into the
-# running AtroCore database.
+# Seed the reference catalogs (Specialty, ActivityType, FindingSeverity) into
+# the running AtroCore database.
 #
 # Run this AFTER `docker compose up -d` and after AtroCore has applied the
 # schema from web-data/<domain>/data/metadata/:
@@ -10,10 +10,11 @@
 #   docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
 #   docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
 #
-# That is what creates the `activity_type` table and the `activity_type_id`
-# columns; this script only fills in the rows.
+# That is what creates the `activity_type` and `finding_severity` tables and the
+# `activity_type_id` columns; this script only fills in the rows.
 #
-# DESTRUCTIVE: replaces every row in `specialty` and `activity_type`.
+# DESTRUCTIVE for `specialty` and `activity_type` (rows are replaced). FindingSeverity
+# is upserted instead, so an administrator's tuned day counts are preserved.
 #
 # Usage: scripts/seed-nomenclatura.sh [target-db] --yes
 
