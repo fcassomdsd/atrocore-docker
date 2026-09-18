@@ -220,6 +220,35 @@ is seeded as `Planned`, because `/siteVisits` hides visits that are still
 `sql/seed-demo-dataset.sql` carries the full rationale. **Never put a real
 authority's data in it** — see the P0 finding in `TECHNICAL_DEBT_ANALYSIS.md`.
 
+### Starter authority dataset (placeholders for your own data)
+
+The demo dataset above is synthetic and is not what a real deployment wants. For that,
+`sql/seed-starter-dataset.sql` ships a minimal, coherent set of **placeholder** authority
+records — one service area, provider, contact, inspector (+ specialty), location service,
+assignment group, inspection cadence, regulation and two articles — so you can see how the
+entities relate, then edit them into your own data.
+
+```bash
+./scripts/seed-nomenclatura.sh --yes                # spec_* / atype_* the starter rows reference
+./scripts/seed-starter-dataset.sh --yes             # 12 placeholder rows across 11 tables
+# or: make db-seed-starter YES=1
+
+./scripts/seed-starter-dataset.sh --remove --yes    # delete every starter- row
+```
+
+Every id starts with `starter-` and every display name says "(editar)". The seed is additive
+and uses `ON CONFLICT DO NOTHING`, so re-running it never overwrites a value you have edited,
+and it never touches a non-`starter-` row. Use it **instead of** the demo dataset, not
+together with it. It creates no site visits or inspections — plan those once your catalogs
+hold real data.
+
+### Layouts
+
+`metadata/layouts/` drives the admin UI only once it is written into a layout profile:
+`./scripts/install-layouts.sh --yes` (`make install-layouts YES=1`) seeds the profile's menu
+and materialises every tracked layout. Run it after the seeds; `demo-quickstart.sh` does it
+for you.
+
 **Required before the demo dataset: `scripts/seed-usoap-vocabularies.sh`.** `ChecklistQuestion.riskLevel`,
 `UsoapProtocolQuestion.criticalElement`/`areaCode` and `InspectionQuestion.compliance` are `extensibleEnum`
 fields whose vocabularies the tracked entity definitions reference **by hard-coded id**, and AtroCore's
