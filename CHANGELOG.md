@@ -6,6 +6,11 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Documentation
+
+- **README's CI section now describes the jobs that actually exist.** It still listed `blank_instance_check` (replaced by the merge-gated `validate:fresh-install`), said "three validation jobs" (there are four, `demo:verify` included), and quoted the demo dataset as "73 rows" (it is 90, which `scripts/validate-seeds.py` enforces). The note below it, which explained why the seed could not run in CI, is also superseded — `validate:fresh-install` bootstraps the application and runs all four seeds on an empty database.
+- **`scripts/demo-quickstart.sh`'s header no longer calls `metadata/` a "partial overlay".** The tree is the whole operational model (32 entities with client definitions, scopes and layouts); the old wording dated from before it was recovered. The `.gitlab-ci.yml` comment above `demo:verify` says "four seeds", not three.
+
 ## [2026-09-18]
 
 ### Fixed
