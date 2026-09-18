@@ -41,12 +41,19 @@ To make the tracked layouts actually render, `scripts/install-layouts.sh` sends 
 PUT /api/v1/<Entity>/layout/<view>?layoutProfileId=default   (body = the layout JSON)
 ```
 
+Layouts scoped to a related entity (the panel shown when viewing a parent record, e.g.
+`Inspector` inside `Specialty.inspectors`) are stored as
+`<Entity>/<view>In<RelatedEntity>For<Ucfirst(link)>.json` — the name AtroCore's own
+`LayoutManager::getLayoutFromFiles` looks for — and sent with an extra
+`&relatedScope=<RelatedEntity>.<link>` argument.
+
 That uses AtroCore's own normaliser (`Layout::saveContent`, which writes `layout_list_item` /
 `layout_section` + `layout_row_item` / `layout_relationship_item`) instead of reimplementing
-the child-table mapping here. `listDashlet` files are deliberately not sent: that view type
-has no case in `saveContent`, so writing it would store an *empty* custom layout and hide
-AtroCore's own default. `scripts/install-layouts.sh` also seeds the default profile's
-navigation (`sql/seed-layout-profile.sql`) — the menu is what makes an entity reachable in
+the child-table mapping here. The recovered `listDashlet` files were removed: that view type is
+referenced nowhere in this AtroCore version and `saveContent` has no case for it, so
+materialising one would store an *empty* custom layout and hide AtroCore's own default.
+`scripts/install-layouts.sh` also seeds the default profile's navigation
+(`sql/seed-layout-profile.sql`) — the menu is what makes an entity reachable in
 the UI at all, and the stock installer's menu contains none of this platform's entities.
 
 The **whole operational model** is tracked here — all 32 entities with their

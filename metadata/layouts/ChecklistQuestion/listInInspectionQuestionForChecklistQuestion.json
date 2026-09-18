@@ -1,0 +1,25 @@
+[
+  {
+    "name": "inspectionQuestions",
+    "notSortable": true
+  },
+  {
+    "name": "code",
+    "link": true
+  },
+  {
+    "name": "activo"
+  },
+  {
+    "name": "specialty"
+  },
+  {
+    "name": "topic"
+  },
+  {
+    "name": "sequence"
+  },
+  {
+    "name": "texto"
+  }
+]

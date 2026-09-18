@@ -257,14 +257,13 @@ $$;
 --
 -- compliance_web's server/findings/severityDeadlines.cjs queries this entity
 -- live to derive a finding's submission and resolution deadlines, and throws
--- when there is no record for the severity. The day counts match the field
--- app's own configuration (compliance_checklist/app.config.json: A=7, B=30,
--- C=90 days to solution), so the two ends agree on the baseline.
+-- when there is no record for the severity.
 --
--- daysToSubmission has no authoritative source in the platform yet -- the
--- field app only ever modelled daysToSolution -- so it is seeded equal to the
--- solution window as an editable placeholder. Change it to the authority's CAP
--- submission rule; the web service reads whatever is in the table.
+-- The day counts are the authority's own, taken from the reference
+-- Dominican-Republic deployment: A = 7 days to solution / 3 to submit,
+-- B = 30 / 15, C = 90 / 30. days_to_solution also matches the field app's
+-- configuration (compliance_checklist/app.config.json: 7/30/90), so the two
+-- ends agree on the baseline.
 --
 -- Upsert, deliberately not delete-and-insert: unlike Specialty/ActivityType,
 -- an administrator may have tuned these values, and re-running this script
@@ -275,9 +274,9 @@ INSERT INTO public.finding_severity (
     deleted, created_at, modified_at, created_by_id, modified_by_id
 )
 VALUES
-    ('severity_a', 'A', 'Severity A', 7,  7,  false, NOW(), NOW(), '1', '1'),
-    ('severity_b', 'B', 'Severity B', 30, 30, false, NOW(), NOW(), '1', '1'),
-    ('severity_c', 'C', 'Severity C', 90, 90, false, NOW(), NOW(), '1', '1')
+    ('severity_a', 'A', 'Severity A', 7,  3,  false, NOW(), NOW(), '1', '1'),
+    ('severity_b', 'B', 'Severity B', 30, 15, false, NOW(), NOW(), '1', '1'),
+    ('severity_c', 'C', 'Severity C', 90, 30, false, NOW(), NOW(), '1', '1')
 ON CONFLICT (id) DO UPDATE
     SET name             = EXCLUDED.name,
         description      = EXCLUDED.description,

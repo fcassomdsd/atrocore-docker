@@ -20,9 +20,10 @@
 # directly, so the table mapping stays owned by AtroCore.
 #
 # Only view types Layout::saveContent can persist are sent: list, detail, kanban,
-# relationships. `listDashlet` is skipped deliberately -- it has no case in
-# saveContent, so writing it would create an EMPTY custom layout and hide the
-# default; leaving it absent keeps AtroCore's own fallback for that view.
+# relationships. The metadata/ layouts also carried `listDashlet` files, but that
+# view type is not referenced anywhere in this AtroCore version and saveContent has
+# no case for it -- writing it would store an EMPTY custom layout and hide the
+# default -- so those files were removed rather than materialised.
 #
 # PREREQUISITES: stack up, AtroCore installed, schema applied
 # (install-metadata.sh + console.php clear cache + sql diff --run).
@@ -127,10 +128,15 @@ fi
 
 # ------------------------------------------------------- 3. materialise files
 apply_view() {
-  local entity="$1" view="$2" file="$3"
+  local entity="$1" view="$2" file="$3" related_scope="${4:-}"
   local url="${API_BASE}/${entity}/layout/${view}?layoutProfileId=${PROFILE_ID}"
+  local label="${entity}/${view}"
+  if [[ -n "${related_scope}" ]]; then
+    url="${url}&relatedScope=${related_scope}"
+    label="${entity}/${view} (${related_scope})"
+  fi
   if [[ "${DRY_RUN}" == "1" ]]; then
-    printf '  [dry-run] PUT %s (%s/%s.json)\n' "${url}" "${entity}" "${view}"
+    printf '  [dry-run] PUT %s\n' "${url}"
     return 0
   fi
   local status
@@ -143,28 +149,45 @@ apply_view() {
     -H 'Content-Type: application/json' \
     --data-binary "@${file}" "${url}")"
   if [[ "${status}" != "200" && "${status}" != "204" ]]; then
-    echo "Error: PUT ${entity}/layout/${view} returned HTTP ${status}." >&2
+    echo "Error: PUT ${label} returned HTTP ${status}." >&2
     exit 1
   fi
-  printf '  %s/%s\n' "${entity}" "${view}"
+  printf '  %s\n' "${label}"
 }
 
 echo "Materialising tracked layouts into profile '${PROFILE_ID}'..."
 applied=0
-skipped=0
 for entity_dir in "${LAYOUTS_DIR}"/*/; do
   [[ -d "${entity_dir}" ]] || continue
   entity="$(basename "${entity_dir}")"
-  for view in list detail kanban relationships; do
-    file="${entity_dir%/}/${view}.json"
-    if [[ -f "${file}" ]]; then
-      apply_view "${entity}" "${view}" "${file}"
-      applied=$((applied + 1))
-    fi
+  for file in "${entity_dir%/}"/*.json; do
+    [[ -f "${file}" ]] || continue
+    base="$(basename "${file}" .json)"
+    related_scope=""
+    case "${base}" in
+      list|detail|kanban|relationships)
+        view="${base}"
+        ;;
+      # Related-scope layout, named the way LayoutManager::getLayoutFromFiles looks for it:
+      # <view>In<RelatedEntity>For<Ucfirst(link)>. Recover the link's real case (link names
+      # are camelCase, so only the first letter was upper-cased) and pass it as relatedScope,
+      # which the API splits into relatedEntity/relatedLink.
+      listIn*For*|detailIn*For*)
+        view="${base%%In*}"
+        rest="${base#*In}"
+        rel_entity="${rest%%For*}"
+        link_cap="${rest#*For}"
+        link="$(printf '%s' "${link_cap:0:1}" | tr '[:upper:]' '[:lower:]')${link_cap:1}"
+        related_scope="${rel_entity}.${link}"
+        ;;
+      *)
+        echo "  skipping unrecognised layout file ${entity}/${base}.json" >&2
+        continue
+        ;;
+    esac
+    apply_view "${entity}" "${view}" "${file}" "${related_scope}"
+    applied=$((applied + 1))
   done
-  if [[ -f "${entity_dir%/}/listDashlet.json" ]]; then
-    skipped=$((skipped + 1))
-  fi
 done
 
-echo "Layouts installed: ${applied} file(s) into profile '${PROFILE_ID}'; ${skipped} listDashlet file(s) skipped (not persistable by AtroCore's Layout::saveContent)."
+echo "Layouts installed: ${applied} file(s) into profile '${PROFILE_ID}'."
