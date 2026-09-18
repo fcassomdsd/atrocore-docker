@@ -406,13 +406,14 @@ Main targets:
 
 ## CI Validation (GitLab)
 
-The CI pipeline (`.gitlab-ci.yml`) includes three validation jobs:
+The CI pipeline (`.gitlab-ci.yml`) includes four validation jobs:
 
 - `validate:metadata`: runs `scripts/validate-metadata.py` over the tracked `metadata/` tree (no containers needed).
-- `validate:seed`: runs `scripts/validate-seeds.py`, which checks the demo dataset is additive-only (every `DELETE` scoped to `demo-` rows), has no `TRUNCATE`, namespaces every row id, still totals the documented 73 rows, and that `--remove` covers every table the seed writes. It also cross-checks `sql/seed-usoap-vocabularies.sql` against the extensible-enum ids the tracked entity definitions reference — AtroCore's enums have no home in `metadata/`, so that id contract is the only thing tying them together. Fast and container-free.
-- `blank_instance_check`: starts services, verifies DB access, and validates backup creation.
+- `validate:seed`: runs `scripts/validate-seeds.py`, which checks the demo dataset is additive-only (every `DELETE` scoped to `demo-` rows), has no `TRUNCATE`, namespaces every row id, still totals the documented 90 rows, and that `--remove` covers every table the seed writes. It also cross-checks `sql/seed-usoap-vocabularies.sql` against the extensible-enum ids the tracked entity definitions reference — AtroCore's enums have no home in `metadata/`, so that id contract is the only thing tying them together. Fast and container-free.
+- `validate:fresh-install`: merge-gated. Deletes `web-data/` and `db-data/`, builds, bootstraps the application out of the image, installs the tracked model, runs `clear cache` + `sql diff --run`, runs all four seeds, and asserts the resulting schema and seeded rows.
+- `demo:verify`: the whole-stack guard. Clones the five sibling repositories, brings all six services up and runs `scripts/demo-quickstart.sh --yes`. **Manual/scheduled, deliberately never a merge gate** — it builds five projects and boots Alfresco, Solr, ActiveMQ, the transform service, Node-RED and two Node services.
 
-> The demo seed is **applied** locally and in the quickstart, not in CI: the `atro-web` image built by this pipeline starts Apache with a DocumentRoot that does not exist (the AtroCore application is never installed), so its schema never appears and there is nothing to seed. That is why the old `demo_seed_check` job skipped itself on every run.
+> `validate:seed` is container-free: it validates the seed SQL's invariants without running it. The seed itself is applied by `validate:fresh-install` (a merge gate) on an empty database, and by `scripts/demo-quickstart.sh` / `demo:verify` locally and in the whole-stack guard. The old `blank_instance_check` / `demo_seed_check` jobs it replaced asserted only that PostgreSQL answered and a dump could be written.
 
 Common CI variables you can override:
 
