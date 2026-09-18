@@ -31,6 +31,9 @@
 --   * ActingInspector — disconnected (its links were removed).
 --   * Tag — not enabled in the UI yet.
 -- FindingSeverity *is* included: compliance_web reads it live for deadline maths.
+-- InspectedProvider / InspectedService / InspectedSpecialty *are* included: they are
+-- the per-provider inspection records the planning flow creates and the UI works with,
+-- not Alfresco-stored and not unused.
 --
 -- IDEMPOTENT: INSERT ... ON CONFLICT (id) DO UPDATE. It intentionally does not
 -- force `is_default` on an existing profile, so an administrator who promotes a
@@ -63,7 +66,7 @@ VALUES (
     true,
     false,
     $nav$[
-  {"name": "vigilancia", "label": "Vigilancia", "items": ["SiteVisit", "Inspection", "InspectionSchedule", "InspectionCadence", "ServiceArea", "AssignmentGroup"]},
+  {"name": "vigilancia", "label": "Vigilancia", "items": ["SiteVisit", "Inspection", "InspectedProvider", "InspectedService", "InspectedSpecialty", "InspectionSchedule", "InspectionCadence", "ServiceArea", "AssignmentGroup"]},
   {"name": "entidades-reguladas", "label": "Entidades reguladas", "items": ["ServiceProvider", "Location", "LocationService", "Person"]},
   {"name": "recursos", "label": "Recursos", "items": ["Inspector"]},
   {"name": "cumplimiento", "label": "Cumplimiento (USOAP)", "items": ["Reglamento", "Normativa", "DocumentoOACI", "AcapiteOACI", "UsoapProtocolQuestion", "UsoapEvidenceExpectation"]},
@@ -92,4 +95,4 @@ UPDATE public."user"
 
 COMMIT;
 
-\echo 'Default layout profile seeded: platform menu with 29 entities in 7 groups.'
+\echo 'Default layout profile seeded: 26 platform entities in 7 groups (all 32 except the 6 deliberately omitted).'

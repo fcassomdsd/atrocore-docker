@@ -20,8 +20,8 @@
 --   * Specialty, ActivityType, FindingSeverity and the USOAP vocabularies — those are
 --     real reference catalogs, not authority data; they are seeded by
 --     seed-nomenclatura.sh / seed-usoap-vocabularies.sh.
---   * SiteVisit / Inspection / InspectedProvider* — per-visit operational records
---     created by planning, not seeded.
+--   * SiteVisit / Inspection / InspectedProvider* — used per-visit operational records
+--     that the planning flow creates and the navigation exposes, not seeded.
 --   * Finding / CorrectiveAction* — those live in Alfresco.
 --   * Tag — not enabled in the UI yet.
 --
