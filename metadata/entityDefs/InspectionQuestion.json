@@ -71,14 +71,6 @@
             "dropdown": false,
             "readOnly": false
         },
-        "findings": {
-            "type": "linkMultiple",
-            "noLoad": true,
-            "layoutDetailDisabled": true,
-            "massUpdateDisabled": true,
-            "isCustom": true,
-            "foreignName": "findingCode"
-        },
         "code": {
             "tooltip": false,
             "type": "varchar",
@@ -145,12 +137,6 @@
             "type": "belongsTo",
             "foreign": "inspectionQuestions",
             "entity": "ChecklistQuestion"
-        },
-        "findings": {
-            "type": "hasMany",
-            "foreign": "inspectionQuestions",
-            "relationName": "FindingInspectionQuestion",
-            "entity": "Finding"
         },
         "inspectedSpecialty": {
             "type": "belongsTo",

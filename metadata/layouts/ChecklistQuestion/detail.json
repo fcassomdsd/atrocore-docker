@@ -4,7 +4,98 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "code"
+        },
+        {
+          "name": "activo"
+        }
+      ],
+      [
+        {
+          "name": "specialty"
+        },
+        {
+          "name": "topic"
+        }
+      ],
+      [
+        {
+          "name": "sequence"
+        },
+        {
+          "name": "fechaVigencia"
+        }
+      ],
+      [
+        {
+          "name": "references"
+        },
+        {
+          "name": "riskLevel"
+        }
+      ],
+      [
+        {
+          "name": "texto",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "verification",
+          "fullWidth": true
+        },
+        false
+      ]
+    ]
+  },
+  {
+    "label": "Details",
+    "rows": [
+      [
+        {
+          "name": "code"
+        },
+        {
+          "name": "activo"
+        }
+      ],
+      [
+        {
+          "name": "specialty"
+        },
+        {
+          "name": "topic"
+        }
+      ],
+      [
+        {
+          "name": "sequence"
+        },
+        {
+          "name": "fechaVigencia"
+        }
+      ],
+      [
+        {
+          "name": "references"
+        },
+        {
+          "name": "riskLevel"
+        }
+      ],
+      [
+        {
+          "name": "texto",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "verification",
+          "fullWidth": true
         },
         false
       ]

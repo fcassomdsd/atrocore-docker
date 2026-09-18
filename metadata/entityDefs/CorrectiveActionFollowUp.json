@@ -17,16 +17,6 @@
             "type": "datetime",
             "readOnly": true
         },
-        "createdBy": {
-            "type": "link",
-            "readOnly": true,
-            "view": "views/fields/user"
-        },
-        "modifiedBy": {
-            "type": "link",
-            "readOnly": true,
-            "view": "views/fields/user"
-        },
         "followUpDate": {
             "tooltip": false,
             "type": "date",
@@ -86,33 +76,6 @@
             "unique": false,
             "index": false,
             "isMultilang": false
-        },
-        "correctiveAction": {
-            "tooltip": false,
-            "type": "link",
-            "auditableEnabled": false,
-            "auditableDisabled": false,
-            "isCustom": true,
-            "modifiedExtendedDisabled": false,
-            "foreignName": "id",
-            "required": false,
-            "dropdown": false,
-            "readOnly": false
-        }
-    },
-    "links": {
-        "createdBy": {
-            "type": "belongsTo",
-            "entity": "User"
-        },
-        "modifiedBy": {
-            "type": "belongsTo",
-            "entity": "User"
-        },
-        "correctiveAction": {
-            "type": "belongsTo",
-            "foreign": "correctiveActionFollowUps",
-            "entity": "CorrectiveAction"
         }
     },
     "indexes": {

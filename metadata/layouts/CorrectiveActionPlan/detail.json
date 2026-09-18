@@ -4,7 +4,24 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "code"
+        },
+        {
+          "name": "description"
+        }
+      ],
+      [
+        {
+          "name": "issueDate"
+        },
+        {
+          "name": "acceptanceDate"
+        }
+      ],
+      [
+        {
+          "name": "comments",
+          "fullWidth": true
         },
         false
       ]

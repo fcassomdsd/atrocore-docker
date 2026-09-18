@@ -123,6 +123,7 @@ jobs:
       - run: ./scripts/seed-icao-reference-data.sh --yes
       - run: ./scripts/seed-nomenclatura.sh --yes
       - run: ./scripts/seed-demo-dataset.sh --yes
+      - run: ./scripts/install-layouts.sh --yes
 
       - name: Assert the application is actually installed
         run: |
@@ -150,6 +151,9 @@ jobs:
           check "select count(*) from acapite_o_a_c_i where id not like 'demo-%'"                        "ICAO Annex paragraphs"  1890
           check "select count(*) from usoap_protocol_question where id not like 'demo-%'"                 "ICAO Protocol Questions" 281
           check "select count(*) from usoap_protocol_question_acapite_o_a_c_i where id not like 'demo-%'" "ICAO PQ citations"      439
+          # The default layout profile and the layouts scripts/install-layouts.sh materialises into it.
+          check "select count(*) from layout where layout_profile_id='default' and deleted=false" "materialised layouts" 114
+          check "select jsonb_array_length(navigation::jsonb) from layout_profile where id='default'" "default profile groups" 7
 
       - run: ./scripts/backup-db.sh
       - run: test -n "$(find db-dumps -maxdepth 1 -type f -name '*.dump' -size +0c | head -n 1)"

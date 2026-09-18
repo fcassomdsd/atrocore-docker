@@ -1,5 +1,8 @@
 [
   {
+    "name": "inspection"
+  },
+  {
     "name": "name",
     "link": true
   }

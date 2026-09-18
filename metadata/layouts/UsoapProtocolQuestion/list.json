@@ -1,6 +1,13 @@
 [
   {
-    "name": "name",
-    "link": true
+    "name": "code"
+  },
+  {
+    "name": "areaCode",
+    "notSortable": true
+  },
+  {
+    "name": "criticalElement",
+    "notSortable": true
   }
 ]

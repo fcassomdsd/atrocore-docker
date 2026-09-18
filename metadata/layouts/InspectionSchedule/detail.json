@@ -4,9 +4,33 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "inspection",
+          "fullWidth": true
         },
         false
+      ],
+      [
+        {
+          "name": "name",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "place"
+        },
+        {
+          "name": "serviceArea"
+        }
+      ],
+      [
+        {
+          "name": "startDateTime"
+        },
+        {
+          "name": "endDateTime"
+        }
       ]
     ]
   }

@@ -25,7 +25,29 @@ The structure mirrors what AtroCore expects, so the mapping is one-to-one:
 | `entityDefs/*.json` | `web-data/<domain>/data/metadata/entityDefs/` |
 | `clientDefs/*.json` | `web-data/<domain>/data/metadata/clientDefs/` |
 | `scopes/*.json` | `web-data/<domain>/data/metadata/scopes/` |
-| `layouts/<Entity>/*.json` | `web-data/<domain>/data/layouts/<Entity>/` |
+| `layouts/<Entity>/*.json` | materialised into the `layout` DB table for the default profile (see below) |
+
+`install-metadata.sh` also *copies* `layouts/` to `web-data/<domain>/data/layouts/`, but
+**this AtroCore version never reads that directory** — `Atro\Core\LayoutManager` resolves a
+layout from the `layout` database table (per layout profile), then the core/module resource
+trees, and falls back to the entity type's default. `data/layouts/` is written only by the
+Entity Manager when it creates a new entity. The copy is therefore kept for reference and for
+`export-instance-metadata.py`, which reads it back — not because it drives the UI.
+
+To make the tracked layouts actually render, `scripts/install-layouts.sh` sends each
+`layouts/<Entity>/{list,detail,kanban,relationships}.json` to AtroCore itself:
+
+```
+PUT /api/v1/<Entity>/layout/<view>?layoutProfileId=default   (body = the layout JSON)
+```
+
+That uses AtroCore's own normaliser (`Layout::saveContent`, which writes `layout_list_item` /
+`layout_section` + `layout_row_item` / `layout_relationship_item`) instead of reimplementing
+the child-table mapping here. `listDashlet` files are deliberately not sent: that view type
+has no case in `saveContent`, so writing it would store an *empty* custom layout and hide
+AtroCore's own default. `scripts/install-layouts.sh` also seeds the default profile's
+navigation (`sql/seed-layout-profile.sql`) — the menu is what makes an entity reachable in
+the UI at all, and the stock installer's menu contains none of this platform's entities.
 
 The **whole operational model** is tracked here — all 32 entities with their
 `clientDefs`, `scopes` and `layouts` — not only the entities a recent change
@@ -56,14 +78,19 @@ make metadata-drift     # scripts/export-instance-metadata.py --check
 make metadata-export    # copy the instance's definitions back into metadata/
 ```
 
-`--check` compares the JSON of every tracked definition (entityDefs, clientDefs, scopes
-and layouts) against the running instance and fails on any difference, so drift is
-visible before it is lost. It also reports entities that exist **only** at runtime — the
+`--check` compares the JSON of every tracked definition (entityDefs, clientDefs and
+scopes) against the running instance and fails on any difference, so drift is visible
+before it is lost. It also reports entities that exist **only** at runtime — the
 `ProtocolQuestion` layout left over from the 2026-09 rename is one — without failing on
 them, because an entity the project does not own may legitimately live there. Adding a
 new one is deliberate: export it with `--include-new` **and** add it to
 `EXPECTED_ENTITIES` in `scripts/validate-metadata.py`, which fails the build if a
 tracked definition disappears.
+
+**Layouts are not part of that comparison.** They are resolved from the `layout` database
+table, not from disk (see "Layout" above), so a filesystem comparison would be meaningless.
+`metadata/layouts/` is the source of truth: `scripts/install-layouts.sh` materialises it
+into the default profile, and re-running it reconciles the database after any admin edit.
 
 ## Applying changes
 

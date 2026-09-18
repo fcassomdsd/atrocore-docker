@@ -1,6 +1,31 @@
 [
   {
-    "name": "name",
+    "name": "code",
     "link": true
+  },
+  {
+    "name": "texto"
+  },
+  {
+    "name": "fechaVigencia"
+  },
+  {
+    "name": "code",
+    "link": true
+  },
+  {
+    "name": "activo"
+  },
+  {
+    "name": "specialty"
+  },
+  {
+    "name": "topic"
+  },
+  {
+    "name": "sequence"
+  },
+  {
+    "name": "texto"
   }
 ]

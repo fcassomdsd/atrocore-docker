@@ -5,7 +5,8 @@ CI previously booted the stack and checked a table count, which said nothing
 about the metadata itself. This script checks that:
 
   * every metadata/**/*.json file parses as JSON
-  * every entity definition declares ``fields`` and ``links``
+  * every entity definition declares ``fields`` (``links`` is optional — an
+    entity with no relations legitimately has none)
   * entity definition names are unique
   * every link target resolves to either a tracked entity definition or a
     known upstream/base entity
@@ -96,9 +97,13 @@ else:
         tracked.add(name)
         entity_defs[name] = data
 
-        for required in ("fields", "links"):
-            if required not in data:
-                fail(f"metadata/entityDefs/{path.name}: missing '{required}'")
+        # "fields" is mandatory; "links" is not. An entity whose relations have all been
+        # removed has no "links" key at all in the instance's own definition, and AtroCore
+        # treats that as "no links". The link-target check below already tolerates its absence.
+        if "fields" not in data:
+            fail(f"metadata/entityDefs/{path.name}: missing 'fields'")
+        if "links" in data and not isinstance(data["links"], dict):
+            fail(f"metadata/entityDefs/{path.name}: 'links' must be an object")
 
 # ----------------------------------------------- expected set and 1:1 coverage
 missing_entities = sorted(EXPECTED_ENTITIES - tracked)

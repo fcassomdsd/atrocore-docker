@@ -4,9 +4,19 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "icaoCode"
         },
-        false
+        {
+          "name": "name"
+        }
+      ],
+      [
+        {
+          "name": "city"
+        },
+        {
+          "name": "province"
+        }
       ]
     ]
   }

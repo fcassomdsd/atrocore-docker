@@ -4,7 +4,32 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "code"
+        },
+        {
+          "name": "inspectedSpecialty"
+        }
+      ],
+      [
+        {
+          "name": "checklistQuestion"
+        },
+        {
+          "name": "sequence"
+        }
+      ],
+      [
+        {
+          "name": "compliance"
+        },
+        {
+          "name": "riskLevel"
+        }
+      ],
+      [
+        {
+          "name": "comments",
+          "fullWidth": true
         },
         false
       ]

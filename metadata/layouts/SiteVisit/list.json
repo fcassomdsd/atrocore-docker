@@ -1,6 +1,12 @@
 [
   {
-    "name": "name",
+    "name": "code",
     "link": true
+  },
+  {
+    "name": "startDate"
+  },
+  {
+    "name": "endDate"
   }
 ]

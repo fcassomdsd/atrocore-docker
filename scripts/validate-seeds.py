@@ -118,6 +118,64 @@ for pattern, why in (
 
 
 # ---------------------------------------------------------------------------
+# The starter authority dataset is the counterpart to the demo: additive,
+# idempotent placeholder records an adopter edits, namespaced `starter-`. Same
+# invariants as the demo seed (no TRUNCATE, nothing destructive, every id
+# namespaced, --remove covers every table), so it is validated the same way.
+# ---------------------------------------------------------------------------
+STARTER_SQL = ROOT / "sql" / "seed-starter-dataset.sql"
+STARTER_SH = ROOT / "scripts" / "seed-starter-dataset.sh"
+EXPECTED_STARTER_ROWS = 12
+
+starter_ids: list[str] = []
+starter_insert_tables: set[str] = set()
+
+if not STARTER_SQL.is_file():
+    problems.append(f"{STARTER_SQL} is missing")
+else:
+    starter_sql = STARTER_SQL.read_text(encoding="utf-8")
+    if re.search(r"\bTRUNCATE\b", starter_sql, re.IGNORECASE):
+        problems.append("the starter seed uses TRUNCATE; it must only ever touch starter- rows")
+    if re.search(r"\bDELETE\b", starter_sql, re.IGNORECASE):
+        problems.append(
+            "the starter seed contains DELETE; removal belongs in the wrapper's --remove path"
+        )
+
+    starter_insert_tables = set(
+        re.findall(r"INSERT\s+INTO\s+(?:public\.)?(\w+)", starter_sql, re.IGNORECASE)
+    )
+    if not starter_insert_tables:
+        problems.append("the starter seed contains no INSERT statements")
+
+    starter_ids = re.findall(r"^\s*\('([^']+)'", starter_sql, re.MULTILINE)
+    for row_id in starter_ids:
+        if not row_id.startswith("starter-"):
+            problems.append(f"starter seed row id does not start with starter-: {row_id}")
+
+    if len(starter_ids) != EXPECTED_STARTER_ROWS:
+        problems.append(
+            f"expected {EXPECTED_STARTER_ROWS} starter rows, counted {len(starter_ids)} — "
+            "update EXPECTED_STARTER_ROWS, the SQL header and the CHANGELOG together"
+        )
+
+    if not STARTER_SH.is_file():
+        problems.append(f"{STARTER_SH} is missing")
+    else:
+        starter_shell = STARTER_SH.read_text(encoding="utf-8")
+        block = re.search(r"STARTER_TABLES=\((.*?)\)", starter_shell, re.DOTALL)
+        if not block:
+            problems.append("could not find the STARTER_TABLES array in scripts/seed-starter-dataset.sh")
+        else:
+            starter_remove_tables = set(re.findall(r"\w+", block.group(1)))
+            missing = starter_insert_tables - starter_remove_tables
+            extra = starter_remove_tables - starter_insert_tables
+            if missing:
+                problems.append(f"STARTER_TABLES does not cover: {sorted(missing)} — --remove would leak rows")
+            if extra:
+                problems.append(f"STARTER_TABLES lists tables the seed never writes: {sorted(extra)}")
+
+
+# ---------------------------------------------------------------------------
 # The USOAP / risk vocabulary seed must define exactly the extensible enums the
 # tracked entity definitions reference by id. AtroCore's extensible enums have
 # no home in metadata/, so this id contract is the only thing tying the two
@@ -227,5 +285,6 @@ if problems:
 print(
     f"OK: seeds valid — demo dataset: {len(row_ids)} rows across "
     f"{len(insert_tables)} tables, every DELETE scoped to demo- rows, "
-    f"--remove covers every table."
+    f"--remove covers every table; starter dataset: {len(starter_ids)} rows across "
+    f"{len(starter_insert_tables)} tables, additive/upsert, --remove covers every table."
 )

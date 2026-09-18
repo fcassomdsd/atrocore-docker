@@ -1,6 +1,15 @@
 [
   {
+    "name": "inspection"
+  },
+  {
     "name": "name",
     "link": true
+  },
+  {
+    "name": "startDateTime"
+  },
+  {
+    "name": "endDateTime"
   }
 ]

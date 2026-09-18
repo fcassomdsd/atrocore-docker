@@ -4,9 +4,13 @@
     "rows": [
       [
         {
+          "name": "inspection"
+        }
+      ],
+      [
+        {
           "name": "name"
-        },
-        false
+        }
       ]
     ]
   }

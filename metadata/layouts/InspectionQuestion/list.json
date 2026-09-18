@@ -1,6 +1,16 @@
 [
   {
-    "name": "name",
+    "name": "code",
     "link": true
+  },
+  {
+    "name": "inspectedSpecialty"
+  },
+  {
+    "name": "checklistQuestion"
+  },
+  {
+    "name": "compliance",
+    "notSortable": true
   }
 ]

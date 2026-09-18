@@ -106,6 +106,7 @@ validate:fresh-install:
     - ./scripts/seed-icao-reference-data.sh --yes
     - ./scripts/seed-nomenclatura.sh --yes
     - ./scripts/seed-demo-dataset.sh --yes
+    - ATROCORE_HOST_BASE="${ATROCORE_BASE_URL}" ./scripts/install-layouts.sh --yes
     - |
       # The application must be usable, not merely present: `/api/v1/App/user` answers 401 only
       # once it is installed and wants authentication. Before this step existed the job passed
@@ -134,6 +135,9 @@ validate:fresh-install:
       check "select count(*) from acapite_o_a_c_i where id not like 'demo-%'"                        "ICAO Annex paragraphs"  1890
       check "select count(*) from usoap_protocol_question where id not like 'demo-%'"                 "ICAO Protocol Questions" 281
       check "select count(*) from usoap_protocol_question_acapite_o_a_c_i where id not like 'demo-%'" "ICAO PQ citations"      439
+      # The default layout profile and the layouts scripts/install-layouts.sh materialises into it.
+      check "select count(*) from layout where layout_profile_id='default' and deleted=false" "materialised layouts" 114
+      check "select jsonb_array_length(navigation::jsonb) from layout_profile where id='default'" "default profile groups" 7
     - ./scripts/backup-db.sh
     - test -n "$(find db-dumps -maxdepth 1 -type f -name '*.dump' -size +0c | head -n 1)"
   after_script:

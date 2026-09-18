@@ -4,7 +4,49 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "code"
+        },
+        {
+          "name": "activityType"
+        }
+      ],
+      [
+        {
+          "name": "location",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "status"
+        },
+        false
+      ],
+      [
+        {
+          "name": "objective",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "scope",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "description",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "conclusion"
         },
         false
       ]

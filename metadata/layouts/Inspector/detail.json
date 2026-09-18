@@ -6,6 +6,14 @@
         {
           "name": "name"
         },
+        {
+          "name": "organizationID"
+        }
+      ],
+      [
+        {
+          "name": "externalUserID"
+        },
         false
       ]
     ]

@@ -4,9 +4,11 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "codigo"
         },
-        false
+        {
+          "name": "name"
+        }
       ]
     ]
   }

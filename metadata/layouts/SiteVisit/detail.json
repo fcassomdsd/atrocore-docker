@@ -4,7 +4,31 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "code"
+        },
+        {
+          "name": "location"
+        }
+      ],
+      [
+        {
+          "name": "startDate"
+        },
+        {
+          "name": "endDate"
+        }
+      ],
+      [
+        {
+          "name": "mainInspector"
+        },
+        {
+          "name": "secondaryInspector"
+        }
+      ],
+      [
+        {
+          "name": "status"
         },
         false
       ]

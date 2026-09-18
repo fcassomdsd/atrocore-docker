@@ -18,28 +18,6 @@
             "type": "datetime",
             "readOnly": true
         },
-        "createdBy": {
-            "type": "link",
-            "readOnly": true,
-            "view": "views/fields/user"
-        },
-        "modifiedBy": {
-            "type": "link",
-            "readOnly": true,
-            "view": "views/fields/user"
-        },
-        "inspector": {
-            "tooltip": false,
-            "type": "link",
-            "auditableEnabled": false,
-            "auditableDisabled": false,
-            "isCustom": true,
-            "modifiedExtendedDisabled": false,
-            "foreignName": "name",
-            "required": true,
-            "dropdown": false,
-            "readOnly": false
-        },
         "role": {
             "tooltip": false,
             "type": "extensibleMultiEnum",
@@ -52,21 +30,6 @@
             "dropdown": false,
             "extensibleEnumId": "a01k60s39gce7ct0jrnbybszncc",
             "allowedOptions": []
-        }
-    },
-    "links": {
-        "createdBy": {
-            "type": "belongsTo",
-            "entity": "User"
-        },
-        "modifiedBy": {
-            "type": "belongsTo",
-            "entity": "User"
-        },
-        "inspector": {
-            "type": "belongsTo",
-            "foreign": "actingInspectors",
-            "entity": "Inspector"
         }
     },
     "indexes": {
