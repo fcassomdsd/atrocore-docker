@@ -1,0 +1,154 @@
+name: CI
+
+# Mirror of this repository's GitLab CI validation jobs, published on GitHub purely for public
+# visibility (GitLab remains the source of truth for development — see CONTRIBUTING.md). Only
+# the correctness-signal jobs are mirrored here; release automation stays GitLab-only.
+#
+# demo:verify (the whole-platform demo guard) is deliberately NOT mirrored yet — it clones the
+# other five repositories as siblings, which first needs all of them mirrored to GitHub too.
+# It'll follow once that's in place.
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate-metadata:
+    # Fast, stack-free validation of the tracked metadata overlay — no Docker needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 scripts/validate-metadata.py
+
+  validate-seed:
+    # The fast, container-free companion to validate-fresh-install below: validates the seed's
+    # invariants (additive-only, no TRUNCATE, every row id namespaced, row counts matching
+    # documentation, every extensible enum the tracked entity definitions reference by id being
+    # created) in seconds, without Docker.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 scripts/validate-seeds.py
+
+  validate-fresh-install:
+    # Walks the README's steps on an empty database: build, bootstrap the application out of
+    # the image, run AtroCore's own install, install the tracked model, sync the schema, seed,
+    # and check the result — exactly what a clean `git clone` + `docker compose up` gives
+    # someone. ubuntu-latest ships Docker + Compose natively, so no dind service is needed here
+    # the way GitLab's job needs one.
+    runs-on: ubuntu-latest
+    env:
+      SKELETON_VARIANT: atrocore
+      BUILD_VARIANT: base
+      PRODUCTION_DOMAIN: localhost
+      PRODUCTION_STABILITY: stable
+      TESTING_DOMAIN: ''
+      TESTING_STABILITY: rc
+      POSTGRES_PASSWORD: ci_postgres_password
+      POSTGRES_PIM_USER: ci_user
+      POSTGRES_PIM_PASSWORD: ci_password
+      POSTGRES_PIM_DB: atrocore
+      POSTGRES_PIM_DB_TEST: ''
+      # install-atrocore.sh takes these from ../compliance_flow/.env, which isn't checked out
+      # here, so the job supplies its own. They become the super admin the platform logs in as.
+      ATROCORE_USERNAME: ci_admin
+      ATROCORE_PASSWORD: ci_admin_password
+      ATROCORE_BASE_URL: http://localhost
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write .env
+        run: |
+          cat > .env <<EOF
+          SKELETON_VARIANT=${SKELETON_VARIANT}
+          BUILD_VARIANT=${BUILD_VARIANT}
+          PRODUCTION_DOMAIN=${PRODUCTION_DOMAIN}
+          PRODUCTION_STABILITY=${PRODUCTION_STABILITY}
+          TESTING_DOMAIN=${TESTING_DOMAIN}
+          TESTING_STABILITY=${TESTING_STABILITY}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PIM_USER=${POSTGRES_PIM_USER}
+          POSTGRES_PIM_PASSWORD=${POSTGRES_PIM_PASSWORD}
+          POSTGRES_PIM_DB=${POSTGRES_PIM_DB}
+          POSTGRES_PIM_DB_TEST=${POSTGRES_PIM_DB_TEST}
+          EOF
+
+      - name: Clean slate
+        run: |
+          rm -rf db-data web-data
+          mkdir -p db-data web-data
+
+      - name: Build and start db + atro-web
+        run: docker compose up -d --build db atro-web
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 90); do
+            if docker compose exec -T db pg_isready -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" >/dev/null 2>&1; then
+              echo "PostgreSQL is ready"
+              exit 0
+            fi
+            if [ "$i" -eq 90 ]; then
+              echo "PostgreSQL did not become ready in time"
+              docker compose logs db || true
+              exit 1
+            fi
+            echo "Waiting for PostgreSQL to be ready... ($i/90)"
+            sleep 2
+          done
+
+      - run: ./scripts/bootstrap-web-data.sh
+      - run: ./scripts/install-atrocore.sh --yes
+
+      # Console as www-data: exec defaults to root, and root-owned cache files break the web
+      # process on its next write (HTTP 500 on every API route).
+      - run: ./scripts/install-metadata.sh
+      - run: docker compose exec -T -u www-data atro-web php /var/www/localhost/console.php clear cache
+      - run: docker compose exec -T -u www-data atro-web php /var/www/localhost/console.php sql diff --run
+
+      - run: ./scripts/seed-usoap-vocabularies.sh --yes
+      - run: ./scripts/seed-icao-reference-data.sh --yes
+      - run: ./scripts/seed-nomenclatura.sh --yes
+      - run: ./scripts/seed-demo-dataset.sh --yes
+
+      - name: Assert the application is actually installed
+        run: |
+          # /api/v1/App/user answers 401 only once it is installed and wants authentication.
+          code=$(curl -s -o /dev/null -m 30 -w '%{http_code}' "${ATROCORE_BASE_URL}/api/v1/App/user")
+          echo "  /api/v1/App/user = $code"
+          [ "$code" = "401" ] || { echo "FAIL: AtroCore is not installed (expected 401, got $code)"; exit 1; }
+
+      - name: Assert the seeded/synced data is correct
+        run: |
+          check() { # check <sql> <label> <expected>
+            got=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -tAc "$1")
+            echo "  $2 = $got"
+            [ "$got" = "$3" ] || { echo "FAIL: expected $2 = $3, got '$got'"; exit 1; }
+          }
+          check "select count(*) from location where id like 'demo-%'"         "demo locations"     1
+          check "select count(*) from service_provider where id like 'demo-%'" "demo providers"     2
+          check "select count(*) from inspector where id like 'demo-%'"        "demo inspectors"    3
+          check "select count(*) from inspection where id like 'demo-%'"       "demo inspections"   3
+          check "select count(*) from specialty"                                "specialties"       16
+          check "select count(*) from \"user\" where id='1' and is_admin"       "super admin"        1
+          check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7
+          check "select count(*) from information_schema.tables where table_schema='public' and table_name in ('service_area','site_visit','finding','corrective_action','documento_o_a_c_i')" "operational tables" 5
+          check "select count(*) from documento_o_a_c_i where id not like 'demo-%'"                     "ICAO Annex documents"   15
+          check "select count(*) from acapite_o_a_c_i where id not like 'demo-%'"                        "ICAO Annex paragraphs"  1890
+          check "select count(*) from usoap_protocol_question where id not like 'demo-%'"                 "ICAO Protocol Questions" 281
+          check "select count(*) from usoap_protocol_question_acapite_o_a_c_i where id not like 'demo-%'" "ICAO PQ citations"      439
+
+      - run: ./scripts/backup-db.sh
+      - run: test -n "$(find db-dumps -maxdepth 1 -type f -name '*.dump' -size +0c | head -n 1)"
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true

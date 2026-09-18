@@ -1,5 +1,7 @@
 # AtroCore Docker Environment
 
+[![CI](https://github.com/fcassomdsd/atrocore-docker/actions/workflows/ci.yml/badge.svg)](https://github.com/fcassomdsd/atrocore-docker/actions/workflows/ci.yml)
+
 Docker Compose setup for running AtroCore/AtroPIM locally with:
 
 - Apache + PHP 8.4 (`atro-web` service, see `.docker/php/Dockerfile`)
