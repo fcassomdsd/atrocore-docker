@@ -108,11 +108,11 @@ diagnose() { # diagnose <project dir>
 
 # project path -> directory the quickstart expects to find it in
 SIBLINGS=(
-  "safety-app2/compliance-cmis:compliance_cmis"
+  "safety-app2/compliance_cmis:compliance_cmis"
   "safety-app2/compliance_flow:compliance_flow"
   "safety-app2/compliance_import:compliance_import"
   "safety-app2/compliance_web:compliance_web"
-  "safety-app2/compliance_app:compliance_checklist"
+  "safety-app2/compliance_checklist:compliance_checklist"
 )
 
 # ---------------------------------------------------------------------------
@@ -383,7 +383,7 @@ wait_for() { # wait_for <label> <url> <acceptable codes> <attempts> [container n
 # — and the quickstart probes it properly once that has happened. The readiness signal this script
 # needs is therefore "the web server answers at all". (The quickstart's own preflight skips this
 # probe for exactly the same reason.)
-wait_for_any_http "AtroCore" "http://${DEMO_HOST}/api/v1/App/user" 60 "compliance_atrocore-"
+wait_for_any_http "AtroCore" "http://${DEMO_HOST}/api/v1/App/user" 60 "atrocore-docker-"
 wait_for "Alfresco"  "http://${DEMO_HOST}:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-" "200" 150 "compliance_cmis-"
 wait_for "import"    "http://${DEMO_HOST}:8000/health" "200" 40 "compliance_import-"
 wait_for "Node-RED"  "http://${DEMO_HOST}:1880/" "200 401" 40 "compliance_flow-"
