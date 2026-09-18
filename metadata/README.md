@@ -78,14 +78,19 @@ make metadata-drift     # scripts/export-instance-metadata.py --check
 make metadata-export    # copy the instance's definitions back into metadata/
 ```
 
-`--check` compares the JSON of every tracked definition (entityDefs, clientDefs, scopes
-and layouts) against the running instance and fails on any difference, so drift is
-visible before it is lost. It also reports entities that exist **only** at runtime — the
+`--check` compares the JSON of every tracked definition (entityDefs, clientDefs and
+scopes) against the running instance and fails on any difference, so drift is visible
+before it is lost. It also reports entities that exist **only** at runtime — the
 `ProtocolQuestion` layout left over from the 2026-09 rename is one — without failing on
 them, because an entity the project does not own may legitimately live there. Adding a
 new one is deliberate: export it with `--include-new` **and** add it to
 `EXPECTED_ENTITIES` in `scripts/validate-metadata.py`, which fails the build if a
 tracked definition disappears.
+
+**Layouts are not part of that comparison.** They are resolved from the `layout` database
+table, not from disk (see "Layout" above), so a filesystem comparison would be meaningless.
+`metadata/layouts/` is the source of truth: `scripts/install-layouts.sh` materialises it
+into the default profile, and re-running it reconciles the database after any admin edit.
 
 ## Applying changes
 

@@ -18,6 +18,14 @@ The tracked set is the contract: the first two modes only touch entities that ar
 already in the repository. An entity that exists **only** at runtime is reported as
 untracked — adding it is deliberate, because it must also be listed in
 `EXPECTED_ENTITIES` in `scripts/validate-metadata.py`.
+
+Layouts are deliberately NOT compared here. AtroCore resolves layout content from the
+`layout` database table (per layout profile), not from `data/layouts/` — the directory
+`install-metadata.sh` copies `metadata/layouts/` into. Comparing the two filesystem trees
+would only ever confirm that the last copy ran, and an administrator's layout edit in the
+UI lands in the database, so it was invisible to this check anyway. `metadata/layouts/` is
+the source of truth: `scripts/install-layouts.sh` materialises it into the default profile
+and re-running it is what reconciles the database after a UI edit.
 """
 
 from __future__ import annotations
@@ -33,11 +41,11 @@ ROOT = Path(__file__).resolve().parent.parent
 METADATA = ROOT / "metadata"
 
 # (label, repo directory, runtime directory, tree-of-directories?)
+# No "layouts" entry: layouts are DB-backed, not file-backed (see the module docstring).
 TREES = (
     ("entityDefs", METADATA / "entityDefs", "metadata/entityDefs", False),
     ("clientDefs", METADATA / "clientDefs", "metadata/clientDefs", False),
     ("scopes", METADATA / "scopes", "metadata/scopes", False),
-    ("layouts", METADATA / "layouts", "layouts", True),
 )
 
 
@@ -166,6 +174,7 @@ def main() -> int:
         if problems:
             return 1
         print("OK: metadata/ matches the running instance" + (f" ({len(untracked)} untracked)" if untracked else ""))
+        print("Note: layouts are not compared (DB-backed). Re-run scripts/install-layouts.sh to reconcile them.")
         return 0
 
     include_names: set[str] = set()
@@ -186,6 +195,7 @@ def main() -> int:
             "scripts/validate-metadata.py, then run it."
         )
     print("\nReview the diff, then: ./scripts/install-metadata.sh is NOT needed — the instance is the source.")
+    print("Layouts are not exported here (DB-backed); edit metadata/layouts/ and run scripts/install-layouts.sh instead.")
     return 0
 
 

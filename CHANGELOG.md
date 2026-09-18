@@ -21,6 +21,7 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 ### Fixed
 
 - **`scripts/validate-metadata.py` no longer requires a `links` key on every entity definition.** The link cleanup removed the key entirely from five definitions, which AtroCore treats as "no links"; the validator now requires `fields` and validates `links` only when present.
+- **`make metadata-drift` no longer compares the non-runtime `data/layouts` tree.** It compared `metadata/layouts/` against `web-data/<domain>/data/layouts/`, which AtroCore never reads — so it could only ever confirm that the last `install-metadata.sh` copy ran, and an administrator's layout edit (which lands in the `layout` database table) was invisible to it either way. The check now covers entityDefs/clientDefs/scopes and prints an explicit note that layouts are DB-backed and reconciled by `scripts/install-layouts.sh`.
 
 ## [2026-09-18]
 
