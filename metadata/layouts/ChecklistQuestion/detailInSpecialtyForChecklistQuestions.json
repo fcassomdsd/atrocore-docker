@@ -1,0 +1,29 @@
+[
+  {
+    "label": "Details",
+    "rows": [
+      [
+        {
+          "name": "specialty",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "activo"
+        },
+        {
+          "name": "fechaVigencia"
+        }
+      ],
+      [
+        {
+          "name": "texto",
+          "fullWidth": true
+        },
+        false
+      ]
+    ]
+  }
+]

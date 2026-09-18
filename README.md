@@ -247,7 +247,18 @@ hold real data.
 `metadata/layouts/` drives the admin UI only once it is written into a layout profile:
 `./scripts/install-layouts.sh --yes` (`make install-layouts YES=1`) seeds the profile's menu
 and materialises every tracked layout. Run it after the seeds; `demo-quickstart.sh` does it
-for you.
+for you. Besides the plain `<view>.json` files it also sends the related-scope layouts
+(`<view>In<RelatedEntity>For<Link>.json`, e.g. `Inspector` inside `Specialty.inspectors`) with
+the `relatedScope` the API expects.
+
+### Spanish vocabulary labels
+
+The `compliance`, `findingClass` and `inspectorRoles` dropdowns read Spanish for an `es_DO`
+user only once `es_DO` is configured as an *additional* language — AtroCore creates the
+`name_es_do` column only then, which is why a fresh install showed English labels.
+`./scripts/enable-spanish-labels.sh --yes` configures the language, syncs the schema and seeds
+the labels; `demo-quickstart.sh` runs it for you. It is idempotent and keeps the English
+`name` alongside the Spanish column.
 
 **Required before the demo dataset: `scripts/seed-usoap-vocabularies.sh`.** `ChecklistQuestion.riskLevel`,
 `UsoapProtocolQuestion.criticalElement`/`areaCode` and `InspectionQuestion.compliance` are `extensibleEnum`
