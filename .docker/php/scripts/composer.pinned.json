@@ -1,0 +1,27 @@
+{
+    "name": "atrocore/skeleton-atrocore",
+    "description": "Skeleton for AtroCORE",
+    "homepage": "https://atrocore.com",
+    "minimum-stability": "stable",
+    "require": {
+        "atrocore/core": "2.1.6",
+        "atrocore/export": "1.10.1",
+        "atrocore/export-http": "1.8.0",
+        "atrocore/import": "1.10.2",
+        "atrocore/import-http": "1.6.1"
+    },
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://packagist.atrocore.com/packages.json"
+        }
+    ],
+    "scripts": {
+        "post-update-cmd": "\\Atro\\Composer\\PostUpdate::postUpdate"
+    },
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true
+        }
+    }
+}

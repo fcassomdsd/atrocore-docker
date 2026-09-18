@@ -1,0 +1,21 @@
+[
+  {
+    "name": "name",
+    "link": true
+  },
+  {
+    "name": "inspectedProvider"
+  },
+  {
+    "name": "specialty"
+  },
+  {
+    "name": "location"
+  },
+  {
+    "name": "nextDueDate"
+  },
+  {
+    "name": "active"
+  }
+]

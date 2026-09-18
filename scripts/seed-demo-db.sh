@@ -23,8 +23,13 @@ if [[ ! -f "${DUMP_FILE}" ]]; then
   if [[ -f "${ROOT_DIR}/${DUMP_FILE}" ]]; then
     DUMP_FILE="${ROOT_DIR}/${DUMP_FILE}"
   else
-    echo "Error: demo dump file not found: ${DUMP_FILE}"
-    exit 1
+    echo "Error: demo dump file not found: ${DUMP_FILE}" >&2
+    echo "" >&2
+    echo "Database dumps are no longer committed to this repository: they contained" >&2
+    echo "live credential material. Provision the seed dump from the release artifact" >&2
+    echo "store, or pass one explicitly:" >&2
+    echo "  $0 <dump-file> [target-db] --yes" >&2
+    exit 3
   fi
 fi
 

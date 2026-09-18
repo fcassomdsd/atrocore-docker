@@ -1,16 +1,6 @@
 FROM php:8.4-apache-bookworm AS base
 LABEL maintainer="AtroCore GmbH <support@atrocore.com>"
 
-ARG SKELETON_VARIANT
-ARG PRODUCTION_DOMAIN
-ARG PRODUCTION_STABILITY
-ARG PRODUCTION_DB
-ARG TESTING_DOMAIN
-ARG TESTING_STABILITY
-ARG TESTING_DB
-ARG DB_USER
-ARG DB_PASSWORD
-
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"  \
     && printf "post_max_size = 20M\nupload_max_filesize = 20M\nmax_execution_time = 180\nmax_input_time = 180\nmemory_limit = 256M" >> "$PHP_INI_DIR/php.ini" \
     && apt-get update && apt-get install -y \
@@ -39,18 +29,19 @@ RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"  \
     && docker-php-ext-install -j$(nproc) mbstring curl gd xml zip pdo_pgsql exif ftp ldap sockets \
     && pecl install xattr imagick \
     && docker-php-ext-enable xattr imagick \
-    && a2enmod rewrite && a2dissite 000-default
+    && a2enmod rewrite && a2dissite 000-default \
+    && mkdir -p /var/spool/cron/crontabs/
 
 WORKDIR /var/www
 
+# AtroCore itself is installed at container bootstrap (scripts/bootstrap-web-data.sh, run
+# against the bind-mounted ./web-data/), not baked into this image's build layers. AtroCore's
+# core packages are GPL-3.0-only; installing them here at build time would mean any pre-built
+# copy of this image carries GPL-3.0 source, which "distribution" obligations attach to. The
+# install scripts still ship in the image (unchanged, only invoked later rather than here) so
+# the bootstrap step can run the same sequence this Dockerfile used to run directly.
 COPY php/scripts /var/www/scripts
-
-RUN chmod +x scripts/*.sh && mkdir -p /var/spool/cron/crontabs/ \
-    && /bin/bash ./scripts/prepare-pim.sh --optional "${SKELETON_VARIANT}" "${TESTING_STABILITY}" "${TESTING_DOMAIN}" "${DB_USER}" "${DB_PASSWORD}" "${TESTING_DB}" \
-    && /bin/bash ./scripts/prepare-pim.sh "${SKELETON_VARIANT}" "${PRODUCTION_STABILITY}" "${PRODUCTION_DOMAIN}" "${DB_USER}" "${DB_PASSWORD}" "${PRODUCTION_DB}" \
-    && chown www-data:crontab /var/spool/cron/crontabs/www-data \
-    && chmod 600 /var/spool/cron/crontabs/www-data \
-    && rm -rf scripts && mkdir -p /var/www/.cache && chown www-data:www-data /var/www/.cache
+RUN chmod +x scripts/*.sh
 
 COPY startup.sh /startup.sh
 RUN chmod +x /startup.sh

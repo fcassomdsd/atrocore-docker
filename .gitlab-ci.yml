@@ -1,5 +1,6 @@
 stages:
   - validate
+  - release
 
 variables:
   DOCKER_HOST: tcp://docker:2375
@@ -41,60 +42,202 @@ default:
       POSTGRES_PIM_DB_TEST=${POSTGRES_PIM_DB_TEST}
       EOF
 
-blank_instance_check:
+# Fast, stack-free validation of the tracked metadata overlay. The smoke jobs
+# below boot containers and check a table count, which says nothing about the
+# team's actual deliverable (metadata/).
+validate:metadata:
   stage: validate
+  image: python:3.12-alpine
+  before_script: []
   script:
+    - python3 scripts/validate-metadata.py
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# The fresh-install check. This job used to assert only that PostgreSQL answered and a
+# backup could be written, which said nothing about whether a new user gets a working
+# system — and it passed throughout the period when a clean clone could not build its
+# application or its schema at all. It now walks the README's steps 3–8 on an empty
+# database: build, bootstrap the application out of the image, run AtroCore's own install,
+# install the tracked model, sync the schema, seed, and check the result. `web-data/` and
+# `db-data/` are deleted first, so this is exactly what `git clone` + `docker compose up`
+# gives someone.
+validate:fresh-install:
+  stage: validate
+  variables:
+    # `install-atrocore.sh` takes these from ../compliance_flow/.env, which is not checked out
+    # here, so the job supplies its own. They become the super admin the platform logs in as.
+    ATROCORE_USERNAME: ci_admin
+    ATROCORE_PASSWORD: ci_admin_password
+    # Published ports live on the dind service, not the job container, so `localhost` does not
+    # reach them here — the service alias does.
+    ATROCORE_BASE_URL: http://docker
+  script:
+    # `python3` is needed by install-metadata.sh (register-entity-tab.py) and `curl` by
+    # install-atrocore.sh; the default before_script has already installed bash and written .env.
+    - apk add --no-cache python3 curl
     - rm -rf db-data web-data
     - mkdir -p db-data web-data
     - docker compose up -d --build db atro-web
     - |
-      for i in $(seq 1 60); do
+      for i in $(seq 1 90); do
         if docker compose exec -T db pg_isready -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" >/dev/null 2>&1; then
           echo "PostgreSQL is ready"
           break
         fi
-        if [ "$i" -eq 60 ]; then
+        if [ "$i" -eq 90 ]; then
           echo "PostgreSQL did not become ready in time"
           docker compose logs db || true
           exit 1
         fi
-        echo "Waiting for PostgreSQL to be ready... ($i/60)"
+        echo "Waiting for PostgreSQL to be ready... ($i/90)"
         sleep 2
       done
-    - docker compose ps
-    - docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -c "SELECT 1;"
+    - ./scripts/bootstrap-web-data.sh
+    - ./scripts/install-atrocore.sh --yes
+    # Console as www-data: exec defaults to root, and root-owned cache files break the web
+    # process on its next write (HTTP 500 on every API route).
+    - ./scripts/install-metadata.sh
+    - docker compose exec -T -u www-data atro-web php /var/www/localhost/console.php clear cache
+    - docker compose exec -T -u www-data atro-web php /var/www/localhost/console.php sql diff --run
+    - ./scripts/seed-usoap-vocabularies.sh --yes
+    - ./scripts/seed-icao-reference-data.sh --yes
+    - ./scripts/seed-nomenclatura.sh --yes
+    - ./scripts/seed-demo-dataset.sh --yes
+    - |
+      # The application must be usable, not merely present: `/api/v1/App/user` answers 401 only
+      # once it is installed and wants authentication. Before this step existed the job passed
+      # with a 500 here.
+      code=$(curl -s -o /dev/null -m 30 -w '%{http_code}' "${ATROCORE_BASE_URL}/api/v1/App/user")
+      echo "  /api/v1/App/user = $code"
+      [ "$code" = "401" ] || { echo "FAIL: AtroCore is not installed (expected 401, got $code)"; exit 1; }
+    - |
+      check() { # check <sql> <label> <expected>
+        got=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -tAc "$1")
+        echo "  $2 = $got"
+        [ "$got" = "$3" ] || { echo "FAIL: expected $2 = $3, got '$got'"; exit 1; }
+      }
+      check "select count(*) from location where id like 'demo-%'"         "demo locations"     1
+      check "select count(*) from service_provider where id like 'demo-%'" "demo providers"     2
+      check "select count(*) from inspector where id like 'demo-%'"        "demo inspectors"    3
+      check "select count(*) from inspection where id like 'demo-%'"       "demo inspections"   3
+      check "select count(*) from specialty"                                "specialties"       16
+      check "select count(*) from \"user\" where id='1' and is_admin"       "super admin"        1
+      check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7
+      # Tables that only exist if the recovered operational model was installed.
+      check "select count(*) from information_schema.tables where table_schema='public' and table_name in ('service_area','site_visit','finding','corrective_action','documento_o_a_c_i')" "operational tables" 5
+      # The ICAO reference catalog (documents/paragraphs/protocol questions/citations) — real
+      # rows only, excluding the demo dataset's own demo-doc-a10v3 / demo-pq-* / demo-acapite-*.
+      check "select count(*) from documento_o_a_c_i where id not like 'demo-%'"                     "ICAO Annex documents"   15
+      check "select count(*) from acapite_o_a_c_i where id not like 'demo-%'"                        "ICAO Annex paragraphs"  1890
+      check "select count(*) from usoap_protocol_question where id not like 'demo-%'"                 "ICAO Protocol Questions" 281
+      check "select count(*) from usoap_protocol_question_acapite_o_a_c_i where id not like 'demo-%'" "ICAO PQ citations"      439
     - ./scripts/backup-db.sh
     - test -n "$(find db-dumps -maxdepth 1 -type f -name '*.dump' -size +0c | head -n 1)"
   after_script:
     - docker compose down -v || true
+  # Merge request pipelines only. Every change lands through an MR, so this both gates the
+  # merge and runs the expensive build once instead of also on the develop push that follows.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
-demo_seed_check:
+# The live seed run now happens in `validate:fresh-install` above, which deletes
+# `web-data`/`db-data`, builds, installs the tracked model, syncs the schema and runs all
+# four seeds. This job stays as the fast, container-free companion: it validates the
+# seed's invariants — additive-only (every DELETE scoped to demo- rows), no TRUNCATE,
+# every row id namespaced, the row count matching its documentation, `--remove` covering
+# every table the seed writes, and every extensible enum the tracked entity definitions
+# reference by id being created by `seed-usoap-vocabularies.sql`. It runs in seconds and
+# needs no Docker, so it catches a broken seed on the first push rather than ten minutes
+# into an image build.
+validate:seed:
   stage: validate
+  image: python:3.12-alpine
+  before_script: []
   script:
-    - rm -rf db-data web-data
-    - mkdir -p db-data web-data
-    - docker compose up -d --build db atro-web
-    - |
-      for i in $(seq 1 60); do
-        if docker compose exec -T db pg_isready -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" >/dev/null 2>&1; then
-          echo "PostgreSQL is ready"
-          break
-        fi
-        if [ "$i" -eq 60 ]; then
-          echo "PostgreSQL did not become ready in time"
-          docker compose logs db || true
-          exit 1
-        fi
-        echo "Waiting for PostgreSQL to be ready... ($i/60)"
-        sleep 2
-      done
-    - ./scripts/seed-demo-db.sh --yes
-    - |
-      table_count=$(docker compose exec -T db psql -U "$POSTGRES_PIM_USER" -d "$POSTGRES_PIM_DB" -At -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';")
-      if [ "$table_count" -le 0 ]; then
-        echo "Expected demo seed to create public tables, found: $table_count"
-        exit 1
-      fi
-      echo "Demo seed check passed with $table_count public tables."
+    - python3 scripts/validate-seeds.py
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# Releases are CalVer-tagged from CHANGELOG.md and gated on a prepared release
+# entry: the tag is the date of the newest "## [YYYY-MM-DD]" section, the
+# pipeline fails when that section is missing, when CHANGELOG.md is unchanged
+# since the previous release, or when the tag already exists. The CHANGELOG is
+# the release trigger: a merge to the default branch that does not touch
+# CHANGELOG.md produces no release. See scripts/release-tag.sh and
+# CONTRIBUTING.md ("Versioning and releases").
+# The whole-stack demo. `validate:fresh-install` covers AtroCore and the three seeds; everything
+# after that — the identities, the imports, the closure walkthrough and the oversight artifacts —
+# needs the other five repositories side by side, which a single-repo checkout does not have. This
+# job assembles that layout (`scripts/demo-verify-ci.sh` clones the siblings; all six projects are
+# public and cloned over HTTPS at `develop`), brings the stack up and runs the demo quickstart.
+#
+# It is deliberately NOT a merge-request gate. It builds five projects and boots Alfresco, Solr,
+# ActiveMQ, the transform service, Node-RED and two Node services, so it takes on the order of
+# twenty minutes and needs a runner with memory to match; the per-repo pipelines stay the gate.
+# Run it on a schedule (`CI_PIPELINE_SOURCE == "schedule"`) or by hand from the pipeline UI — a
+# schedule is the only way the demo is checked without someone remembering to press the button.
+#
+# `SIBLING_REF` is what makes it a *demo* guard rather than a per-branch one: it clones every
+# sibling at `develop`, so it answers "does the demo work on today's integration branches?".
+# Point it at a branch to check a matching set of changes before they are merged.
+demo:verify:
+  stage: validate
+  variables:
+    SIBLING_REF: develop
+  script:
+    # `git` for the sibling clones, `python3` for the .env merge and `nodejs` because the quickstart
+    # parses every JSON response with `node` (runbook §1.1 lists it as a host prerequisite); bash and
+    # curl come from the default before_script, which also writes this project's .env.
+    - apk add --no-cache python3 curl git nodejs
+    - ./scripts/demo-verify-ci.sh
   after_script:
-    - docker compose down -v || true
+    # Runs even when the demo fails, so a failed job does not leave five stacks and their volumes
+    # behind on the runner.
+    - ./scripts/demo-verify-ci.sh --teardown || true
+  rules:
+    # Scheduled: it runs unattended.
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    # Everywhere else it is offered as a manual button, never a gate — `allow_failure` keeps a
+    # failed demo run from blocking a pipeline it was not asked to gate, and being manual means
+    # no pipeline pays for it unless somebody presses it (or a schedule fires).
+    - when: manual
+      allow_failure: true
+
+compute_release_tag:
+  stage: release
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache git
+  variables:
+    GIT_DEPTH: "0"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - CHANGELOG.md
+  script:
+    - sh scripts/release-tag.test.sh
+    - sh scripts/release-tag.sh --env-file release.env
+  artifacts:
+    reports:
+      dotenv: release.env
+
+create_release:
+  stage: release
+  needs: ["compute_release_tag"]
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  before_script: []
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - CHANGELOG.md
+  script:
+    - echo "Creating release $RELEASE_TAG"
+  release:
+    tag_name: '$RELEASE_TAG'
+    ref: '$CI_COMMIT_SHA'
+    description: 'See CHANGELOG.md for the changes in $RELEASE_TAG'

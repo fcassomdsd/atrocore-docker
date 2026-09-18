@@ -2,5 +2,12 @@
 data/
 web-data/
 db-data/
+db-dumps/
+*.dump
 .env
 docker-compose.override.yaml
+.config.php.*
+
+# Local scratch files (a CI job id and a job trace) kept out of the tree on purpose.
+.ci-job
+.trace.txt

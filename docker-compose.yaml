@@ -4,16 +4,10 @@ services:
       context: .docker
       dockerfile: php/Dockerfile
       target: ${BUILD_VARIANT:-base}
-      args:
-        SKELETON_VARIANT: ${SKELETON_VARIANT:-pim-no-demo}
-        PRODUCTION_DOMAIN: ${PRODUCTION_DOMAIN:-localhost}
-        PRODUCTION_DB: ${POSTGRES_PIM_DB}
-        PRODUCTION_STABILITY: ${PRODUCTION_STABILITY:-stable}
-        TESTING_DOMAIN: ${TESTING_DOMAIN}
-        TESTING_STABILITY: ${TESTING_STABILITY:-stable}
-        TESTING_DB: ${POSTGRES_PIM_DB_TEST}
-        DB_USER: ${POSTGRES_PIM_USER}
-        DB_PASSWORD: ${POSTGRES_PIM_PASSWORD}
+    # No build args: this image no longer installs AtroCore at build time (see the Dockerfile
+    # comment and scripts/bootstrap-web-data.sh) — the values that used to be passed here
+    # (SKELETON_VARIANT, PRODUCTION_STABILITY, DB credentials, etc.) are read directly from
+    # .env by that script instead.
     environment:
       PRODUCTION_DOMAIN: ${PRODUCTION_DOMAIN:-localhost}
       TESTING_DOMAIN: ${TESTING_DOMAIN}

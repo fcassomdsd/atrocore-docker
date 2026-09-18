@@ -2,7 +2,7 @@
 
 Docker Compose setup for running AtroCore/AtroPIM locally with:
 
-- Apache + PHP 8.2 (`atro-web` service)
+- Apache + PHP 8.4 (`atro-web` service, see `.docker/php/Dockerfile`)
 - PostgreSQL 15 (`db` service)
 - Optional Traefik reverse proxy (via the provided example override file)
 
@@ -17,8 +17,28 @@ Use this checklist if you are running the project for the first time:
 1. Copy `.env.example` to `.env`.
 2. Fill in database credentials in `.env`.
 3. Start containers with `docker compose up -d --build`.
-4. Wait until `db` and `atro-web` are healthy/running in `docker compose ps`.
-5. Open http://localhost.
+4. Wait until `db` and `atro-web` are `running` in `docker compose ps` (the compose services define no healthcheck, so they never report `healthy`).
+5. **Install the application.** `docker compose up` scaffolds the application *files* but does not install it: a fresh instance has `'isInstalled' => false` and an empty `user` table, so `/api/v1/App/user` answers `500` and every consumer sees a broken AtroCore. This runs AtroCore's own install wizard with the credentials the platform uses (`ATROCORE_USERNAME`/`ATROCORE_PASSWORD` in `../compliance_flow/.env`).
+
+   ```bash
+   ./scripts/install-atrocore.sh --yes    # bootstraps web-data/, then installs (rebuilds the DB)
+   ```
+
+6. Install the tracked metadata and create the schema — **on a clean clone the bootstrap inside step 5 is what first installs the application into `web-data/`** (that directory is bind-mounted over `/var/www`, and the `atro-web` image contains no AtroCore application to begin with — it's installed directly into the bind-mounted directory, not baked into the image, so a pre-built copy of this image never carries AtroCore's GPL-3.0 source). The tracked model is complete, so this creates every operational table (`location`, `service_provider`, `site_visit`, `service_area`, `finding`, …):
+
+   ```bash
+   ./scripts/install-metadata.sh          # copies metadata/ into web-data/
+   docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
+   docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
+   ```
+
+   Console commands must run as **`www-data`** (`-u www-data`): `docker compose exec` defaults to root, and root-owned files in `data/cache` make the web process fail on its next cache write, which surfaces as `500` on every API route.
+
+7. Open http://localhost.
+
+8. Optional: load the synthetic demo dataset (next section) with `./scripts/seed-usoap-vocabularies.sh --yes && ./scripts/seed-icao-reference-data.sh --yes && ./scripts/seed-nomenclatura.sh --yes && ./scripts/seed-demo-dataset.sh --yes`, or restore a real authority's data with `./scripts/seed-demo-db.sh <dump-file> --yes`.
+
+Everything above is also available as one command once the stack is up — see "End-to-end demo quickstart" below.
 
 ### 1. Prerequisites
 
@@ -158,7 +178,95 @@ Important:
 
 ## Demo Data Seeding
 
-Seed the default database from `atrocore.dump`:
+### Synthetic demo dataset (use this on a fresh install)
+
+A fresh clone comes up with an empty but **complete** schema — step 5 creates every
+operational table from the tracked `metadata/` — so this version-controlled dataset is
+all a demo needs. It contains no secrets, is **additive** (it only ever writes rows whose
+`id` starts with `demo-`) and is re-runnable, so it is safe to run against a database
+that already holds real records. Restore a real authority's data instead (or on top) with
+`./scripts/seed-demo-db.sh <dump-file> --yes`; dumps are deliberately not committed.
+`demo-quickstart.sh` checks that the operational schema exists before it seeds, so a
+schema that was never synced fails there rather than four steps later.
+
+```bash
+./scripts/seed-usoap-vocabularies.sh --yes    # risk / USOAP extensible enums (required)
+./scripts/seed-icao-reference-data.sh --yes   # ICAO Annex documents/paragraphs/PQs (required)
+./scripts/seed-nomenclatura.sh --yes          # spec_* / atype_* reference rows
+./scripts/seed-demo-dataset.sh --yes          # the demo dataset
+# or: make db-seed-demo YES=1
+
+./scripts/seed-demo-dataset.sh --remove --yes   # delete every demo- row
+# or: make db-seed-demo-remove YES=1
+```
+
+It creates one fictional airport (ICAO `ZZZZ` — ICAO's own "unknown aerodrome"
+placeholder), two service providers, three inspectors, their services and
+specialties, **two site visits dated relative to the day you seed** — one a month behind
+(whose inspections carry the findings walked through closure) and one three weeks ahead
+(the planning walkthrough) — three inspections, the interview schedules the plan generator
+needs, and a checklist
+catalog (three topics, nine questions) with its USOAP citation chain
+(`ChecklistQuestion → Normativa → AcapiteOACI → UsoapProtocolQuestion`) plus the
+per-inspection selections `/checklist` actually reads. Question codes use the
+reserved `9xxx` range and PQ codes the unassigned `PQ 99.x` range. Document codes
+carry the current year (`V-ZZZZ-2026-01`, `AV-ZZZZ-A-0001`); reference the
+stable `id`s (`demo-sv-01`, `demo-insp-ans-01`) from scripts and docs. The visit
+is seeded as `Planned`, because `/siteVisits` hides visits that are still
+`Created` — a seed that stopped at `Created` would look like an empty database.
+
+`sql/seed-demo-dataset.sql` carries the full rationale. **Never put a real
+authority's data in it** — see the P0 finding in `TECHNICAL_DEBT_ANALYSIS.md`.
+
+**Required before the demo dataset: `scripts/seed-usoap-vocabularies.sh`.** `ChecklistQuestion.riskLevel`,
+`UsoapProtocolQuestion.criticalElement`/`areaCode` and `InspectionQuestion.compliance` are `extensibleEnum`
+fields whose vocabularies the tracked entity definitions reference **by hard-coded id**, and AtroCore's
+extensible enums have no home in `metadata/` (`install-metadata.sh` syncs entityDefs/clientDefs/scopes/layouts
+only). They therefore existed only in the database: without them a fresh install resolves every risk level and
+USOAP Critical Element / area to nothing. The seed recreates 7 enums and their 47 option bindings, is additive
+(`INSERT ... ON CONFLICT DO NOTHING`, so customised vocabularies are never overwritten) and is deliberately
+**not** removed by `--remove`.
+
+**Also required before the demo dataset: `scripts/seed-icao-reference-data.sh`.** The USOAP citation chain
+(`ChecklistQuestion → Normativa → AcapiteOACI → UsoapProtocolQuestion`) has no ICAO Annex documents, Annex
+paragraphs or Protocol Questions on a fresh install — only the three synthetic `PQ 99.x` rows the demo dataset
+itself creates. This seed loads the real ICAO-standard catalog: **15 Annex documents, 1,890 Annex paragraphs,
+281 USOAP Protocol Questions and 439 PQ → paragraph citations**, extracted from a legacy database snapshot and
+filtered to real (non-demo) rows. Unlike `Normativa` — a specific country's national regulation, which this project deliberately never seeds
+(each adopting authority enters their own) — this content is ICAO-standard and CAA-independent, so it belongs
+in every install, not something each adopting authority has to re-enter by hand.
+`sql/seed-usoap-evidence-expectations.sql` depends on it: it resolves each row's parent Protocol Question by
+`code`, which otherwise resolves to `NULL`. Additive (`INSERT ... ON CONFLICT DO NOTHING`) and, like the
+vocabularies seed, deliberately **not** removed by `--remove`.
+
+### End-to-end demo quickstart (whole platform)
+
+First time running this platform? See the root-level
+[`GETTING_STARTED_FOR_ADOPTERS.md`](../GETTING_STARTED_FOR_ADOPTERS.md) for hardware
+requirements, timing expectations, and what the demo dataset actually is before diving in.
+
+`scripts/demo-quickstart.sh` drives the rest of the platform from a stack that is
+already running: it bootstraps the app into `web-data/`, installs the metadata and
+syncs the schema, seeds the USOAP vocabularies, the Nomenclatura catalogs and the
+demo dataset, imports the demo checklist, canonical documents and follow-up
+payloads, then runs the read-only smoke harness and the error-envelope audit.
+
+```bash
+./scripts/demo-quickstart.sh --yes
+```
+
+It is additive and idempotent, and it assumes the stack is up (runbook §3–§5) and
+the `.env` files from §4 exist. It seeds the demo identities as well, and finishes
+by printing the closure-review calls that it deliberately does not walk for you.
+The step-by-step version is §7 of `docs/COMPLIANCE_INTEGRATION_RUNBOOK.md`.
+
+### Restoring a real dataset
+
+> Database dumps are **not** committed to this repository — the previously tracked
+> dumps contained live credential material (user password hashes and session
+> tokens). Provision a seed dump from the release artifact store before seeding.
+
+Seed the default database from a provisioned `atrocore.dump`:
 
 ```bash
 ./scripts/seed-demo-db.sh --yes
@@ -186,14 +294,67 @@ Safety behavior:
 
 - Seeding is destructive and requires explicit confirmation (`--yes` or `YES=1`).
 
+## Entity Metadata and Reference Catalogs
+
+AtroCore's live metadata lives under `web-data/<domain>/data/`, which is
+**gitignored and disposable** — CI recreates it from scratch on every run.
+Customisations therefore cannot be edited there and kept.
+
+`web-data/` is also a **bind mount** (`./web-data:/var/www/`), and the `atro-web` image
+contains no AtroCore application to begin with — it's installed directly into `web-data/`
+at first run (`scripts/bootstrap-web-data.sh`, which runs `prepare-pim.sh` inside a
+throwaway container against the bind-mounted directory) rather than baked into the image's
+build layers, specifically so a pre-built `atro-web` image never contains AtroCore's
+GPL-3.0 source. `install-metadata.sh` runs `bootstrap-web-data.sh` for you when
+`web-data/<domain>/` is missing (`make bootstrap` runs it on its own). Without it, `atro-web`
+starts with a DocumentRoot that does not exist.
+
+Instead, the version-controlled source of truth is:
+
+- `metadata/` — entity definitions, client definitions, scopes and layouts
+  (see `metadata/README.md`)
+- `sql/seed-nomenclatura-catalog.sql` — the reference **rows** for the
+  `Specialty` and `ActivityType` catalogs
+
+### Applying a metadata change
+
+```bash
+./scripts/install-metadata.sh          # copy metadata/ into web-data/, register tabs
+docker compose exec atro-web php /var/www/localhost/console.php clear cache
+docker compose exec atro-web php /var/www/localhost/console.php sql diff --show   # review DDL
+docker compose exec atro-web php /var/www/localhost/console.php sql diff --run    # apply
+./scripts/seed-nomenclatura.sh --yes   # load the catalog rows
+```
+
+Make shortcuts:
+
+```bash
+make metadata-install
+make db-seed-nomenclatura YES=1
+```
+
+Notes:
+
+- This AtroCore build has **no `rebuild` console command**. The equivalent is
+  `clear cache` followed by `sql diff --run`.
+- Always read `sql diff --show` before `--run`: it prints the exact DDL derived
+  from the JSON metadata, including any `DROP`.
+- `install-metadata.sh` falls back to a throwaway root container for files owned
+  by `www-data`, so it works without `sudo`.
+- The seed script is destructive (`--yes` required) but **idempotent** — it can
+  be re-run safely.
+- The tracked `*.dump` files predate this catalog standard. After restoring any
+  dump, re-run the metadata install and the nomenclatura seed to bring the
+  instance back to the current standard.
+
 ## Optional Traefik Reverse Proxy
 
 This repository includes examples for Traefik in:
 
-- `docker-compose.override.yaml.old`
-- `traefik.yml.old`
+- `traefik/docker-compose.override.yaml.example`
+- `traefik/traefik.yml.example`
 
-If you want HTTPS and host-based routing, adapt these files to your setup and enable the related environment variables in `.env` (for example `LETS_ENCRYPT_EMAIL` and router names).
+If you want HTTPS and host-based routing, copy these files into the repository root (without the `.example` suffix), adapt them to your setup, and enable the related environment variables in `.env` (for example `LETS_ENCRYPT_EMAIL` and router names).
 
 ## Makefile Targets
 
@@ -205,14 +366,22 @@ Main targets:
 - `make down` - Stop containers
 - `make db-backup` - Create database backup
 - `make db-restore DUMP=... [DB=...]` - Restore dump into DB
-- `make db-seed [DUMP=atrocore.dump] [DB=...] YES=1` - Seed demo data
+- `make db-seed-vocabularies [DB=...] YES=1` - Seed the risk/USOAP extensible enums (required, additive)
+- `make db-seed-demo [DB=...] YES=1` - Seed the synthetic demo dataset (additive; safe)
+- `make db-seed-demo-remove [DB=...] YES=1` - Delete every `demo-` row
+- `make db-seed [DUMP=atrocore.dump] [DB=...] YES=1` - Restore a real dump instead (destructive)
+- `make metadata-install` - Install tracked `metadata/` into `web-data/`
+- `make db-seed-nomenclatura [DB=...] YES=1` - Seed Specialty/ActivityType catalogs
 
 ## CI Validation (GitLab)
 
-The CI pipeline (`.gitlab-ci.yml`) includes two validation jobs:
+The CI pipeline (`.gitlab-ci.yml`) includes three validation jobs:
 
+- `validate:metadata`: runs `scripts/validate-metadata.py` over the tracked `metadata/` tree (no containers needed).
+- `validate:seed`: runs `scripts/validate-seeds.py`, which checks the demo dataset is additive-only (every `DELETE` scoped to `demo-` rows), has no `TRUNCATE`, namespaces every row id, still totals the documented 73 rows, and that `--remove` covers every table the seed writes. It also cross-checks `sql/seed-usoap-vocabularies.sql` against the extensible-enum ids the tracked entity definitions reference — AtroCore's enums have no home in `metadata/`, so that id contract is the only thing tying them together. Fast and container-free.
 - `blank_instance_check`: starts services, verifies DB access, and validates backup creation.
-- `demo_seed_check`: starts services, seeds demo data, and verifies that public tables exist.
+
+> The demo seed is **applied** locally and in the quickstart, not in CI: the `atro-web` image built by this pipeline starts Apache with a DocumentRoot that does not exist (the AtroCore application is never installed), so its schema never appears and there is nothing to seed. That is why the old `demo_seed_check` job skipped itself on every run.
 
 Common CI variables you can override:
 
@@ -232,8 +401,10 @@ Common CI variables you can override:
 
 ## Repository Structure
 
-- `scripts/` - Backup, restore, and demo seed helpers
-- `db-dumps/` - Generated dump files
+- `scripts/` - Backup, restore, demo seed, metadata install, and catalog seed helpers
+- `metadata/` - Version-controlled AtroCore entity metadata (installed into `web-data/`)
+- `sql/` - Reference-catalog, vocabulary and demo-dataset seed scripts (`seed-nomenclatura-catalog.sql`, `seed-usoap-vocabularies.sql`, `seed-icao-reference-data.sql`, `seed-demo-dataset.sql`, `seed-usoap-evidence-expectations.sql`)
+- `db-dumps/` - Generated dump files (gitignored, never committed)
 - `db-data/` - PostgreSQL persistent data
 - `web-data/` - AtroCore web and application data
 
