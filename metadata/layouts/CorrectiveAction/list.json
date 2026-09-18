@@ -1,6 +1,11 @@
 [
   {
-    "name": "name",
-    "link": true
+    "name": "description"
+  },
+  {
+    "name": "dueDate"
+  },
+  {
+    "name": "status"
   }
 ]

@@ -4,7 +4,21 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "code"
+        },
+        {
+          "name": "criticalElement"
+        }
+      ],
+      [
+        {
+          "name": "areaCode"
+        },
+        false
+      ],
+      [
+        {
+          "name": "texto"
         },
         false
       ]

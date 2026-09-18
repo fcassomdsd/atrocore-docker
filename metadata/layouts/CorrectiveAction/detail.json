@@ -4,9 +4,18 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "description",
+          "fullWidth": true
         },
         false
+      ],
+      [
+        {
+          "name": "dueDate"
+        },
+        {
+          "name": "status"
+        }
       ]
     ]
   }

@@ -4,9 +4,19 @@
     "rows": [
       [
         {
+          "name": "inspection"
+        },
+        {
+          "name": "inspectedService"
+        }
+      ],
+      [
+        {
           "name": "name"
         },
-        false
+        {
+          "name": "specialty"
+        }
       ]
     ]
   }

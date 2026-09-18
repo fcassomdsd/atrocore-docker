@@ -4,9 +4,17 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "siteVisit"
         },
         false
+      ],
+      [
+        {
+          "name": "name"
+        },
+        {
+          "name": "serviceProvider"
+        }
       ]
     ]
   }

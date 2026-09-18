@@ -4,7 +4,24 @@
     "rows": [
       [
         {
+          "name": "reglamento"
+        },
+        {
           "name": "name"
+        }
+      ],
+      [
+        {
+          "name": "activo"
+        },
+        {
+          "name": "fechaVigencia"
+        }
+      ],
+      [
+        {
+          "name": "texto",
+          "fullWidth": true
         },
         false
       ]

@@ -1,6 +1,12 @@
 [
   {
-    "name": "name",
+    "name": "code",
     "link": true
+  },
+  {
+    "name": "location"
+  },
+  {
+    "name": "status"
   }
 ]

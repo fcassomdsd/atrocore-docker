@@ -1,12 +1,30 @@
 [
   {
-    "label": "Details",
+    "label": "New panel",
     "rows": [
       [
         {
           "name": "name"
         },
-        false
+        {
+          "name": "shortName"
+        }
+      ],
+      [
+        {
+          "name": "location"
+        },
+        {
+          "name": "serviceProvider"
+        }
+      ],
+      [
+        {
+          "name": "serviceArea"
+        },
+        {
+          "name": "pointOfContact"
+        }
       ]
     ]
   }

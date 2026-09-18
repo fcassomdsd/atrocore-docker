@@ -4,7 +4,39 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "findingCode"
+        },
+        {
+          "name": "status"
+        }
+      ],
+      [
+        {
+          "name": "description"
+        },
+        {
+          "name": "detectionDate"
+        }
+      ],
+      [
+        {
+          "name": "nonConformity",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "class"
+        },
+        {
+          "name": "closeDate"
+        }
+      ],
+      [
+        {
+          "name": "recommendation",
+          "fullWidth": true
         },
         false
       ]

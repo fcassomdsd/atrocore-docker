@@ -4,9 +4,41 @@
     "rows": [
       [
         {
-          "name": "name"
+          "name": "name",
+          "fullWidth": true
         },
         false
+      ],
+      [
+        {
+          "name": "personalID"
+        },
+        {
+          "name": "personalPhone"
+        }
+      ],
+      [
+        {
+          "name": "personalEmail",
+          "fullWidth": true
+        },
+        false
+      ],
+      [
+        {
+          "name": "workID"
+        },
+        {
+          "name": "workPosition"
+        }
+      ],
+      [
+        {
+          "name": "workPhone"
+        },
+        {
+          "name": "workEmail"
+        }
       ]
     ]
   }

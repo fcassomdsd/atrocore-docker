@@ -1,6 +1,17 @@
 [
   {
-    "name": "name",
-    "link": true
+    "name": "findingCode"
+  },
+  {
+    "name": "description"
+  },
+  {
+    "name": "status"
+  },
+  {
+    "name": "detectionDate"
+  },
+  {
+    "name": "closeDate"
   }
 ]

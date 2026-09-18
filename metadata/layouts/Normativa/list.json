@@ -1,6 +1,15 @@
 [
   {
+    "name": "reglamento"
+  },
+  {
     "name": "name",
     "link": true
+  },
+  {
+    "name": "activo"
+  },
+  {
+    "name": "fechaVigencia"
   }
 ]

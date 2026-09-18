@@ -1,5 +1,11 @@
 [
   {
     "name": "children"
+  },
+  {
+    "name": "locationServices"
+  },
+  {
+    "name": "pointsOfContact"
   }
 ]
