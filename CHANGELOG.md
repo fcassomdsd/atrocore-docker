@@ -32,6 +32,7 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 - **`scripts/validate-metadata.py` no longer requires a `links` key on every entity definition.** The link cleanup removed the key entirely from five definitions, which AtroCore treats as "no links"; the validator now requires `fields` and validates `links` only when present.
 - **`make metadata-drift` no longer compares the non-runtime `data/layouts` tree.** It compared `metadata/layouts/` against `web-data/<domain>/data/layouts/`, which AtroCore never reads — so it could only ever confirm that the last `install-metadata.sh` copy ran, and an administrator's layout edit (which lands in the `layout` database table) was invisible to it either way. The check now covers entityDefs/clientDefs/scopes and prints an explicit note that layouts are DB-backed and reconciled by `scripts/install-layouts.sh`.
+- **`scripts/install-layouts.sh` sent the wrong auth header for the Layout route.** It used `Authorization: Bearer`, which that route rejects with HTTP 400 `None of security schemas did match` — its OpenAPI security scheme is an apiKey header named `Authorization-Token` (AtroCore's entity routes, which Node-RED uses, accept Bearer; this one does not). Fixed, and **verified live against the running instance**: `make install-layouts YES=1` materialised all 114 layouts into the `default` profile (`Inspector/layout/list` now returns `name, organizationID, specialty`, `Person/layout/detail` returns its 8 fields), with the 7-group platform menu intact.
 
 ## [2026-09-18]
 

@@ -134,8 +134,12 @@ apply_view() {
     return 0
   fi
   local status
+  # The Layout route's OpenAPI security scheme is an apiKey header literally named
+  # `Authorization-Token` (see Atro\Core\OpenApiGenerator: securitySchemes). Sending the
+  # token as `Authorization: Bearer` answers HTTP 400 "None of security schemas did match";
+  # the entity routes Node-RED uses accept Bearer, but this one does not.
   status="$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X PUT \
-    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Authorization-Token: ${TOKEN}" \
     -H 'Content-Type: application/json' \
     --data-binary "@${file}" "${url}")"
   if [[ "${status}" != "200" && "${status}" != "204" ]]; then
