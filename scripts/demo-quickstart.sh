@@ -18,10 +18,11 @@
 # the image is hidden) and the seeds fail on missing tables. Skipping it is only correct
 # when the app and the custom tables are already there (`--skip-metadata`).
 #
-# The tracked metadata/ tree is a *partial overlay* (the files this project actually
-# customises — see metadata/README.md). The operational entities the demo seeds write to —
-# Location, ServiceProvider, SiteVisit, Inspector, ServiceArea, Finding … — come from the
-# recovered entity definitions `install-metadata.sh` installs from it, and the tables are
+# The tracked metadata/ tree is the *whole operational model* — all 32 entities with their
+# client definitions, scopes and layouts, not a subset (see metadata/README.md). The
+# operational entities the demo seeds write to — Location, ServiceProvider, SiteVisit,
+# Inspector, ServiceArea, Finding … — come from the entity definitions `install-metadata.sh`
+# installs from it, and the tables are
 # built by `sql diff --run`; a clean clone needs no dump. Step 0b fails loudly if that did
 # not happen: the schema probe below reads `public.service_area` (override
 # SCHEMA_PROBE_TABLE to exercise the failure path deliberately).

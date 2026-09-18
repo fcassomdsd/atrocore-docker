@@ -170,7 +170,7 @@ validate:seed:
 # the release trigger: a merge to the default branch that does not touch
 # CHANGELOG.md produces no release. See scripts/release-tag.sh and
 # CONTRIBUTING.md ("Versioning and releases").
-# The whole-stack demo. `validate:fresh-install` covers AtroCore and the three seeds; everything
+# The whole-stack demo. `validate:fresh-install` covers AtroCore and the four seeds; everything
 # after that — the identities, the imports, the closure walkthrough and the oversight artifacts —
 # needs the other five repositories side by side, which a single-repo checkout does not have. This
 # job assembles that layout (`scripts/demo-verify-ci.sh` clones the siblings; all six projects are
