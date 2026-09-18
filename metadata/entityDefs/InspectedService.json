@@ -49,10 +49,6 @@
             "dropdown": false,
             "readOnly": false
         },
-        "correctiveActionPlan": {
-            "type": "link",
-            "foreignName": "code"
-        },
         "inspectedSpecialties": {
             "type": "linkMultiple",
             "noLoad": true,
@@ -60,14 +56,6 @@
             "massUpdateDisabled": true,
             "isCustom": true,
             "foreignName": "id"
-        },
-        "findings": {
-            "type": "linkMultiple",
-            "noLoad": true,
-            "layoutDetailDisabled": true,
-            "massUpdateDisabled": true,
-            "isCustom": true,
-            "foreignName": "findingCode"
         },
         "inspectedProvider": {
             "tooltip": false,
@@ -101,20 +89,10 @@
             "foreign": "inspectedServices",
             "entity": "LocationService"
         },
-        "correctiveActionPlan": {
-            "type": "belongsTo",
-            "foreign": "inspectedServcies",
-            "entity": "CorrectiveActionPlan"
-        },
         "inspectedSpecialties": {
             "type": "hasMany",
             "foreign": "inspectedService",
             "entity": "InspectedSpecialty"
-        },
-        "findings": {
-            "type": "hasMany",
-            "foreign": "inspectedService",
-            "entity": "Finding"
         },
         "inspectedProvider": {
             "type": "belongsTo",

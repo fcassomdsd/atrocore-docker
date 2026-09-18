@@ -6,6 +6,14 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Changed
+
+- **The tracked model now reflects the instance's link cleanup: the unused entity cluster is disconnected.** `ActingInspector`, `Finding`, `CorrectiveAction`, `CorrectiveActionPlan` and `CorrectiveActionFollowUp` had their relations removed on the running instance — `Inspector.actingInspectors`, `Finding.{correctiveActions,inspectedService,inspectionQuestions}`, `CorrectiveAction.{correctiveActionFollowUps,correctiveActionPlan,findings}`, `CorrectiveActionPlan.{correctiveActions,inspectedServcies}`, `CorrectiveActionFollowUp.correctiveAction`, `InspectedService.{correctiveActionPlan,findings}` and `InspectionQuestion.findings` — and `sql diff --run` dropped the corresponding columns. The entity definitions remain (so the tables and, where relevant, the framework fields stay), but nothing links to or from them. Captured with `make metadata-export`; `make metadata-drift` is clean again. **Note:** the definitions are still `entity: true, tab: true, disabled: false`, so they remain visible in the AtroCore UI until a navigation/layout decision says otherwise.
+
+### Fixed
+
+- **`scripts/validate-metadata.py` no longer requires a `links` key on every entity definition.** The link cleanup removed the key entirely from five definitions, which AtroCore treats as "no links"; the validator now requires `fields` and validates `links` only when present.
+
 ## [2026-09-18]
 
 ### Fixed

@@ -17,16 +17,6 @@
             "type": "datetime",
             "readOnly": true
         },
-        "createdBy": {
-            "type": "link",
-            "readOnly": true,
-            "view": "views/fields/user"
-        },
-        "modifiedBy": {
-            "type": "link",
-            "readOnly": true,
-            "view": "views/fields/user"
-        },
         "dueDate": {
             "tooltip": false,
             "type": "date",
@@ -56,67 +46,6 @@
             "unique": false,
             "index": false,
             "isMultilang": false
-        },
-        "correctiveActionPlan": {
-            "tooltip": false,
-            "type": "link",
-            "auditableEnabled": false,
-            "auditableDisabled": false,
-            "isCustom": true,
-            "modifiedExtendedDisabled": false,
-            "required": false,
-            "dropdown": false,
-            "readOnly": false,
-            "foreignName": "code"
-        },
-        "findings": {
-            "tooltip": false,
-            "type": "linkMultiple",
-            "auditableEnabled": false,
-            "auditableDisabled": false,
-            "isCustom": true,
-            "modifiedExtendedDisabled": false,
-            "foreignName": "findingCode",
-            "required": false,
-            "dropdown": false,
-            "readOnly": false,
-            "noLoad": true,
-            "layoutDetailDisabled": true,
-            "massUpdateDisabled": true
-        },
-        "correctiveActionFollowUps": {
-            "type": "linkMultiple",
-            "noLoad": true,
-            "layoutDetailDisabled": true,
-            "massUpdateDisabled": true,
-            "isCustom": true,
-            "foreignName": "id"
-        }
-    },
-    "links": {
-        "createdBy": {
-            "type": "belongsTo",
-            "entity": "User"
-        },
-        "modifiedBy": {
-            "type": "belongsTo",
-            "entity": "User"
-        },
-        "correctiveActionPlan": {
-            "type": "belongsTo",
-            "foreign": "correctiveActions",
-            "entity": "CorrectiveActionPlan"
-        },
-        "findings": {
-            "type": "hasMany",
-            "foreign": "correctiveActions",
-            "relationName": "CorrectiveActionFinding",
-            "entity": "Finding"
-        },
-        "correctiveActionFollowUps": {
-            "type": "hasMany",
-            "foreign": "correctiveAction",
-            "entity": "CorrectiveActionFollowUp"
         }
     },
     "indexes": {

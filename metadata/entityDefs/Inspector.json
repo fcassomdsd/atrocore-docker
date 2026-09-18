@@ -58,13 +58,6 @@
             "layoutDetailDisabled": true,
             "massUpdateDisabled": true
         },
-        "actingInspectors": {
-            "type": "linkMultiple",
-            "noLoad": true,
-            "layoutDetailDisabled": true,
-            "massUpdateDisabled": true,
-            "isCustom": true
-        },
         "inspectedSpecialties": {
             "type": "linkMultiple",
             "noLoad": true,
@@ -118,11 +111,6 @@
             "foreign": "inspectors",
             "relationName": "InspectorSpecialty",
             "entity": "Specialty"
-        },
-        "actingInspectors": {
-            "type": "hasMany",
-            "foreign": "inspector",
-            "entity": "ActingInspector"
         },
         "inspectedSpecialties": {
             "type": "hasMany",

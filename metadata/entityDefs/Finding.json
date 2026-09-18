@@ -17,16 +17,6 @@
             "type": "datetime",
             "readOnly": true
         },
-        "createdBy": {
-            "type": "link",
-            "readOnly": true,
-            "view": "views/fields/user"
-        },
-        "modifiedBy": {
-            "type": "link",
-            "readOnly": true,
-            "view": "views/fields/user"
-        },
         "nonConformity": {
             "tooltip": false,
             "type": "text",
@@ -95,29 +85,6 @@
             "unique": false,
             "index": false
         },
-        "correctiveActions": {
-            "type": "linkMultiple",
-            "noLoad": true,
-            "layoutDetailDisabled": true,
-            "massUpdateDisabled": true,
-            "isCustom": true,
-            "foreignName": "id"
-        },
-        "inspectionQuestions": {
-            "tooltip": false,
-            "type": "linkMultiple",
-            "auditableEnabled": false,
-            "auditableDisabled": false,
-            "isCustom": true,
-            "modifiedExtendedDisabled": false,
-            "foreignName": "code",
-            "required": false,
-            "dropdown": false,
-            "readOnly": false,
-            "noLoad": true,
-            "layoutDetailDisabled": true,
-            "massUpdateDisabled": true
-        },
         "class": {
             "tooltip": false,
             "type": "extensibleEnum",
@@ -163,45 +130,6 @@
             "unique": false,
             "index": false,
             "isMultilang": false
-        },
-        "inspectedService": {
-            "tooltip": false,
-            "type": "link",
-            "auditableEnabled": false,
-            "auditableDisabled": false,
-            "isCustom": true,
-            "modifiedExtendedDisabled": false,
-            "foreignName": "name",
-            "required": false,
-            "dropdown": false,
-            "readOnly": false
-        }
-    },
-    "links": {
-        "createdBy": {
-            "type": "belongsTo",
-            "entity": "User"
-        },
-        "modifiedBy": {
-            "type": "belongsTo",
-            "entity": "User"
-        },
-        "correctiveActions": {
-            "type": "hasMany",
-            "foreign": "findings",
-            "relationName": "CorrectiveActionFinding",
-            "entity": "CorrectiveAction"
-        },
-        "inspectionQuestions": {
-            "type": "hasMany",
-            "foreign": "findings",
-            "relationName": "FindingInspectionQuestion",
-            "entity": "InspectionQuestion"
-        },
-        "inspectedService": {
-            "type": "belongsTo",
-            "foreign": "findings",
-            "entity": "InspectedService"
         }
     },
     "indexes": {
