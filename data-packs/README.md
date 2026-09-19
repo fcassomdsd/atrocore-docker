@@ -4,9 +4,9 @@ CSV templates that load an authority's own records into AtroCore **through AtroC
 module** — the same records `sql/seed-starter-dataset.sql` seeds, in the one format an adopter can
 edit in a spreadsheet and re-import whenever the data changes.
 
-Twelve entities have to be populated before an inspection can be planned (locations, service
-providers, contacts, inspectors, service areas, assignment groups, regulations and their
-articles, and the location↔provider services that tie them together). Hand-entering them through
+Nine kinds of authority record have to exist before an inspection can be planned — locations,
+service providers, contacts, inspectors, service areas, assignment groups, regulations and their
+articles, and the location↔provider services that tie them together. Hand-entering them through
 the admin UI is the slowest part of standing the platform up, and a SQL seed cannot be edited by
 someone who does not write SQL. A pack is a CSV template plus the column mapping AtroCore needs,
 so the work becomes: open the CSV, replace the placeholders, import.
@@ -64,13 +64,13 @@ data writes nothing.
   create is never touched by the removal, and the seed never overwrites a row you have edited.
 * Extra columns are fine: add a column to the CSV *and* a matching entry to the pack's `columns` in
   `data-packs/packs.json` (field name from `metadata/entityDefs/<Entity>.json`, header, and for a
-  link the `importBy` attribute to match the related record by). Columns present in
-  `packs.json` but absent from an existing feed are pruned automatically.
+  link the `importBy` attribute to match the related record by). A column the pack stops mapping is
+  pruned from the feed automatically, so a removed column cannot keep writing its old default.
 * A relationship cell is matched by `importBy` — `id` for rows you created here, `code` for the
   reference catalogs (e.g. `ATS` for a specialty). An empty relationship cell leaves the link
   alone.
 * Values with commas must be quoted (standard CSV) — see `Normativa.csv`, whose article texts are
-  quoted and multiline-safe.
+  quoted for that reason.
 
 ## How it works
 
