@@ -1,0 +1,108 @@
+{
+  "location": {
+    "entity": "Location",
+    "code": "data-pack-location",
+    "title": "Location",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" },
+      { "field": "icaoCode", "header": "ICAO" },
+      { "field": "city", "header": "City" },
+      { "field": "province", "header": "Province" }
+    ]
+  },
+  "service-provider": {
+    "entity": "ServiceProvider",
+    "code": "data-pack-service-provider",
+    "title": "Service provider",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" },
+      { "field": "alias", "header": "Alias" },
+      { "field": "sortOrder", "header": "SortOrder" }
+    ]
+  },
+  "service-area": {
+    "entity": "ServiceArea",
+    "code": "data-pack-service-area",
+    "title": "Service area",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" }
+    ]
+  },
+  "person": {
+    "entity": "Person",
+    "code": "data-pack-person",
+    "title": "Person (point of contact)",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" },
+      { "field": "serviceProvider", "header": "ProviderID", "importBy": ["id"] },
+      { "field": "workID", "header": "WorkID" },
+      { "field": "workPosition", "header": "WorkPosition" },
+      { "field": "workEmail", "header": "WorkEmail" }
+    ]
+  },
+  "inspector": {
+    "entity": "Inspector",
+    "code": "data-pack-inspector",
+    "title": "Inspector",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" },
+      { "field": "organizationID", "header": "OrganizationID" },
+      { "field": "externalUserID", "header": "ExternalUserID" },
+      { "field": "specialty", "header": "SpecialtyCodes", "importBy": ["code"] }
+    ]
+  },
+  "assignment-group": {
+    "entity": "AssignmentGroup",
+    "code": "data-pack-assignment-group",
+    "title": "Assignment group",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" },
+      { "field": "externalGroup", "header": "ExternalGroup" },
+      { "field": "description", "header": "Description" }
+    ]
+  },
+  "reglamento": {
+    "entity": "Reglamento",
+    "code": "data-pack-reglamento",
+    "title": "Regulation",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" },
+      { "field": "codigo", "header": "Codigo" }
+    ]
+  },
+  "normativa": {
+    "entity": "Normativa",
+    "code": "data-pack-normativa",
+    "title": "Regulation article",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" },
+      { "field": "texto", "header": "Text" },
+      { "field": "activo", "header": "Active" },
+      { "field": "fechaVigencia", "header": "EffectiveDate" },
+      { "field": "reglamento", "header": "RegulationID", "importBy": ["id"] },
+      { "field": "acapitesOACI", "header": "AnnexParagraphID", "importBy": ["id"] }
+    ]
+  },
+  "location-service": {
+    "entity": "LocationService",
+    "code": "data-pack-location-service",
+    "title": "Location service",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" },
+      { "field": "shortName", "header": "ShortName" },
+      { "field": "location", "header": "LocationID", "importBy": ["id"] },
+      { "field": "serviceProvider", "header": "ProviderID", "importBy": ["id"] },
+      { "field": "pointOfContact", "header": "PersonID", "importBy": ["id"] },
+      { "field": "serviceArea", "header": "ServiceAreaID", "importBy": ["id"] }
+    ]
+  }
+}

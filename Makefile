@@ -1,4 +1,4 @@
-.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao metadata-install metadata-export metadata-drift db-seed-nomenclatura install-layouts db-seed-starter
+.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao metadata-install metadata-export metadata-drift db-seed-nomenclatura install-layouts db-seed-starter db-seed-starter-remove import-data-packs validate-seeds validate-data-packs
 
 help:
 	@echo "Available targets:"
@@ -18,6 +18,14 @@ help:
 	@echo "  make db-seed-starter [DB=...] YES=1"
 	@echo "                                Seed the placeholder authority dataset (starter- rows,"
 	@echo "                                editable; additive). Use instead of db-seed-demo."
+	@echo "  make db-seed-starter-remove [DB=...] YES=1"
+	@echo "                                Delete every starter- row"
+	@echo "  make import-data-packs [PACK=...]"
+	@echo "                                Import the authority data packs through AtroCore's own"
+	@echo "                                import module (CSV templates under data-packs/; no PACK"
+	@echo "                                means every pack). Editable equivalent of db-seed-starter."
+	@echo "  make validate-seeds            Check the seed invariants (no Docker needed)"
+	@echo "  make validate-data-packs       Check data-packs/ against the starter seed (no Docker)"
 	@echo "  make db-seed [DUMP=atrocore.dump] [DB=...] YES=1"
 	@echo "                                Restore a real pg_dump instead (destructive;"
 	@echo "                                the dump is not in git — use db-seed-demo normally)"
@@ -33,8 +41,7 @@ help:
 	@echo "                                Seed the default layout profile's menu and materialise"
 	@echo "                                metadata/layouts/ into it (needs the stack up)"
 	@echo ""
-	@echo "Quickstart order: up -> metadata-install -> db-seed-vocabularies -> db-seed-icao -> db-seed-nomenclatura -> db-seed-demo -> install-layouts"
-	@echo "(metadata-install bootstraps web-data/ itself when it is empty)"
+	@echo "Quickstart order: up -> metadata-install -> db-seed-vocabularies -> db-seed-icao -> db-seed-nomenclatura -> db-seed-demo -> install-layouts"	@echo "(metadata-install bootstraps web-data/ itself when it is empty)"
 
 up:
 	docker compose up -d
@@ -145,6 +152,31 @@ db-seed-starter:
 	else \
 		./scripts/seed-starter-dataset.sh --yes; \
 	fi
+
+db-seed-starter-remove:
+	@if [ "$(YES)" != "1" ]; then \
+		echo "Usage: make db-seed-starter-remove [DB=target_db] YES=1"; \
+		echo "(deletes every starter- row, including links an import created)"; \
+		exit 1; \
+	fi
+	@if [ -n "$(DB)" ]; then \
+		./scripts/seed-starter-dataset.sh "$(DB)" --remove --yes; \
+	else \
+		./scripts/seed-starter-dataset.sh --remove --yes; \
+	fi
+
+import-data-packs:
+	@if [ -n "$(PACK)" ]; then \
+		./scripts/import-data-pack.py $(PACK); \
+	else \
+		./scripts/import-data-pack.py --all; \
+	fi
+
+validate-seeds:
+	python3 scripts/validate-seeds.py
+
+validate-data-packs:
+	python3 scripts/validate-data-packs.py
 
 db-seed:
 	@if [ "$(YES)" != "1" ]; then \
