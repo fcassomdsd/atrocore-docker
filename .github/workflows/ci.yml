@@ -132,7 +132,7 @@ jobs:
       # The other onboarding route to the same rows: ImportFeed + ImportConfiguratorItem are
       # created over the API and every CSV is imported. Non-zero on any import error, and on a
       # database the starter seed just populated every row should come back unchanged.
-      - run: ./scripts/import-data-pack.py --all
+      - run: ./scripts/import-data-pack.sh --all
       - run: ./scripts/install-layouts.sh --yes
       - run: ./scripts/enable-spanish-labels.sh --yes
 

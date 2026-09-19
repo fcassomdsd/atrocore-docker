@@ -38,9 +38,9 @@ STARTER_SQL = ROOT / "sql" / "seed-starter-dataset.sql"
 # pack maps to a column of its own — the Inspector pack's `specialty` column creates them.
 SEED_TABLES_WITHOUT_PACKS = {"inspector_specialty", "location_service_specialty"}
 
-# `importBy` names an attribute on the *related* entity, so only real, matchable attributes are
-# sensible here.
-ALLOWED_IMPORT_BY = {"id", "code", "name"}
+# `importBy` names an attribute on the *related* entity, so it has to exist there and be a
+# storable, matchable type. These mirror Import\FieldConverters\Link::ALLOWED_TYPES.
+ALLOWED_IMPORT_BY_TYPES = {"bool", "enum", "varchar", "float", "int", "text", "wysiwyg"}
 
 RELATIONSHIP_TYPES = {"link", "linkMultiple", "hasMany", "belongsTo", "hasOne"}
 
@@ -50,6 +50,50 @@ IMPLICIT_FIELDS = {"id", "deleted", "createdAt", "modifiedAt", "createdBy", "mod
 
 def snake_case(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def entity_definition(entity: str) -> dict:
+    path = ENTITY_DEFS / f"{entity}.json"
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def check_import_by(
+    label: str, entity: str, field: str, import_by: list[str], entity_links: dict
+) -> list[str]:
+    """`importBy` must name the id or a storable, matchable field on the *related* entity — that
+    is exactly what the import module's Link converter accepts, so mirror it here rather than
+    allow a fixed list of favourites."""
+    link = entity_links.get(field) or {}
+    foreign = link.get("entity")
+    if not foreign:
+        return [
+            f"{label}: cannot resolve the related entity for '{field}' from "
+            f"metadata/entityDefs/{entity}.json links"
+        ]
+    foreign_def = entity_definition(foreign)
+    foreign_fields = foreign_def.get("fields") or {}
+    if not foreign_fields:
+        return [f"{label}: metadata/entityDefs/{foreign}.json (related to '{field}') is missing"]
+
+    problems = []
+    for value in import_by:
+        if value == "id":
+            continue
+        spec = foreign_fields.get(value)
+        if not spec:
+            problems.append(
+                f"{label}: '{field}' matches on '{value}', which is not a field of {foreign}"
+            )
+        elif spec.get("notStorable"):
+            problems.append(f"{label}: '{field}' matches on '{value}', which is not storable in {foreign}")
+        elif spec.get("type") not in ALLOWED_IMPORT_BY_TYPES:
+            problems.append(
+                f"{label}: '{field}' matches on '{value}' ({spec.get('type')}), which the import "
+                f"module cannot match by — expected one of {sorted(ALLOWED_IMPORT_BY_TYPES)}"
+            )
+    return problems
 
 
 def seed_rows_by_table(sql: str) -> dict[str, list[str]]:
@@ -117,11 +161,10 @@ def main() -> int:
         if not all(fields) or not all(headers):
             problems.append(f"{label}: every column needs both 'field' and 'header'")
 
-        entity_def = ENTITY_DEFS / f"{entity}.json"
-        entity_fields: dict[str, dict] = {}
-        if entity_def.is_file():
-            entity_fields = json.loads(entity_def.read_text(encoding="utf-8")).get("fields") or {}
-        else:
+        entity_def = entity_definition(entity)
+        entity_fields: dict[str, dict] = entity_def.get("fields") or {}
+        entity_links: dict[str, dict] = entity_def.get("links") or {}
+        if not entity_fields:
             problems.append(f"{label}: metadata/entityDefs/{entity}.json is missing")
 
         for column in columns:
@@ -140,12 +183,9 @@ def main() -> int:
                         "(the attribute on the related entity to match by)"
                     )
                 else:
-                    unknown = [value for value in import_by if value not in ALLOWED_IMPORT_BY]
-                    if unknown:
-                        problems.append(
-                            f"{label}: '{field}' uses importBy {unknown}; "
-                            f"expected one of {sorted(ALLOWED_IMPORT_BY)}"
-                        )
+                    problems.extend(
+                        check_import_by(label, entity, field, import_by, entity_links)
+                    )
 
         csv_path = PACKS_DIR / f"{entity}.csv"
         if not csv_path.is_file():

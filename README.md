@@ -251,9 +251,9 @@ through AtroCore's own import module rather than `psql` — the route to take if
 entering the data does not write SQL:
 
 ```bash
-./scripts/import-data-pack.py --list                # what is available
+./scripts/import-data-pack.sh --list                # what is available
 make import-data-packs                              # every pack (or PACK=location inspector)
-./scripts/import-data-pack.py --all --dry-run
+./scripts/import-data-pack.sh --all --dry-run
 ```
 
 Rows are matched by the `ID` column and upserted, so editing a value and re-running the command
