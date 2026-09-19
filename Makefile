@@ -182,9 +182,9 @@ db-seed-starter-remove:
 
 import-data-packs:
 	@if [ -n "$(PACK)" ]; then \
-		./scripts/import-data-pack.py $(PACK); \
+		./scripts/import-data-pack.sh $(PACK); \
 	else \
-		./scripts/import-data-pack.py --all; \
+		./scripts/import-data-pack.sh --all; \
 	fi
 
 validate-seeds:

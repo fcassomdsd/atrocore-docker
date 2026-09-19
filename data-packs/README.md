@@ -20,8 +20,8 @@ make db-seed-vocabularies YES=1     # reference catalogs the packs point at (spe
 make import-data-packs              # every pack
 make import-data-packs PACK=location        # one pack
 make import-data-packs PACK="location inspector"
-./scripts/import-data-pack.py --list        # what is available
-./scripts/import-data-pack.py --all --dry-run
+./scripts/import-data-pack.sh --list        # what is available
+./scripts/import-data-pack.sh --all --dry-run
 ```
 
 Credentials come from `../compliance_flow/.env` (`ATROCORE_USERNAME` / `ATROCORE_PASSWORD`) or this
@@ -65,6 +65,13 @@ re-run the same command. Rows are matched by their `ID` column and upserted
 (`fileDataAction=create_update`), so an import never duplicates a row and a re-import of unchanged
 data writes nothing.
 
+* A relationship column matches on whatever `importBy` names in `packs.json`. Where the related
+  entity has a stable human key, the template uses it rather than an opaque id — `RegulationCode`
+  resolves a `Reglamento` by its `codigo` (`RAD-XXXX`) and `LocationICAO` resolves a `Location` by
+  its `icaoCode` (`XXXX`) — so the spreadsheet stays readable and you can fill it in without
+  looking ids up. `importBy` has to name a storable, matchable field on the *related* entity;
+  `validate-data-packs.py` checks that against `metadata/entityDefs/`, so a typo or an
+  unmatchable type fails before an import runs.
 * Every id is namespaced `starter-` so the whole dataset can be removed with
   `make db-seed-starter-remove YES=1`. If you are typing real records, use your own ids — a row you
   create is never touched by the removal, and the seed never overwrites a row you have edited.

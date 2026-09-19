@@ -1,2 +1,2 @@
-ID,Name,ShortName,LocationID,ProviderID,PersonID,ServiceAreaID,SpecialtyCodes
-starter-lsvc-01,Servicio de ejemplo en el aeropuerto de ejemplo (editar),EJ,starter-loc-01,starter-prov-01,starter-poc-01,starter-area-general,ATS
+ID,Name,ShortName,LocationICAO,ProviderID,PersonID,ServiceAreaID,SpecialtyCodes
+starter-lsvc-01,Servicio de ejemplo en el aeropuerto de ejemplo (editar),EJ,XXXX,starter-prov-01,starter-poc-01,starter-area-general,ATS
