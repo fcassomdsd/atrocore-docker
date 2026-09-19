@@ -1,4 +1,4 @@
-.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao metadata-install metadata-export metadata-drift db-seed-nomenclatura install-layouts db-seed-starter db-seed-starter-remove import-data-packs validate-seeds validate-data-packs
+.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao metadata-install metadata-export metadata-drift db-seed-nomenclatura install-layouts db-seed-starter db-seed-starter-remove import-data-packs validate-seeds validate-data-packs db-migrate db-migrate-status
 
 help:
 	@echo "Available targets:"
@@ -6,6 +6,8 @@ help:
 	@echo "  make down                      Stop containers"
 	@echo "  make db-backup                 Create timestamped DB dump"
 	@echo "  make db-restore DUMP=... [DB=...]"
+	@echo "  make db-migrate-status         List pending schema migrations"
+	@echo "  make db-migrate YES=1          Apply pending schema migrations"
 	@echo "                                Restore dump into DB (destructive)"
 	@echo "  make db-seed-vocabularies [DB=...] YES=1"
 	@echo "                                Seed the USOAP/risk extensible enums (required)"
@@ -65,6 +67,19 @@ db-restore:
 	else \
 		./scripts/restore-db.sh "$(DUMP)"; \
 	fi
+
+db-migrate-status:
+	./scripts/migrate-db.sh --status
+
+# Run this BEFORE metadata-install: `sql diff` drops columns the new metadata no
+# longer declares, so a migration that reads one has to get there first.
+db-migrate:
+	@if [ "$(YES)" != "1" ]; then \
+		echo "Usage: make db-migrate YES=1"; \
+		echo "Take a backup first (make db-backup)."; \
+		exit 1; \
+	fi
+	./scripts/migrate-db.sh --yes
 
 metadata-install:
 	./scripts/install-metadata.sh

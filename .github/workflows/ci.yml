@@ -114,6 +114,8 @@ jobs:
 
       - run: ./scripts/bootstrap-web-data.sh
       - run: ./scripts/install-atrocore.sh --yes
+      # Before install-metadata.sh + `sql diff --run`: see the note in .gitlab-ci.yml.
+      - run: ./scripts/migrate-db.sh --yes
 
       # Console as www-data: exec defaults to root, and root-owned cache files break the web
       # process on its next write (HTTP 500 on every API route).
@@ -159,6 +161,14 @@ jobs:
           check "select count(*) from normativa where id like 'starter-%'"     "starter articles"   2
           check "select count(*) from location_service where id like 'starter-%'" "starter location services" 1
           check "select count(*) from inspector_specialty where inspector_id like 'starter-%'" "starter inspector specialties" 1
+          check "select count(*) from location_service_specialty where location_service_id like 'starter-%'" "starter location service specialties" 1
+          # The starter cadence exists with zero site visits -- the point of anchoring
+          # InspectionCadence on LocationService rather than the per-visit InspectedProvider.
+          check "select count(*) from inspection_cadence where id like 'starter-%'" "starter cadences" 1
+          check "select count(*) from site_visit where id not like 'demo-%'" "non-demo site visits" 0
+          # Migration 0002 re-pointed the link.
+          check "select count(*) from information_schema.columns where table_name='inspection_cadence' and column_name in ('inspected_provider_id','location_id')" "dropped cadence columns" 0
+          check "select count(*) from information_schema.columns where table_name='inspection_cadence' and column_name='location_service_id'" "cadence location_service_id" 1
           check "select count(*) from specialty"                                "specialties"       16
           check "select count(*) from \"user\" where id='1' and is_admin"       "super admin"        1
           check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7

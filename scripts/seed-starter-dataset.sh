@@ -73,6 +73,8 @@ fi
 STARTER_TABLES=(
   normativa
   reglamento
+  inspection_cadence
+  location_service_specialty
   location_service
   inspector_specialty
   inspector
@@ -102,9 +104,6 @@ if [[ "${REMOVE}" == "1" ]]; then
   # and the next `--yes` aborts on the (parent, child) unique index in *_specialty.
   REMOVE_SQL+=" DELETE FROM public.inspector_specialty WHERE inspector_id LIKE 'starter-%';"
   REMOVE_SQL+=" DELETE FROM public.location_service_specialty WHERE location_service_id LIKE 'starter-%';"
-  # The seed no longer writes a cadence (it needs an InspectedProvider), but versions before
-  # 2026-09-18 did — clean those up so an upgrade does not leak a starter- cadence row.
-  REMOVE_SQL+=" DELETE FROM public.inspection_cadence WHERE id LIKE 'starter-%';"
   REMOVE_SQL+=" COMMIT;"
 
   printf '%s\n' "${REMOVE_SQL}" | docker compose exec -T db psql \

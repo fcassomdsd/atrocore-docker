@@ -99,13 +99,6 @@
             "layoutDetailDisabled": true,
             "massUpdateDisabled": true,
             "isCustom": true
-        },
-        "inspectionCadences": {
-            "type": "linkMultiple",
-            "noLoad": true,
-            "layoutDetailDisabled": true,
-            "massUpdateDisabled": true,
-            "isCustom": true
         }
     },
     "links": {
@@ -131,11 +124,6 @@
             "type": "hasMany",
             "foreign": "location",
             "entity": "SiteVisit"
-        },
-        "inspectionCadences": {
-            "type": "hasMany",
-            "foreign": "location",
-            "entity": "InspectionCadence"
         }
     },
     "indexes": {

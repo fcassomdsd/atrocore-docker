@@ -20,10 +20,10 @@
 --   * Specialty, ActivityType, FindingSeverity and the USOAP vocabularies — those are
 --     real reference catalogs, not authority data; they are seeded by
 --     seed-nomenclatura.sh / seed-usoap-vocabularies.sh.
---   * SiteVisit / Inspection / InspectedProvider* / InspectionCadence — used per-visit
---     operational records that the planning flow creates and the navigation exposes, not
---     seeded (a cadence requires an InspectedProvider, which only exists after a site visit
---     has been planned).
+--   * SiteVisit / Inspection / InspectedProvider* — per-visit operational records that the
+--     planning flow creates and the navigation exposes, not seeded.
+--     (InspectionCadence *is* seeded below: it hangs off LocationService, which is authority
+--     data, so a cadence no longer needs a site visit to exist first.)
 --   * Finding / CorrectiveAction* — those live in Alfresco.
 --   * Tag — not enabled in the UI yet.
 --
@@ -80,6 +80,13 @@ INSERT INTO public.location_service (id, name, short_name, location_id, service_
     ('starter-lsvc-01', 'Servicio de ejemplo en el aeropuerto de ejemplo (editar)', 'EJ', 'starter-loc-01', 'starter-prov-01', 'starter-poc-01', 'starter-area-general', false, NOW(), NOW(), '1', '1')
 ON CONFLICT (id) DO NOTHING;
 
+-- Which specialties this service covers. Specialty codes are the real, seeded catalog.
+-- Without this row the service covers nothing, and a cadence naming a specialty could not
+-- be validated against it.
+INSERT INTO public.location_service_specialty (id, location_service_id, specialty_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('starter-lsvc-01-ats', 'starter-lsvc-01', 'spec_ats', false, NOW(), NOW(), '1', '1')
+ON CONFLICT (id) DO NOTHING;
+
 -- ------------------------------------------------------------------ regulation
 INSERT INTO public.reglamento (id, name, codigo, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
     ('starter-reglamento-01', 'Reglamento de aviación civil de ejemplo (editar)', 'RAD-XXXX', false, NOW(), NOW(), '1', '1')
@@ -97,14 +104,16 @@ INSERT INTO public.normativa (id, name, texto, activo, fecha_vigencia, reglament
 ON CONFLICT (id) DO NOTHING;
 
 -- ------------------------------------------------------------ inspection cadence
--- Deliberately not seeded: `InspectionCadence.inspectedProvider` is a required link to
--- `InspectedProvider`, which is an operational, per-site-visit record (it belongs to a
--- `SiteVisit` and a `ServiceProvider`), not authority data. A fresh install has no
--- `InspectedProvider`, so any cadence row here would be a dangling link that the UI cannot
--- save and the import module rejects ("no record(s) found in the entity 'InspectedProvider'").
--- Create cadences in the UI once a site visit has been planned; `data-packs/README.md`
--- describes how to bulk-load them afterwards.
+-- How often this service is due an inspection. The cadence hangs off the LocationService
+-- above -- authority data -- so it can exist before any site visit has been planned; the
+-- daily scheduling job in compliance_web is what turns a due cadence into a SiteVisit.
+--
+-- `next_due_date` is deliberately far in the future. A past date would make that job create
+-- a real SiteVisit on every install, including in CI, the first time it runs.
+INSERT INTO public.inspection_cadence (id, name, location_service_id, specialty_id, activity_type_id, interval_months, last_scheduled_date, next_due_date, active, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
+    ('starter-cadence-01', 'Cadencia de ejemplo: ATS en el aeropuerto de ejemplo (editar)', 'starter-lsvc-01', 'spec_ats', 'atype_i', 12, NULL, DATE '2027-12-31', true, false, NOW(), NOW(), '1', '1')
+ON CONFLICT (id) DO NOTHING;
 
 COMMIT;
 
-\echo 'Starter authority dataset seeded (11 placeholder rows across 10 tables). Edit the values or remove with --remove.'
+\echo 'Starter authority dataset seeded (13 placeholder rows across 12 tables). Edit the values or remove with --remove.'

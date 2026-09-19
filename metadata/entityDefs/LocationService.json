@@ -73,7 +73,7 @@
             "isCustom": true,
             "modifiedExtendedDisabled": false,
             "foreignName": "name",
-            "required": false,
+            "required": true,
             "dropdown": false,
             "readOnly": false
         },
@@ -85,7 +85,7 @@
             "isCustom": true,
             "modifiedExtendedDisabled": false,
             "foreignName": "name",
-            "required": false,
+            "required": true,
             "dropdown": false,
             "readOnly": false
         },
@@ -103,6 +103,13 @@
             "required": false,
             "dropdown": false,
             "readOnly": false
+        },
+        "inspectionCadences": {
+            "type": "linkMultiple",
+            "noLoad": true,
+            "layoutDetailDisabled": true,
+            "massUpdateDisabled": true,
+            "isCustom": true
         }
     },
     "links": {
@@ -144,6 +151,11 @@
             "type": "belongsTo",
             "foreign": "locationServices",
             "entity": "ServiceArea"
+        },
+        "inspectionCadences": {
+            "type": "hasMany",
+            "foreign": "locationService",
+            "entity": "InspectionCadence"
         }
     },
     "indexes": {

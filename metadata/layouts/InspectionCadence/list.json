@@ -4,13 +4,10 @@
     "link": true
   },
   {
-    "name": "inspectedProvider"
+    "name": "locationService"
   },
   {
     "name": "specialty"
-  },
-  {
-    "name": "location"
   },
   {
     "name": "nextDueDate"

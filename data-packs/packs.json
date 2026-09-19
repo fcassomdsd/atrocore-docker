@@ -102,7 +102,23 @@
       { "field": "location", "header": "LocationICAO", "importBy": ["icaoCode"] },
       { "field": "serviceProvider", "header": "ProviderID", "importBy": ["id"] },
       { "field": "pointOfContact", "header": "PersonID", "importBy": ["id"] },
-      { "field": "serviceArea", "header": "ServiceAreaID", "importBy": ["id"] }
+      { "field": "serviceArea", "header": "ServiceAreaID", "importBy": ["id"] },
+      { "field": "specialty", "header": "SpecialtyCodes", "importBy": ["code"] }
+    ]
+  },
+  "inspection-cadence": {
+    "entity": "InspectionCadence",
+    "code": "data-pack-inspection-cadence",
+    "title": "Inspection cadence",
+    "columns": [
+      { "field": "id", "header": "ID", "identifier": true },
+      { "field": "name", "header": "Name" },
+      { "field": "locationService", "header": "LocationServiceID", "importBy": ["id"] },
+      { "field": "specialty", "header": "SpecialtyCode", "importBy": ["code"] },
+      { "field": "activityType", "header": "ActivityTypeCode", "importBy": ["code"] },
+      { "field": "intervalMonths", "header": "IntervalMonths" },
+      { "field": "nextDueDate", "header": "NextDueDate" },
+      { "field": "active", "header": "Active" }
     ]
   }
 }
