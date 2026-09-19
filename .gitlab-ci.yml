@@ -106,6 +106,13 @@ validate:fresh-install:
     - ./scripts/seed-icao-reference-data.sh --yes
     - ./scripts/seed-nomenclatura.sh --yes
     - ./scripts/seed-demo-dataset.sh --yes
+    # The adopter's placeholder dataset, applied to a real schema so a row that no longer fits
+    # the metadata (a required link, a missing column) fails here instead of on someone's first
+    # install, then the same rows again through the import module (ImportFeed + CSV import).
+    # `import-data-pack.py` exits non-zero on any import error.
+    - ./scripts/seed-starter-dataset.sh --yes
+    # `ATROCORE_API_BASE` because this job reaches the stack through the dind alias, not localhost.
+    - ATROCORE_API_BASE="${ATROCORE_BASE_URL}/api/v1" ./scripts/import-data-pack.py --all
     - ATROCORE_HOST_BASE="${ATROCORE_BASE_URL}" ./scripts/install-layouts.sh --yes
     - ./scripts/enable-spanish-labels.sh --yes
     - |
@@ -125,6 +132,11 @@ validate:fresh-install:
       check "select count(*) from service_provider where id like 'demo-%'" "demo providers"     2
       check "select count(*) from inspector where id like 'demo-%'"        "demo inspectors"    3
       check "select count(*) from inspection where id like 'demo-%'"       "demo inspections"   3
+      # The starter dataset, seeded and then re-imported through the data packs above.
+      check "select count(*) from location where id like 'starter-%'"      "starter locations"  1
+      check "select count(*) from normativa where id like 'starter-%'"     "starter articles"   2
+      check "select count(*) from location_service where id like 'starter-%'" "starter location services" 1
+      check "select count(*) from inspector_specialty where inspector_id like 'starter-%'" "starter inspector specialties" 1
       check "select count(*) from specialty"                                "specialties"       16
       check "select count(*) from \"user\" where id='1' and is_admin"       "super admin"        1
       check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7
@@ -164,6 +176,7 @@ validate:seed:
   before_script: []
   script:
     - python3 scripts/validate-seeds.py
+    - python3 scripts/validate-data-packs.py
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "develop"'

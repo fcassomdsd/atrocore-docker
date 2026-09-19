@@ -34,7 +34,8 @@ jobs:
     # The fast, container-free companion to validate-fresh-install below: validates the seed's
     # invariants (additive-only, no TRUNCATE, every row id namespaced, row counts matching
     # documentation, every extensible enum the tracked entity definitions reference by id being
-    # created) in seconds, without Docker.
+    # created) in seconds, without Docker — plus that the `data-packs/` CSV templates still
+    # describe exactly the rows the starter seed writes.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +43,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 scripts/validate-seeds.py
+      - run: python3 scripts/validate-data-packs.py
 
   validate-fresh-install:
     # Walks the README's steps on an empty database: build, bootstrap the application out of
@@ -123,6 +125,14 @@ jobs:
       - run: ./scripts/seed-icao-reference-data.sh --yes
       - run: ./scripts/seed-nomenclatura.sh --yes
       - run: ./scripts/seed-demo-dataset.sh --yes
+      # The adopter's placeholder dataset, applied to a real schema so a row that no longer fits
+      # the metadata (a required link, a missing column) fails here instead of on someone's
+      # first install.
+      - run: ./scripts/seed-starter-dataset.sh --yes
+      # The other onboarding route to the same rows: ImportFeed + ImportConfiguratorItem are
+      # created over the API and every CSV is imported. Non-zero on any import error, and on a
+      # database the starter seed just populated every row should come back unchanged.
+      - run: ./scripts/import-data-pack.py --all
       - run: ./scripts/install-layouts.sh --yes
       - run: ./scripts/enable-spanish-labels.sh --yes
 
@@ -144,6 +154,11 @@ jobs:
           check "select count(*) from service_provider where id like 'demo-%'" "demo providers"     2
           check "select count(*) from inspector where id like 'demo-%'"        "demo inspectors"    3
           check "select count(*) from inspection where id like 'demo-%'"       "demo inspections"   3
+          # The starter dataset, seeded and then re-imported through the data packs above.
+          check "select count(*) from location where id like 'starter-%'"      "starter locations"  1
+          check "select count(*) from normativa where id like 'starter-%'"     "starter articles"   2
+          check "select count(*) from location_service where id like 'starter-%'" "starter location services" 1
+          check "select count(*) from inspector_specialty where inspector_id like 'starter-%'" "starter inspector specialties" 1
           check "select count(*) from specialty"                                "specialties"       16
           check "select count(*) from \"user\" where id='1' and is_admin"       "super admin"        1
           check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7

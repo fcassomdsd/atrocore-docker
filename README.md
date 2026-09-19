@@ -225,12 +225,12 @@ authority's data in it** — see the P0 finding in `TECHNICAL_DEBT_ANALYSIS.md`.
 The demo dataset above is synthetic and is not what a real deployment wants. For that,
 `sql/seed-starter-dataset.sql` ships a minimal, coherent set of **placeholder** authority
 records — one service area, provider, contact, inspector (+ specialty), location service,
-assignment group, inspection cadence, regulation and two articles — so you can see how the
-entities relate, then edit them into your own data.
+assignment group, regulation and two articles — so you can see how the entities relate, then
+edit them into your own data.
 
 ```bash
 ./scripts/seed-nomenclatura.sh --yes                # spec_* / atype_* the starter rows reference
-./scripts/seed-starter-dataset.sh --yes             # 12 placeholder rows across 11 tables
+./scripts/seed-starter-dataset.sh --yes             # 11 placeholder rows across 10 tables
 # or: make db-seed-starter YES=1
 
 ./scripts/seed-starter-dataset.sh --remove --yes    # delete every starter- row
@@ -240,7 +240,27 @@ Every id starts with `starter-` and every display name says "(editar)". The seed
 and uses `ON CONFLICT DO NOTHING`, so re-running it never overwrites a value you have edited,
 and it never touches a non-`starter-` row. Use it **instead of** the demo dataset, not
 together with it. It creates no site visits or inspections — plan those once your catalogs
-hold real data.
+hold real data. `InspectionCadence` is deliberately absent: its `inspectedProvider` is a
+required link to the per-site-visit `InspectedProvider`, so a cadence cannot exist before a
+site visit has been planned.
+
+### Authority data packs (the same records, loaded through the import module)
+
+The same records are also available as editable CSV templates under `data-packs/`, loaded
+through AtroCore's own import module rather than `psql` — the route to take if the person
+entering the data does not write SQL:
+
+```bash
+./scripts/import-data-pack.py --list                # what is available
+make import-data-packs                              # every pack (or PACK=location inspector)
+./scripts/import-data-pack.py --all --dry-run
+```
+
+Rows are matched by the `ID` column and upserted, so editing a value and re-running the command
+updates it, and re-importing unchanged data writes nothing. The packs and the SQL seed write
+exactly the same rows (CI asserts it in both directions); use one or the other.
+`data-packs/README.md` documents the column mapping, how to add columns, and how to add a pack.
+
 
 ### Layouts
 
