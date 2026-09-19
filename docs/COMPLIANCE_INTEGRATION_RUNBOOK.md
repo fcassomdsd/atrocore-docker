@@ -346,6 +346,14 @@ is the canonical guide for both profiles.
     ./scripts/seed-demo-dataset.sh --yes         # the demo dataset
     # or: make bootstrap / make metadata-install / make db-seed-vocabularies YES=1 …
 
+A **real deployment wants its own records, not the demo dataset.** Two interchangeable routes
+exist for the authority data an inspection needs (locations, providers, contacts, inspectors,
+service areas, assignment groups, regulations and their articles, location services):
+`./scripts/seed-starter-dataset.sh --yes` (placeholder `starter-` rows to edit, applied with
+`psql`) or `./scripts/import-data-pack.py --all` (the same records as editable CSV, loaded
+through AtroCore's own import module — see `data-packs/README.md`). Use one or the other; they
+write the same rows.
+
 On a **clean clone the first command is doing two jobs.** `./web-data` is bind-mounted over
 `/var/www/`, and the `atro-web` image contains no AtroCore application at all — it's
 installed directly into `web-data/` at bootstrap time (`scripts/bootstrap-web-data.sh` runs
