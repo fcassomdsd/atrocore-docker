@@ -87,7 +87,7 @@
       { "field": "texto", "header": "Text" },
       { "field": "activo", "header": "Active" },
       { "field": "fechaVigencia", "header": "EffectiveDate" },
-      { "field": "reglamento", "header": "RegulationID", "importBy": ["id"] },
+      { "field": "reglamento", "header": "RegulationCode", "importBy": ["codigo"] },
       { "field": "acapitesOACI", "header": "AnnexParagraphID", "importBy": ["id"] }
     ]
   },
@@ -99,7 +99,7 @@
       { "field": "id", "header": "ID", "identifier": true },
       { "field": "name", "header": "Name" },
       { "field": "shortName", "header": "ShortName" },
-      { "field": "location", "header": "LocationID", "importBy": ["id"] },
+      { "field": "location", "header": "LocationICAO", "importBy": ["icaoCode"] },
       { "field": "serviceProvider", "header": "ProviderID", "importBy": ["id"] },
       { "field": "pointOfContact", "header": "PersonID", "importBy": ["id"] },
       { "field": "serviceArea", "header": "ServiceAreaID", "importBy": ["id"] }
