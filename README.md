@@ -258,7 +258,8 @@ make import-data-packs                              # every pack (or PACK=locati
 
 Rows are matched by the `ID` column and upserted, so editing a value and re-running the command
 updates it, and re-importing unchanged data writes nothing. The packs and the SQL seed write
-exactly the same rows (CI asserts it in both directions); use one or the other.
+exactly the same rows — a container-free check asserts the ids match both ways, and CI imports
+every pack after applying the seed — so use one or the other.
 `data-packs/README.md` documents the column mapping, how to add columns, and how to add a pack.
 
 
