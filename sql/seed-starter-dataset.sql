@@ -20,8 +20,10 @@
 --   * Specialty, ActivityType, FindingSeverity and the USOAP vocabularies — those are
 --     real reference catalogs, not authority data; they are seeded by
 --     seed-nomenclatura.sh / seed-usoap-vocabularies.sh.
---   * SiteVisit / Inspection / InspectedProvider* — used per-visit operational records
---     that the planning flow creates and the navigation exposes, not seeded.
+--   * SiteVisit / Inspection / InspectedProvider* / InspectionCadence — used per-visit
+--     operational records that the planning flow creates and the navigation exposes, not
+--     seeded (a cadence requires an InspectedProvider, which only exists after a site visit
+--     has been planned).
 --   * Finding / CorrectiveAction* — those live in Alfresco.
 --   * Tag — not enabled in the UI yet.
 --
@@ -88,17 +90,21 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.normativa (id, name, texto, activo, fecha_vigencia, reglamento_id, acapites_o_a_c_i_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
     ('starter-norm-01', 'Artículo de ejemplo 1 (editar)',
      'El proveedor de servicios de navegación aérea debe mantener un manual de operaciones que describa los servicios prestados y los procedimientos que debe seguir el personal operativo, y debe mantenerlo disponible en cada puesto operativo. (Texto de ejemplo: sustituir por el artículo real.)',
-     true, CURRENT_DATE + 365, 'starter-reglamento-01', NULL, false, NOW(), NOW(), '1', '1'),
+     true, DATE '2027-12-31', 'starter-reglamento-01', NULL, false, NOW(), NOW(), '1', '1'),
     ('starter-norm-02', 'Artículo de ejemplo 2 (editar)',
      'El proveedor de servicios de navegación aérea debe vigilar el estado operativo de las ayudas a la navegación radioeléctrica, notificar sin demora a los usuarios cualquier interrupción del servicio y realizar comprobaciones periódicas en vuelo conforme a su programa de mantenimiento. (Texto de ejemplo: sustituir por el artículo real.)',
-     true, CURRENT_DATE + 365, 'starter-reglamento-01', NULL, false, NOW(), NOW(), '1', '1')
+     true, DATE '2027-12-31', 'starter-reglamento-01', NULL, false, NOW(), NOW(), '1', '1')
 ON CONFLICT (id) DO NOTHING;
 
 -- ------------------------------------------------------------ inspection cadence
-INSERT INTO public.inspection_cadence (id, name, description, interval_months, active, inspected_provider_id, specialty_id, location_id, activity_type_id, deleted, created_at, modified_at, created_by_id, modified_by_id) VALUES
-    ('starter-cadence-01', 'Cadencia anual de ejemplo (editar)', 'Una inspección (I) al año del proveedor de ejemplo en ATS (editar)', 12, true, 'starter-prov-01', 'spec_ats', 'starter-loc-01', 'atype_i', false, NOW(), NOW(), '1', '1')
-ON CONFLICT (id) DO NOTHING;
+-- Deliberately not seeded: `InspectionCadence.inspectedProvider` is a required link to
+-- `InspectedProvider`, which is an operational, per-site-visit record (it belongs to a
+-- `SiteVisit` and a `ServiceProvider`), not authority data. A fresh install has no
+-- `InspectedProvider`, so any cadence row here would be a dangling link that the UI cannot
+-- save and the import module rejects ("no record(s) found in the entity 'InspectedProvider'").
+-- Create cadences in the UI once a site visit has been planned; `data-packs/README.md`
+-- describes how to bulk-load them afterwards.
 
 COMMIT;
 
-\echo 'Starter authority dataset seeded (12 placeholder rows across 11 tables). Edit the values or remove with --remove.'
+\echo 'Starter authority dataset seeded (11 placeholder rows across 10 tables). Edit the values or remove with --remove.'

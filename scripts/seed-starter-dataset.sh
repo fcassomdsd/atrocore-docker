@@ -71,7 +71,6 @@ fi
 # Child rows first, so the order stays correct even if AtroCore ever starts
 # declaring database-level foreign keys.
 STARTER_TABLES=(
-  inspection_cadence
   normativa
   reglamento
   location_service
@@ -98,6 +97,14 @@ if [[ "${REMOVE}" == "1" ]]; then
   for table in "${STARTER_TABLES[@]}"; do
     REMOVE_SQL+=" DELETE FROM public.${table} WHERE id LIKE 'starter-%';"
   done
+  # Join rows written through the Import module get generated ids, not `starter-` ones, so
+  # remove them by their starter parent too. Otherwise `--remove` leaves an orphan link behind
+  # and the next `--yes` aborts on the (parent, child) unique index in *_specialty.
+  REMOVE_SQL+=" DELETE FROM public.inspector_specialty WHERE inspector_id LIKE 'starter-%';"
+  REMOVE_SQL+=" DELETE FROM public.location_service_specialty WHERE location_service_id LIKE 'starter-%';"
+  # The seed no longer writes a cadence (it needs an InspectedProvider), but versions before
+  # 2026-09-18 did — clean those up so an upgrade does not leak a starter- cadence row.
+  REMOVE_SQL+=" DELETE FROM public.inspection_cadence WHERE id LIKE 'starter-%';"
   REMOVE_SQL+=" COMMIT;"
 
   printf '%s\n' "${REMOVE_SQL}" | docker compose exec -T db psql \
