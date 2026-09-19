@@ -26,7 +26,7 @@
       "readOnly": true,
       "view": "views/fields/user"
     },
-    "inspectedProvider": {
+    "locationService": {
       "tooltip": false,
       "type": "link",
       "auditableEnabled": false,
@@ -39,18 +39,6 @@
       "readOnly": false
     },
     "specialty": {
-      "tooltip": false,
-      "type": "link",
-      "auditableEnabled": false,
-      "auditableDisabled": false,
-      "isCustom": true,
-      "modifiedExtendedDisabled": false,
-      "foreignName": "name",
-      "required": true,
-      "dropdown": false,
-      "readOnly": false
-    },
-    "location": {
       "tooltip": false,
       "type": "link",
       "auditableEnabled": false,
@@ -129,20 +117,15 @@
       "type": "belongsTo",
       "entity": "User"
     },
-    "inspectedProvider": {
+    "locationService": {
       "type": "belongsTo",
       "foreign": "inspectionCadences",
-      "entity": "InspectedProvider"
+      "entity": "LocationService"
     },
     "specialty": {
       "type": "belongsTo",
       "foreign": "inspectionCadences",
       "entity": "Specialty"
-    },
-    "location": {
-      "type": "belongsTo",
-      "foreign": "inspectionCadences",
-      "entity": "Location"
     },
     "activityType": {
       "type": "belongsTo",
@@ -169,6 +152,14 @@
         "deleted"
       ]
     }
+  },
+  "uniqueIndexes": {
+    "unique_cadence": [
+      "deleted",
+      "location_service_id",
+      "specialty_id",
+      "activity_type_id"
+    ]
   },
   "collection": {
     "asc": false

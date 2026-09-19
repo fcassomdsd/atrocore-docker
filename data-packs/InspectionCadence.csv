@@ -1,0 +1,2 @@
+ID,Name,LocationServiceID,SpecialtyCode,ActivityTypeCode,IntervalMonths,NextDueDate,Active
+starter-cadence-01,Cadencia de ejemplo: ATS en el aeropuerto de ejemplo (editar),starter-lsvc-01,ATS,I,12,2027-12-31,true

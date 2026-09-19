@@ -12,7 +12,7 @@
       ],
       [
         {
-          "name": "inspectedProvider"
+          "name": "locationService"
         },
         {
           "name": "specialty"
@@ -20,25 +20,19 @@
       ],
       [
         {
-          "name": "location"
-        },
-        {
           "name": "activityType"
-        }
-      ],
-      [
+        },
         {
           "name": "intervalMonths"
-        },
-        {
-          "name": "nextDueDate"
         }
       ],
       [
         {
-          "name": "lastScheduledDate"
+          "name": "nextDueDate"
         },
-        false
+        {
+          "name": "lastScheduledDate"
+        }
       ],
       [
         {

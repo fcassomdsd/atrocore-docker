@@ -144,7 +144,7 @@ because they carry live data.
 | `entityDefs/ActivityType.json` | New oversight-activity-type reference entity (`A`/`I`/`M`/`D`/`S`). |
 | `entityDefs/Specialty.json` | Flat specialty catalog: hierarchy and assignment-group links removed. |
 | `entityDefs/Inspection.json` | `inspectionType` varchar replaced by an `activityType` link. |
-| `entityDefs/InspectionCadence.json` | Same replacement; the link is required. |
+| `entityDefs/InspectionCadence.json` | Same replacement; the link is required. Also re-pointed from the per-visit `InspectedProvider` to `LocationService` (authority data, so a cadence can exist before any site visit), dropping its now-derivable `location` link and adding a `uniqueIndexes` entry on (`deleted`, `location_service_id`, `specialty_id`, `activity_type_id`) — note `uniqueIndexes` columns are physical snake_case, unlike `indexes`. See `sql/migrations/0002_repoint_inspection_cadence_to_location_service.sql`. |
 | `entityDefs/AssignmentGroup.json` | Reverse `specialty` link removed (grouping concept retired). |
 | `clientDefs/Specialty.json` | Tree list/detail views dropped along with the hierarchy. |
 | `clientDefs/ActivityType.json` | Plain record controller, mirroring `FindingSeverity`. |

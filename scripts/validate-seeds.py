@@ -125,7 +125,7 @@ for pattern, why in (
 # ---------------------------------------------------------------------------
 STARTER_SQL = ROOT / "sql" / "seed-starter-dataset.sql"
 STARTER_SH = ROOT / "scripts" / "seed-starter-dataset.sh"
-EXPECTED_STARTER_ROWS = 11
+EXPECTED_STARTER_ROWS = 13
 
 starter_ids: list[str] = []
 starter_insert_tables: set[str] = set()

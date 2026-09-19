@@ -129,3 +129,10 @@ done
 echo
 echo "Migrations complete. If this changed entities the metadata refers to, run"
 echo "scripts/install-metadata.sh next, then clear cache and review 'sql diff --show'."
+echo
+echo "NOTE: 'sql diff --run' will propose DROP TABLE schema_migrations, because AtroCore"
+echo "diffs the whole database against entityDefs with no asset filter (see"
+echo "Atro/Core/Utils/Database/Schema/Schema.php::getDiffQueries) and this ledger is not an"
+echo "entity. Losing it only means the migrations above are considered pending again; every"
+echo "migration in sql/migrations/ is written to be guarded and idempotent, so re-running"
+echo "this script is a no-op rather than a second application. Re-check with --status."

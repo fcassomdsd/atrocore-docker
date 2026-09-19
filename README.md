@@ -224,13 +224,13 @@ authority's data in it** — see the P0 finding in `TECHNICAL_DEBT_ANALYSIS.md`.
 
 The demo dataset above is synthetic and is not what a real deployment wants. For that,
 `sql/seed-starter-dataset.sql` ships a minimal, coherent set of **placeholder** authority
-records — one service area, provider, contact, inspector (+ specialty), location service,
-assignment group, regulation and two articles — so you can see how the entities relate, then
-edit them into your own data.
+records — one service area, provider, contact, inspector (+ specialty), location service
+(+ the specialty it covers), inspection cadence, assignment group, regulation and two
+articles — so you can see how the entities relate, then edit them into your own data.
 
 ```bash
 ./scripts/seed-nomenclatura.sh --yes                # spec_* / atype_* the starter rows reference
-./scripts/seed-starter-dataset.sh --yes             # 11 placeholder rows across 10 tables
+./scripts/seed-starter-dataset.sh --yes             # 13 placeholder rows across 12 tables
 # or: make db-seed-starter YES=1
 
 ./scripts/seed-starter-dataset.sh --remove --yes    # delete every starter- row
@@ -240,9 +240,13 @@ Every id starts with `starter-` and every display name says "(editar)". The seed
 and uses `ON CONFLICT DO NOTHING`, so re-running it never overwrites a value you have edited,
 and it never touches a non-`starter-` row. Use it **instead of** the demo dataset, not
 together with it. It creates no site visits or inspections — plan those once your catalogs
-hold real data. `InspectionCadence` is deliberately absent: its `inspectedProvider` is a
-required link to the per-site-visit `InspectedProvider`, so a cadence cannot exist before a
-site visit has been planned.
+hold real data.
+
+It *does* include one `InspectionCadence`, which hangs off the starter `LocationService` —
+authority data — so a cadence no longer requires a planned site visit to exist. Its
+`nextDueDate` is deliberately set to 2027-12-31: `compliance_web`'s daily scheduling job turns
+any cadence whose `nextDueDate` has passed into a real `SiteVisit`, and a placeholder row
+should not do that on a fresh install.
 
 ### Authority data packs (the same records, loaded through the import module)
 

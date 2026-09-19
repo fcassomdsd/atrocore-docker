@@ -40,17 +40,23 @@ stack must be up and the metadata installed.
 | `assignment-group` | AssignmentGroup | `AssignmentGroup.csv` | Groups inspectors are assigned through |
 | `reglamento` | Reglamento | `Reglamento.csv` | A regulation (the instrument) |
 | `normativa` | Normativa | `Normativa.csv` | Articles of a regulation, each linked to its `reglamento` |
-| `location-service` | LocationService | `LocationService.csv` | A provider's service at a location, with its contact and area |
+| `location-service` | LocationService | `LocationService.csv` | A provider's service at a location, with its contact, area and the specialties it covers |
+| `inspection-cadence` | InspectionCadence | `InspectionCadence.csv` | How often a location service is due an inspection |
 
 Import them **in the order listed** (it is the order in `data-packs/packs.json`): later packs
 reference rows earlier ones create. `--all` does this for you. A pack imported before its
 dependencies reports a clear `no record(s) found in the entity 'X' with: {...}` error.
 
-`InspectionCadence` is deliberately **not** a pack. Its `inspectedProvider` field is a required
-link to `InspectedProvider`, which is an operational record created per site visit, not authority
-data — so a cadence cannot exist until a site visit has been planned. Create cadences in the admin
-UI at that point; to bulk-load them later, copy `packs.json`'s shape, point the new feed at
-`InspectionCadence`, and use the ids of the `InspectedProvider` rows you already have.
+`LocationService.csv`'s `SpecialtyCodes` column is a multi-value link, matched by specialty code
+(`ATS`, `NAV`, ...) exactly like `Inspector.csv`'s. It is what says *which* specialties a provider
+covers at a location, and `inspection-cadence` depends on it: a cadence names one specialty, and
+that pairing is only meaningful if the service actually covers it.
+
+`inspection-cadence` is last because it references the `LocationService` rows the previous pack
+creates. A cadence is authority data — it hangs off `LocationService`, not off the per-visit
+`InspectedProvider` — so it can be loaded before any site visit exists; in fact it is what *causes*
+site visits, via `compliance_web`'s daily scheduling job. Keep `NextDueDate` in the future unless
+you want that job to schedule a visit on its next run.
 
 ## Editing a template
 

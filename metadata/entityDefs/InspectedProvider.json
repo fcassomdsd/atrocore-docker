@@ -63,13 +63,6 @@
             "required": false,
             "dropdown": false,
             "readOnly": false
-        },
-        "inspectionCadences": {
-            "type": "linkMultiple",
-            "noLoad": true,
-            "layoutDetailDisabled": true,
-            "massUpdateDisabled": true,
-            "isCustom": true
         }
     },
     "links": {
@@ -100,11 +93,6 @@
             "type": "belongsTo",
             "foreign": "inspectedProviders",
             "entity": "SiteVisit"
-        },
-        "inspectionCadences": {
-            "type": "hasMany",
-            "foreign": "inspectedProvider",
-            "entity": "InspectionCadence"
         }
     },
     "indexes": {
