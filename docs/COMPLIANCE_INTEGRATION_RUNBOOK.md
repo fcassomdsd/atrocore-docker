@@ -340,17 +340,21 @@ is the canonical guide for both profiles.
     ./scripts/install-metadata.sh                # copy the tracked model into web-data/
     docker compose exec -u www-data atro-web php /var/www/localhost/console.php clear cache
     docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
-    ./scripts/seed-usoap-vocabularies.sh --yes   # required: the enums the catalog points at
-    ./scripts/seed-icao-reference-data.sh --yes  # required: ICAO Annex documents/paragraphs/PQs
-    ./scripts/seed-nomenclatura.sh --yes         # required: spec_* / atype_* / severity catalog
+    ./scripts/seed-usoap-vocabularies.sh --yes           # required: the enums the catalog points at
+    ./scripts/seed-icao-reference-data.sh --yes          # required: ICAO Annex documents/paragraphs/PQs
+    ./scripts/seed-usoap-evidence-expectations.sh --yes  # required: 48 evidence expectations (needs the PQs above)
+    ./scripts/seed-nomenclatura.sh --yes                 # required: spec_* / atype_* / severity catalog
     ./scripts/install-layouts.sh --yes           # required: the menu + the 123 tracked layouts
     ./scripts/seed-demo-dataset.sh --yes         # the demo dataset (synthetic; skip for a real deployment)
     # or: make bootstrap / make metadata-install / make db-seed-vocabularies YES=1 …
 
-The seeds are **not all demo data**. The first three create the reference catalogs every
-deployment needs — the USOAP/risk extensible enums, the ICAO Annex/Protocol-Question catalog and
-the Specialty/ActivityType/FindingSeverity rows — and the data packs cannot resolve a
-`SpecialtyCode`, `ActivityTypeCode` or `Normativa.AnnexParagraphID` without them. Only
+The seeds are **not all demo data**. The first four create the reference catalogs every
+deployment needs — the USOAP/risk extensible enums, the ICAO Annex/Protocol-Question catalog, the
+USOAP evidence-expectation catalog that `compliance_cmis`'s CE-evidence report resolves its
+sampled-population ("Type-2") PQs from, and the Specialty/ActivityType/FindingSeverity rows —
+and the data packs cannot resolve a `SpecialtyCode`, `ActivityTypeCode` or
+`Normativa.AnnexParagraphID` without them. The expectation seed must run **after** the ICAO one:
+each of its 48 rows is matched to its parent Protocol Question by `code`. Only
 `seed-demo-dataset.sh` is synthetic and optional. `install-layouts.sh` is required for the UI
 either way: until it runs, the admin menu is AtroCore's stock one (Product/File/Attribute/…) and
 none of this platform's entities are reachable, because AtroCore reads the menu from

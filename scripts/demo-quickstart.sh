@@ -248,6 +248,7 @@ if [[ "${SKIP_SEED}" == "0" ]]; then
   ( cd "${REPO_DIR}" \
     && ./scripts/seed-usoap-vocabularies.sh --yes >/dev/null \
     && ./scripts/seed-icao-reference-data.sh --yes >/dev/null \
+    && ./scripts/seed-usoap-evidence-expectations.sh --yes >/dev/null \
     && ./scripts/seed-nomenclatura.sh --yes >/dev/null \
     && ./scripts/seed-demo-dataset.sh --yes >/dev/null \
     && ./scripts/install-layouts.sh --yes >/dev/null \

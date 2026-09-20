@@ -39,10 +39,19 @@ Use this checklist if you are running the project for the first time:
 7. Seed the reference catalogs every deployment needs. These are **real reference data, not demo data** — the USOAP/risk extensible enums, the ICAO Annex documents/paragraphs and USOAP Protocol Questions, and the Specialty/ActivityType/FindingSeverity catalogs. The data packs cannot resolve a `SpecialtyCode`, `ActivityTypeCode` or `Normativa.AnnexParagraphID` without them:
 
    ```bash
-   ./scripts/seed-usoap-vocabularies.sh --yes   # the enums the USOAP catalog points at
-   ./scripts/seed-icao-reference-data.sh --yes  # 15 ICAO Annex documents, 1,890 paragraphs, 281 PQs
-   ./scripts/seed-nomenclatura.sh --yes         # Specialty / ActivityType / FindingSeverity
+   ./scripts/seed-usoap-vocabularies.sh --yes            # the enums the USOAP catalog points at
+   ./scripts/seed-icao-reference-data.sh --yes           # 15 ICAO Annex documents, 1,890 paragraphs, 281 PQs
+   ./scripts/seed-usoap-evidence-expectations.sh --yes   # 48 evidence expectations (needs the PQs above)
+   ./scripts/seed-nomenclatura.sh --yes                  # Specialty / ActivityType / FindingSeverity
    ```
+
+   The evidence-expectation catalog is what `compliance_cmis`'s `POST /api/usoap/ce-evidence-report`
+   uses to resolve "Type-2" Protocol Questions — the ones whose guidance asks for a sample across a
+   whole population (checklists, inspection/audit reports, CAP follow-ups, manuals, licences,
+   training/personnel records, aerodrome dossiers, oversight plans) rather than one checklist item.
+   It is ICAO-derived and CAA-independent: each row is matched to its parent PQ by `code`, and the
+   ten artifact categories map to Alfresco node types in that webscript's `POPULATION_CATEGORY_TYPES`,
+   so nothing in it depends on a particular authority's data.
 
 8. **Install the menu and the layouts.** Until this runs, the admin UI shows only AtroCore's stock menu (Product/File/Attribute/…) and none of this platform's entities are reachable: AtroCore reads layout content from the `layout` table and the menu from `layout_profile.navigation`, and never from the tracked `metadata/layouts/` that `install-metadata.sh` copies into `data/layouts/`:
 
@@ -327,8 +336,11 @@ filtered to real (non-demo) rows. Unlike `Normativa` — a specific country's na
 (each adopting authority enters their own) — this content is ICAO-standard and CAA-independent, so it belongs
 in every install, not something each adopting authority has to re-enter by hand.
 `sql/seed-usoap-evidence-expectations.sql` depends on it: it resolves each row's parent Protocol Question by
-`code`, which otherwise resolves to `NULL`. Additive (`INSERT ... ON CONFLICT DO NOTHING`) and, like the
-vocabularies seed, deliberately **not** removed by `--remove`.
+`code`, which otherwise resolves to `NULL`. That seed is part of the same required foundation and is wired
+into the checklist, `demo-quickstart.sh` and both fresh-install CI jobs; run it as
+`./scripts/seed-usoap-evidence-expectations.sh --yes` (`make db-seed-usoap-evidence YES=1`) **after** the
+ICAO seed. Additive (`INSERT ... ON CONFLICT DO NOTHING`) and, like the vocabularies seed, deliberately
+**not** removed by `--remove`; the expectation seed itself replaces its own 48 rows on re-run.
 
 ### End-to-end demo quickstart (whole platform)
 
