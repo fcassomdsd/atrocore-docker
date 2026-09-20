@@ -125,6 +125,7 @@ jobs:
 
       - run: ./scripts/seed-usoap-vocabularies.sh --yes
       - run: ./scripts/seed-icao-reference-data.sh --yes
+      - run: ./scripts/seed-usoap-evidence-expectations.sh --yes
       - run: ./scripts/seed-nomenclatura.sh --yes
       - run: ./scripts/seed-demo-dataset.sh --yes
       # The adopter's placeholder dataset, applied to a real schema so a row that no longer fits
@@ -177,6 +178,9 @@ jobs:
           check "select count(*) from acapite_o_a_c_i where id not like 'demo-%'"                        "ICAO Annex paragraphs"  1890
           check "select count(*) from usoap_protocol_question where id not like 'demo-%'"                 "ICAO Protocol Questions" 281
           check "select count(*) from usoap_protocol_question_acapite_o_a_c_i where id not like 'demo-%'" "ICAO PQ citations"      439
+          check "select count(*) from usoap_evidence_expectation" "USOAP evidence expectations" 48
+          # every expectation must have resolved its parent PQ by code
+          check "select count(*) from usoap_evidence_expectation where usoap_protocol_question_id is null" "unresolved expectation parents" 0
           # The default layout profile and the layouts scripts/install-layouts.sh materialises into it.
           check "select count(*) from layout where layout_profile_id='default' and deleted=false" "materialised layouts" 123
           check "select count(*) from extensible_enum_option where name_es_do is not null and deleted=false" "es_DO vocabulary labels" 8

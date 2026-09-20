@@ -1,4 +1,4 @@
-.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao metadata-install metadata-export metadata-drift db-seed-nomenclatura install-layouts db-seed-starter db-seed-starter-remove import-data-packs validate-seeds validate-data-packs db-migrate db-migrate-status
+.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao db-seed-usoap-evidence metadata-install metadata-export metadata-drift db-seed-nomenclatura install-layouts db-seed-starter db-seed-starter-remove import-data-packs validate-seeds validate-data-packs db-migrate db-migrate-status
 
 help:
 	@echo "Available targets:"
@@ -13,6 +13,9 @@ help:
 	@echo "                                Seed the USOAP/risk extensible enums (required)"
 	@echo "  make db-seed-icao [DB=...] YES=1"
 	@echo "                                Seed ICAO Annex documents/paragraphs/PQs (required)"
+	@echo "  make db-seed-usoap-evidence [DB=...] YES=1"
+	@echo "                                Seed the USOAP evidence-expectation catalog (required;"
+	@echo "                                resolves each row to its PQ, so run after db-seed-icao)"
 	@echo "  make db-seed-demo [DB=...] YES=1"
 	@echo "                                Seed the synthetic demo dataset (additive, safe)"
 	@echo "  make db-seed-demo-remove [DB=...] YES=1"
@@ -43,8 +46,8 @@ help:
 	@echo "                                Seed the default layout profile's menu and materialise"
 	@echo "                                metadata/layouts/ into it (needs the stack up)"
 	@echo ""
-	@echo "Quickstart order: up -> metadata-install -> db-seed-vocabularies -> db-seed-icao -> db-seed-nomenclatura -> install-layouts"
-	@echo "  (all five are required; db-seed-demo is optional synthetic data, and install-layouts is"
+	@echo "Quickstart order: up -> metadata-install -> db-seed-vocabularies -> db-seed-icao -> db-seed-usoap-evidence -> db-seed-nomenclatura -> install-layouts"
+	@echo "  (all six are required; db-seed-demo is optional synthetic data, and install-layouts is"
 	@echo "   what puts the platform's menu and layouts into the admin UI)"
 	@echo "  (metadata-install bootstraps web-data/ itself when it is empty)"
 
@@ -134,6 +137,19 @@ db-seed-icao:
 		./scripts/seed-icao-reference-data.sh "$(DB)" --yes; \
 	else \
 		./scripts/seed-icao-reference-data.sh --yes; \
+	fi
+
+db-seed-usoap-evidence:
+	@if [ "$(YES)" != "1" ]; then \
+		echo "Usage: make db-seed-usoap-evidence [DB=target_db] YES=1"; \
+		echo "(replaces the 48-row USOAP evidence-expectation catalog; run db-seed-icao first,"; \
+		echo " so each row resolves its parent Protocol Question by code)"; \
+		exit 1; \
+	fi
+	@if [ -n "$(DB)" ]; then \
+		./scripts/seed-usoap-evidence-expectations.sh "$(DB)" --yes; \
+	else \
+		./scripts/seed-usoap-evidence-expectations.sh --yes; \
 	fi
 
 db-seed-demo:

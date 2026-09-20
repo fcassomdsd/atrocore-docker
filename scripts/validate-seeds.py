@@ -276,6 +276,89 @@ else:
                 "update EXPECTED_ICAO_ROWS, the SQL header and the CHANGELOG together"
             )
 
+# ---------------------------------------------------------------------------
+# The USOAP evidence-expectation catalog is the third piece of that foundation,
+# and the one nothing else supplies: compliance_cmis's
+# `POST /api/usoap/ce-evidence-report` resolves its "Type-2" (sampled
+# population) Protocol Questions from these rows, mapping each artifact
+# category to Alfresco node types in
+# webscripts/usoap/generate-ce-evidence-report.post.js. Every row is matched to
+# its parent PQ by `code`, so a pq_code the ICAO seed does not contain lands as
+# a NULL parent -- silently, which is how this catalog came to be unloaded.
+# ---------------------------------------------------------------------------
+EXPECTATIONS_FILE = ROOT / "sql" / "seed-usoap-evidence-expectations.sql"
+EXPECTED_EXPECTATION_ROWS = 48
+EXPECTED_ARTIFACT_CATEGORIES = 10
+expectation_count = 0
+
+if not EXPECTATIONS_FILE.is_file():
+    problems.append(f"{EXPECTATIONS_FILE.name} is missing")
+else:
+    expectations = EXPECTATIONS_FILE.read_text(encoding="utf-8")
+
+    expectation_ids = re.findall(r"^\s*\('(uee_[^']+)'", expectations, re.MULTILINE)
+    expectation_count = len(expectation_ids)
+    if expectation_count != EXPECTED_EXPECTATION_ROWS:
+        problems.append(
+            f"{EXPECTATIONS_FILE.name}: expected {EXPECTED_EXPECTATION_ROWS} rows, counted "
+            f"{expectation_count} -- update EXPECTED_EXPECTATION_ROWS, the SQL header and the "
+            "CHANGELOG together"
+        )
+    if len(set(expectation_ids)) != expectation_count:
+        problems.append(f"{EXPECTATIONS_FILE.name}: duplicate row ids")
+
+    categories = set(re.findall(r"\('(ext_uac_[a-z_]+)',\s*'[A-Z]", expectations))
+    if len(categories) != EXPECTED_ARTIFACT_CATEGORIES:
+        problems.append(
+            f"{EXPECTATIONS_FILE.name}: expected {EXPECTED_ARTIFACT_CATEGORIES} artifact categories, "
+            f"found {len(categories)}"
+        )
+
+    # the safety-net enum here must stay identical to the canonical one in the
+    # vocabularies seed, or the two would disagree about the ids the rows use
+    if VOCAB_FILE.is_file():
+        vocab_categories = set(
+            re.findall(r"\('(ext_uac_[a-z_]+)',\s*'[A-Z]", VOCAB_FILE.read_text(encoding="utf-8"))
+        )
+        if vocab_categories != categories:
+            problems.append(
+                f"{EXPECTATIONS_FILE.name} and {VOCAB_FILE.name} disagree about the artifact "
+                f"categories (only here: {sorted(categories - vocab_categories)}; "
+                f"only there: {sorted(vocab_categories - categories)})"
+            )
+
+    icao_codes = (
+        set(re.findall(r"'(PQ [0-9.]+)'", ICAO_FILE.read_text(encoding="utf-8")))
+        if ICAO_FILE.is_file() else set()
+    )
+    referenced_codes: set[str] = set()
+    for chunk in re.split(r"\n\s*\('uee_", expectations)[1:]:
+        code = re.search(r"'PQ ([0-9.]+)'", chunk)
+        if code:
+            referenced_codes.add("PQ " + code.group(1))
+        category = re.search(r"'(ext_uac_[a-z_]+)'", chunk)
+        if category and category.group(1) not in categories:
+            problems.append(
+                f"{EXPECTATIONS_FILE.name}: a row uses artifact category "
+                f"'{category.group(1)}', which the file does not define"
+            )
+    unresolved = sorted(referenced_codes - icao_codes)
+    if unresolved:
+        problems.append(
+            f"{EXPECTATIONS_FILE.name}: {len(unresolved)} pq_code(s) are not in "
+            f"{ICAO_FILE.name}, so they would load with a NULL parent, e.g. {unresolved[:3]}"
+        )
+
+    destructive = set(re.findall(r"DELETE\s+FROM\s+(?:public\.)?(\w+)", expectations, re.IGNORECASE))
+    outside = destructive - {"usoap_evidence_expectation"}
+    if outside:
+        problems.append(
+            f"{EXPECTATIONS_FILE.name} deletes from outside its documented scope: {sorted(outside)}"
+        )
+    if re.search(r"\bTRUNCATE\b", expectations, re.IGNORECASE):
+        problems.append(f"{EXPECTATIONS_FILE.name} uses TRUNCATE")
+
+
 if problems:
     print(f"FAIL: {len(problems)} problem(s) in the seed datasets:")
     for problem in problems:
@@ -286,5 +369,6 @@ print(
     f"OK: seeds valid — demo dataset: {len(row_ids)} rows across "
     f"{len(insert_tables)} tables, every DELETE scoped to demo- rows, "
     f"--remove covers every table; starter dataset: {len(starter_ids)} rows across "
-    f"{len(starter_insert_tables)} tables, additive/upsert, --remove covers every table."
+    f"{len(starter_insert_tables)} tables, additive/upsert, --remove covers every table; "
+    f"USOAP evidence expectations: {expectation_count} rows, every pq_code resolvable."
 )

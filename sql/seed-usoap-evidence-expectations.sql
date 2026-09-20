@@ -34,8 +34,11 @@
 --     -v ON_ERROR_STOP=1 < sql/seed-usoap-evidence-expectations.sql
 --
 -- IDEMPOTENT / DESTRUCTIVE SCOPE: replaces every row in
--- `usoap_evidence_expectation` and re-syncs the `usoap_artifact_category`
--- extensible-enum options. Nothing outside those two is touched.
+-- `usoap_evidence_expectation`. It also creates the `usoap_artifact_category`
+-- extensible-enum group as a safety net for when `seed-usoap-vocabularies.sql`
+-- has not run — that seed is the canonical home for the enums and defines the
+-- same ten options, so this part is a no-op once it has. Nothing outside
+-- `usoap_evidence_expectation` and those enum rows is touched.
 --
 -- IDs are deterministic and human-readable (varchar(36)), matching the
 -- convention in seed-nomenclatura-catalog.sql, so re-running this script is
@@ -131,16 +134,19 @@ VALUES
     ('ext_uac_link_license',            'ext_usoap_artifact_cat', 'ext_uac_license',            80,  false, NOW(), NOW(), '1', '1'),
     ('ext_uac_link_oversight_plan',     'ext_usoap_artifact_cat', 'ext_uac_oversight_plan',     90,  false, NOW(), NOW(), '1', '1'),
     ('ext_uac_link_aerodrome_dossier',  'ext_usoap_artifact_cat', 'ext_uac_aerodrome_dossier',  100, false, NOW(), NOW(), '1', '1')
-ON CONFLICT (id) DO NOTHING;
+-- No conflict target: the vocabularies seed (`seed-usoap-vocabularies.sql`) creates the same
+-- relations under its own `vocab-link-*` ids, so the conflict is on the
+-- (deleted, extensible_enum_id, extensible_enum_option_id) unique index, not on `id`.
+ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------------
 -- Evidence-expectation rows, originally backfilled from the (unversioned)
 -- `tabla pqs AGA.csv` / `tabla pqs ANS.csv` source tables.
 -- `usoap_protocol_question_id` is resolved by `code` at insert time
 -- rather than hard-coded, since PQ ids are AtroCore-generated (not ours to
--- fix); a NULL here means the PQ catalog hasn't been imported yet for that
--- code and the row is skipped from the WHERE-matched insert (see the
--- diagnostic query after the DELETE below).
+-- fix); a NULL here means the PQ catalog has not been imported for that code,
+-- so the row lands without a parent and the block at the end of this file
+-- raises a NOTICE naming the count (see the CI assertion that the count is 0).
 -- ---------------------------------------------------------------------------
 DELETE FROM public.usoap_evidence_expectation;
 
