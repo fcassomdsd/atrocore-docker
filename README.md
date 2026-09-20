@@ -42,8 +42,15 @@ Use this checklist if you are running the project for the first time:
    ./scripts/seed-usoap-vocabularies.sh --yes            # the enums the USOAP catalog points at
    ./scripts/seed-icao-reference-data.sh --yes           # 15 ICAO Annex documents, 1,890 paragraphs, 281 PQs
    ./scripts/seed-usoap-evidence-expectations.sh --yes   # 48 evidence expectations (needs the PQs above)
-   ./scripts/seed-nomenclatura.sh --yes                  # Specialty / ActivityType / FindingSeverity
+   ./scripts/seed-nomenclatura.sh --yes                  # Specialty (3 default) / ActivityType / FindingSeverity
    ```
+
+   The **specialty** catalog is CAA-specific — an authority may not split CNS into
+   NAV/COM/SUR/ECNS/DPR at all, or may have a single *AGA* instead of APR/AVIS/FAU/PAV/SSEI — so
+   the seed ships only the three codes the demo and starter datasets reference (`ATS`, `NAV`,
+   `MET`). Add your own in the admin UI, edit the seed, or load the reference sixteen as a
+   starting point with `./scripts/seed-nomenclatura.sh --yes --full-specialties`
+   (`make db-seed-nomenclatura YES=1 FULL_SPECIALTIES=1`).
 
    The evidence-expectation catalog is what `compliance_cmis`'s `POST /api/usoap/ce-evidence-report`
    uses to resolve "Type-2" Protocol Questions — the ones whose guidance asks for a sample across a
@@ -474,7 +481,8 @@ Main targets:
 - `make db-seed-demo-remove [DB=...] YES=1` - Delete every `demo-` row
 - `make db-seed [DUMP=atrocore.dump] [DB=...] YES=1` - Restore a real dump instead (destructive)
 - `make metadata-install` - Install tracked `metadata/` into `web-data/`
-- `make db-seed-nomenclatura [DB=...] YES=1` - Seed Specialty/ActivityType catalogs
+- `make db-seed-nomenclatura [DB=...] YES=1 [FULL_SPECIALTIES=1]` - Seed the Specialty (ATS/NAV/MET
+  by default; `FULL_SPECIALTIES=1` adds the reference sixteen), ActivityType and FindingSeverity catalogs
 
 ## CI Validation (GitLab)
 
