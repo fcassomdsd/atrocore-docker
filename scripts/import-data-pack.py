@@ -232,27 +232,58 @@ def wait_for_job(
         time.sleep(2)
 
 
+JOB_LOG_TYPES = ("create", "update", "skip", "error")
+
+
+def _job_log_total(client: Client, job_id: str, kind: str | None = None) -> int:
+    """How many ImportJobLog rows this job has, optionally of one type.
+
+    The count comes from the collection's `total`, not from the returned rows: the API returns
+    rows in an arbitrary order and a large pack logs thousands of them, so counting a capped page
+    would under-report — and, worse, would let a row error beyond the page go unnoticed."""
+    query = {"where[0][type]": "equals", "where[0][attribute]": "importJobId",
+             "where[0][value]": job_id, "maxSize": "1"}
+    if kind:
+        query.update({"where[1][type]": "equals", "where[1][attribute]": "type", "where[1][value]": kind})
+    result = client.entity("GET", f"/ImportJobLog?{urllib.parse.urlencode(query)}")
+    return int((result or {}).get("total") or 0)
+
+
 def summarise(client: Client, job_id: str) -> tuple[dict[str, int], list[str]]:
-    result = client.entity(
-        "GET",
-        f"/ImportJobLog?{urllib.parse.urlencode({'where[0][type]': 'equals', 'where[0][attribute]': 'importJobId', 'where[0][value]': job_id, 'maxSize': '200'})}",
-    )
-    counts: dict[str, int] = {}
+    counts = {kind: _job_log_total(client, job_id, kind) for kind in JOB_LOG_TYPES}
+    counts = {kind: total for kind, total in counts.items() if total}
+
     errors: list[str] = []
-    for row in (result or {}).get("list") or []:
-        kind = row.get("type") or "unknown"
-        counts[kind] = counts.get(kind, 0) + 1
-        if kind == "error":
+    if counts.get("error"):
+        # Fetch the messages themselves (bounded), but trust the total above for the count, so a
+        # failing import is never reported as a success just because the page was full.
+        result = client.entity(
+            "GET",
+            f"/ImportJobLog?{urllib.parse.urlencode({'where[0][type]': 'equals', 'where[0][attribute]': 'importJobId', 'where[0][value]': job_id, 'where[1][type]': 'equals', 'where[1][attribute]': 'type', 'where[1][value]': 'error', 'maxSize': '200'})}",
+        )
+        for row in (result or {}).get("list") or []:
             message = (row.get("message") or "no message").strip()
             errors.append(f"row {row.get('rowNumber')}: {message}")
+        if counts["error"] > len(errors):
+            errors.append(f"... and {counts['error'] - len(errors)} more error(s) not shown")
+
+    logged = sum(counts.values())
+    all_logs = _job_log_total(client, job_id)
+    if all_logs > logged:
+        counts["other"] = all_logs - logged
     return counts, errors
 
 
-def submit_pack(client: Client, key: str, pack: dict, csv_path: Path) -> tuple[str, str | None]:
+def submit_pack(client: Client, key: str, pack: dict, csv_path: Path) -> tuple[str, str | None] | None:
     """Ensure the feed/columns and hand the CSV rows to the import module. Returns the feed id
     and the newest job id seen before submitting, so a later job can be told apart from an old
-    one. The job itself is collected separately so `--all` can queue every pack before waiting."""
+    one. The job itself is collected separately so `--all` can queue every pack before waiting.
+    Returns None when the CSV carries no data rows — an empty template has nothing to import and
+    submitting it would only create a job with no log rows."""
     rows = read_rows(csv_path, pack["columns"])
+    if not rows:
+        print(f"  {key}: {csv_path.name} has no data rows — nothing to import")
+        return None
     print(f"  {key}: {len(rows)} row(s) from {csv_path.name}")
     feed_id = ensure_feed(client, pack)
     ensure_items(client, feed_id, pack["columns"])
@@ -318,8 +349,10 @@ def main() -> int:
             print(f"  {key}: {len(rows)} row(s) from {csv_path.name}")
             print(f"    [dry-run] would ensure feed {pack['code']} ({pack['entity']}) and import")
             continue
-        feed_id, previous_job = submit_pack(client, key, pack, csv_path)
-        submitted.append((key, feed_id, previous_job))
+        result = submit_pack(client, key, pack, csv_path)
+        if result is not None:
+            feed_id, previous_job = result
+            submitted.append((key, feed_id, previous_job))
 
     failures = 0
     for key, feed_id, previous_job in submitted:
