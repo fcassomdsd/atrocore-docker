@@ -36,9 +36,25 @@ Use this checklist if you are running the project for the first time:
 
    Console commands must run as **`www-data`** (`-u www-data`): `docker compose exec` defaults to root, and root-owned files in `data/cache` make the web process fail on its next cache write, which surfaces as `500` on every API route.
 
-7. Open http://localhost.
+7. Seed the reference catalogs every deployment needs. These are **real reference data, not demo data** — the USOAP/risk extensible enums, the ICAO Annex documents/paragraphs and USOAP Protocol Questions, and the Specialty/ActivityType/FindingSeverity catalogs. The data packs cannot resolve a `SpecialtyCode`, `ActivityTypeCode` or `Normativa.AnnexParagraphID` without them:
 
-8. Optional: load the synthetic demo dataset (next section) with `./scripts/seed-usoap-vocabularies.sh --yes && ./scripts/seed-icao-reference-data.sh --yes && ./scripts/seed-nomenclatura.sh --yes && ./scripts/seed-demo-dataset.sh --yes`, or restore a real authority's data with `./scripts/seed-demo-db.sh <dump-file> --yes`.
+   ```bash
+   ./scripts/seed-usoap-vocabularies.sh --yes   # the enums the USOAP catalog points at
+   ./scripts/seed-icao-reference-data.sh --yes  # 15 ICAO Annex documents, 1,890 paragraphs, 281 PQs
+   ./scripts/seed-nomenclatura.sh --yes         # Specialty / ActivityType / FindingSeverity
+   ```
+
+8. **Install the menu and the layouts.** Until this runs, the admin UI shows only AtroCore's stock menu (Product/File/Attribute/…) and none of this platform's entities are reachable: AtroCore reads layout content from the `layout` table and the menu from `layout_profile.navigation`, and never from the tracked `metadata/layouts/` that `install-metadata.sh` copies into `data/layouts/`:
+
+   ```bash
+   ./scripts/install-layouts.sh --yes     # or: make install-layouts YES=1
+   ```
+
+   Optional, if the deployment is Spanish-first: `./scripts/enable-spanish-labels.sh --yes` adds the `es_DO` language and its vocabulary labels.
+
+9. Open http://localhost.
+
+10. Optional: load the synthetic demo dataset with `./scripts/seed-demo-dataset.sh --yes` (see "Synthetic demo dataset" below), or restore a real authority's data with `./scripts/seed-demo-db.sh <dump-file> --yes`. To enter **your own** authority records instead, use the data packs — `./scripts/import-data-pack.sh --all` (`make import-data-packs`). The packs create their `ImportFeed` and column mappings through the API on the first import of each pack, so a fresh install has **no import feeds** until you run it.
 
 Everything above is also available as one command once the stack is up — see "End-to-end demo quickstart" below.
 
@@ -266,13 +282,21 @@ exactly the same rows — a container-free check asserts the ids match both ways
 every pack after applying the seed — so use one or the other.
 `data-packs/README.md` documents the column mapping, how to add columns, and how to add a pack.
 
+**The import feeds live in the database, not in `metadata/`.** Each pack's `ImportFeed` and its
+per-column mappings are created through the API the first time that pack is imported (the runner
+matches an existing feed by its `code` and reuses it), so a fresh install has no import feeds
+until `make import-data-packs` has run at least once.
 
 ### Layouts
 
-`metadata/layouts/` drives the admin UI only once it is written into a layout profile:
-`./scripts/install-layouts.sh --yes` (`make install-layouts YES=1`) seeds the profile's menu
-and materialises every tracked layout. Run it after the seeds; `demo-quickstart.sh` does it
-for you. Besides the plain `<view>.json` files it also sends the related-scope layouts
+`metadata/layouts/` drives the admin UI only once it is written into a layout profile, and the
+menu itself is that profile's `navigation` column — not the tracked `metadata/scopes`. On a fresh
+install **neither exists until you run** `./scripts/install-layouts.sh --yes`
+(`make install-layouts YES=1`), which seeds the profile's menu (26 platform entities in 7 groups)
+and materialises all 123 tracked layouts into the `layout` table; `install-metadata.sh` copying
+`metadata/layouts/` into `data/layouts/` is inert, because AtroCore never reads that path. Run it
+after the seeds; `demo-quickstart.sh` does it for you. Besides the plain `<view>.json` files it
+also sends the related-scope layouts
 (`<view>In<RelatedEntity>For<Link>.json`, e.g. `Inspector` inside `Specialty.inspectors`) with
 the `relatedScope` the API expects.
 

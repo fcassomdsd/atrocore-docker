@@ -43,7 +43,10 @@ help:
 	@echo "                                Seed the default layout profile's menu and materialise"
 	@echo "                                metadata/layouts/ into it (needs the stack up)"
 	@echo ""
-	@echo "Quickstart order: up -> metadata-install -> db-seed-vocabularies -> db-seed-icao -> db-seed-nomenclatura -> db-seed-demo -> install-layouts"	@echo "(metadata-install bootstraps web-data/ itself when it is empty)"
+	@echo "Quickstart order: up -> metadata-install -> db-seed-vocabularies -> db-seed-icao -> db-seed-nomenclatura -> install-layouts"
+	@echo "  (all five are required; db-seed-demo is optional synthetic data, and install-layouts is"
+	@echo "   what puts the platform's menu and layouts into the admin UI)"
+	@echo "  (metadata-install bootstraps web-data/ itself when it is empty)"
 
 up:
 	docker compose up -d

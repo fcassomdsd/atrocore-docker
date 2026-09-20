@@ -342,17 +342,30 @@ is the canonical guide for both profiles.
     docker compose exec -u www-data atro-web php /var/www/localhost/console.php sql diff --run
     ./scripts/seed-usoap-vocabularies.sh --yes   # required: the enums the catalog points at
     ./scripts/seed-icao-reference-data.sh --yes  # required: ICAO Annex documents/paragraphs/PQs
-    ./scripts/seed-nomenclatura.sh --yes         # spec_* / atype_* reference rows
-    ./scripts/seed-demo-dataset.sh --yes         # the demo dataset
+    ./scripts/seed-nomenclatura.sh --yes         # required: spec_* / atype_* / severity catalog
+    ./scripts/install-layouts.sh --yes           # required: the menu + the 123 tracked layouts
+    ./scripts/seed-demo-dataset.sh --yes         # the demo dataset (synthetic; skip for a real deployment)
     # or: make bootstrap / make metadata-install / make db-seed-vocabularies YES=1 …
+
+The seeds are **not all demo data**. The first three create the reference catalogs every
+deployment needs — the USOAP/risk extensible enums, the ICAO Annex/Protocol-Question catalog and
+the Specialty/ActivityType/FindingSeverity rows — and the data packs cannot resolve a
+`SpecialtyCode`, `ActivityTypeCode` or `Normativa.AnnexParagraphID` without them. Only
+`seed-demo-dataset.sh` is synthetic and optional. `install-layouts.sh` is required for the UI
+either way: until it runs, the admin menu is AtroCore's stock one (Product/File/Attribute/…) and
+none of this platform's entities are reachable, because AtroCore reads the menu from
+`layout_profile.navigation` and layout content from the `layout` table — never from the
+`metadata/layouts/` that `install-metadata.sh` copies into `data/layouts/`.
 
 A **real deployment wants its own records, not the demo dataset.** Two interchangeable routes
 exist for the authority data an inspection needs (locations, providers, contacts, inspectors,
 service areas, assignment groups, regulations and their articles, location services):
 `./scripts/seed-starter-dataset.sh --yes` (placeholder `starter-` rows to edit, applied with
-`psql`) or `./scripts/import-data-pack.py --all` (the same records as editable CSV, loaded
+`psql`) or `./scripts/import-data-pack.sh --all` (the same records as editable CSV, loaded
 through AtroCore's own import module — see `data-packs/README.md`). Use one or the other; they
-write the same rows.
+write the same rows. The import feeds themselves do not exist until the pack runner runs: there
+is no tracked `ImportFeed` metadata, so it creates each feed and its column mappings over the
+API on first import.
 
 On a **clean clone the first command is doing two jobs.** `./web-data` is bind-mounted over
 `/var/www/`, and the `atro-web` image contains no AtroCore application at all — it's
