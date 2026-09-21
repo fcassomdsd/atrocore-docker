@@ -135,7 +135,15 @@ jobs:
       # The other onboarding route to the same rows: ImportFeed + ImportConfiguratorItem are
       # created over the API and every CSV is imported. Non-zero on any import error, and on a
       # database the starter seed just populated every row should come back unchanged.
-      - run: ./scripts/import-data-pack.sh --all
+      # On failure, dump the AtroCore log too: the runner reports each failing ImportJob's own
+      # message, and the container log carries the queue job's failure detail behind it.
+      - name: Import every data pack
+        run: |
+          if ! ./scripts/import-data-pack.sh --all; then
+            echo "--- data-pack import failed; last 80 lines of the AtroCore log:"
+            docker compose logs --tail=80 atro-web || true
+            exit 1
+          fi
       - run: ./scripts/install-layouts.sh --yes
       - run: ./scripts/enable-spanish-labels.sh --yes
 

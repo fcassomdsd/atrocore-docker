@@ -98,6 +98,12 @@ clicked through, then runs the import:
    needed;
 5. polls the resulting `ImportJob` and prints the outcome, with one line per failure.
 
+Packs are imported **one at a time**, deliberately: the import module creates its shared
+`import_feeds` root folder on first use with an unlocked SELECT-then-INSERT, so jobs starting
+together on an instance that has never imported anything all try to insert it and the losers die
+on AtroCore's `folder(code, deleted)` unique index — before logging a single row. Waiting for each
+job costs one job's runtime and removes the race.
+
 The exit status is non-zero if any pack reports an import error, so it gates CI. The whole flow is
 also what the `fresh-install` CI job exercises on an empty database after applying the seed, which
 is how a pack whose links or required fields no longer fit the metadata gets caught before a user

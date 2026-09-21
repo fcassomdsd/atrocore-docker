@@ -9,7 +9,7 @@ script does the parts an adopter would otherwise have to learn in the import UI:
   2. ensures one ImportConfiguratorItem per mapped column;
   3. reads the CSV, converts each row to a JSON object keyed by the CSV headers;
   4. runs the import through `POST /api/v1/ImportFeed/action/easyCatalog`;
-  5. waits for the resulting ImportJob and prints its outcome.
+  5. waits for the resulting ImportJob and prints its outcome, one pack at a time.
 
 It is idempotent: feeds use `fileDataAction=create_update`, so re-importing an edited CSV
 updates the rows whose identifier it already knows and creates the rest. The exit status is
@@ -274,10 +274,16 @@ def summarise(client: Client, job_id: str) -> tuple[dict[str, int], list[str]]:
     return counts, errors
 
 
+# feed id -> (pack code, rows) of the submission in flight, so a job that failed before
+# processing anything can simply be re-submitted (the import upserts, so this is idempotent).
+PENDING_ROWS: dict[str, list[dict]] = {}
+PENDING_ROWS_CODE: dict[str, str] = {}
+
+
 def submit_pack(client: Client, key: str, pack: dict, csv_path: Path) -> tuple[str, str | None] | None:
     """Ensure the feed/columns and hand the CSV rows to the import module. Returns the feed id
     and the newest job id seen before submitting, so a later job can be told apart from an old
-    one. The job itself is collected separately so `--all` can queue every pack before waiting.
+    one. The job is collected by the caller before the next pack is submitted (see `main`).
     Returns None when the CSV carries no data rows — an empty template has nothing to import and
     submitting it would only create a job with no log rows."""
     rows = read_rows(csv_path, pack["columns"])
@@ -288,22 +294,61 @@ def submit_pack(client: Client, key: str, pack: dict, csv_path: Path) -> tuple[s
     feed_id = ensure_feed(client, pack)
     ensure_items(client, feed_id, pack["columns"])
     previous_job = latest_job_id(client, feed_id)
+    PENDING_ROWS[feed_id] = rows
+    PENDING_ROWS_CODE[feed_id] = pack["code"]
     client.action("easyCatalog", {"code": pack["code"], "json": rows})
     return feed_id, previous_job
 
 
 def collect_pack(client: Client, key: str, feed_id: str, previous_job: str | None) -> bool:
-    """Wait for a submitted pack's job and report its outcome; True when it fully succeeded."""
+    """Wait for a submitted pack's job and report its outcome; True when it fully succeeded.
+
+    A job that ends Failed with **no log rows at all** died before it processed a single row,
+    which is a different thing from a row-level error (those always log). Nothing was imported,
+    so re-submitting is safe — the import upserts by id — and we do that once before reporting a
+    failure, printing the job's own `message` either way so a failure does not read as a bare
+    "no log rows". The known cause is the shared `import_feeds` folder race described in `main`;
+    this script no longer triggers it (it imports one pack at a time), and the retry remains as
+    a backstop for a *different* importer running against the same instance."""
     job = wait_for_job(client, feed_id, previous_job)
     if job is None:
         print(f"  {key}: feed {feed_id} · no job started (every row already up to date)")
         return True
+
     counts, errors = summarise(client, job.get("id", ""))
+    state = job.get("state", "unknown")
+    logged = sum(counts.values())
+    message = (job.get("message") or "").strip()
+
+    if state == "Failed" and logged == 0:
+        print(f"  {key}: job Failed before processing any row — retrying once")
+        if message:
+            print(f"      ! {message}")
+        retry_job = resubmit_pack(client, feed_id, key)
+        if retry_job is not None:
+            job = retry_job
+            counts, errors = summarise(client, job.get("id", ""))
+            state = job.get("state", "unknown")
+            logged = sum(counts.values())
+            message = (job.get("message") or "").strip()
+
     summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "no log rows"
-    print(f"  {key}: feed {feed_id} · job {job.get('state', 'unknown')} · {summary}")
-    for message in errors:
-        print(f"      ! {message}")
-    return job.get("state") == "Success" and not errors
+    print(f"  {key}: feed {feed_id} · job {state} · {summary}")
+    for row_error in errors:
+        print(f"      ! {row_error}")
+    if state != "Success" and message:
+        print(f"      ! job message: {message}")
+    return state == "Success" and not errors
+
+
+def resubmit_pack(client: Client, feed_id: str, key: str) -> dict | None:
+    """Re-submit the last rows this feed was given (safe: the import upserts by id)."""
+    rows = PENDING_ROWS.get(feed_id)
+    if rows is None:
+        return None
+    previous_job = latest_job_id(client, feed_id)
+    client.action("easyCatalog", {"code": PENDING_ROWS_CODE[feed_id], "json": rows})
+    return wait_for_job(client, feed_id, previous_job)
 
 
 def main() -> int:
@@ -338,7 +383,7 @@ def main() -> int:
         client.login()
 
     print(f"Importing {len(keys)} data pack(s)" + (" (dry run)" if args.dry_run else "") + ":")
-    submitted: list[tuple[str, str, str | None]] = []
+    failures = 0
     for key in keys:
         pack = packs[key]
         csv_path = Path(args.file) if args.file else PACKS_DIR / f"{pack['entity']}.csv"
@@ -350,13 +395,18 @@ def main() -> int:
             print(f"    [dry-run] would ensure feed {pack['code']} ({pack['entity']}) and import")
             continue
         result = submit_pack(client, key, pack, csv_path)
-        if result is not None:
-            feed_id, previous_job = result
-            submitted.append((key, feed_id, previous_job))
-
-    failures = 0
-    for key, feed_id, previous_job in submitted:
-        if not collect_pack(client, key, feed_id, previous_job):
+        if result is None:
+            continue
+        # One pack at a time, deliberately. The import module creates its shared `import_feeds`
+        # root folder on first use with an unlocked SELECT-then-INSERT
+        # (`ImportFeed::createImportFileFolder`, vendored under vendor/atrocore/import): when the
+        # queue hands the daemon several jobs at once — which is what a fresh instance does, its
+        # jobs all still being Pending — the workers race to insert that folder and every loser
+        # dies on the `folder(code, deleted)` unique index, before it logs a single row. That is
+        # the "job Failed · no log rows" that failed the fresh-install CI run intermittently.
+        # Waiting for each job costs one job's runtime and removes the race by construction,
+        # including when an earlier pack's job failed before reaching the folder.
+        if not collect_pack(client, key, *result):
             failures += 1
 
     if failures:

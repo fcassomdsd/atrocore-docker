@@ -118,7 +118,12 @@ validate:fresh-install:
     # `import-data-pack.sh` exits non-zero on any import error.
     - ./scripts/seed-starter-dataset.sh --yes
     # `ATROCORE_API_BASE` because this job reaches the stack through the dind alias, not localhost.
-    - ATROCORE_API_BASE="${ATROCORE_BASE_URL}/api/v1" ./scripts/import-data-pack.sh --all
+    - |
+      if ! ATROCORE_API_BASE="${ATROCORE_BASE_URL}/api/v1" ./scripts/import-data-pack.sh --all; then
+        echo "--- data-pack import failed; last 80 lines of the AtroCore log:"
+        docker compose logs --tail=80 atro-web || true
+        exit 1
+      fi
     - ATROCORE_HOST_BASE="${ATROCORE_BASE_URL}" ./scripts/install-layouts.sh --yes
     - ./scripts/enable-spanish-labels.sh --yes
     - |
