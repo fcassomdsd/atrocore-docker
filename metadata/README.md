@@ -158,7 +158,9 @@ because they carry live data.
 | `clientDefs/ChecklistQuestion.json`, `scopes/ChecklistQuestion.json`, `layouts/ChecklistQuestion/*` | Plain record controller/scope/layouts, copied unmodified from the old `ProtocolQuestion` runtime definitions (generic, no entity-name-baked strings). |
 
 The row data for `Specialty` and `ActivityType` is seeded separately by
-`sql/seed-nomenclatura-catalog.sql`, and `UsoapEvidenceExpectation` by
+`sql/seed-nomenclatura-catalog.sql` — which ships only three specialties by default
+(`ATS`, `NAV`, `MET`, the ones the demo and starter datasets reference; a taxonomy is
+CAA-specific), with the reference sixteen behind `--full-specialties` — and `UsoapEvidenceExpectation` by
 `sql/seed-usoap-evidence-expectations.sql` (48 rows, originally backfilled
 from the unversioned `tabla pqs AGA.csv` / `tabla pqs ANS.csv` source
 tables), because AtroCore metadata describes the schema only, never the

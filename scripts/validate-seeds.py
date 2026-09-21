@@ -359,6 +359,74 @@ else:
         problems.append(f"{EXPECTATIONS_FILE.name} uses TRUNCATE")
 
 
+# ---------------------------------------------------------------------------
+# The specialty catalog is CAA-specific, so the seed ships only the rows the
+# demo and starter datasets reference and keeps the reference sixteen behind
+# --full-specialties. This guards both halves: that the default stays minimal,
+# and that no committed dataset starts depending on an opt-in specialty.
+# ---------------------------------------------------------------------------
+NOMENCLATURA_FILE = ROOT / "sql" / "seed-nomenclatura-catalog.sql"
+EXPECTED_DEFAULT_SPECIALTIES = {"ATS", "NAV", "MET"}
+EXPECTED_FULL_SPECIALTIES = 16
+
+if not NOMENCLATURA_FILE.is_file():
+    problems.append(f"{NOMENCLATURA_FILE.name} is missing")
+else:
+    nomenclatura = NOMENCLATURA_FILE.read_text(encoding="utf-8")
+    optin = re.search(r"\\if :\{\?full_specialties\}(.*?)\\endif", nomenclatura, re.DOTALL)
+    if not optin:
+        problems.append(
+            f"{NOMENCLATURA_FILE.name} has no '\\if :{{?full_specialties}} ... \\endif' block, so "
+            "there is no way to load the full reference taxonomy"
+        )
+    else:
+        row = r"\('(spec_[a-z]+)',\s*'[^']*',\s*'([A-Z]+)'"
+        default_rows = dict(re.findall(row, nomenclatura[:optin.start()]))
+        optin_rows = dict(re.findall(row, optin.group(1)))
+        default_codes = set(default_rows.values())
+
+        if default_codes != EXPECTED_DEFAULT_SPECIALTIES:
+            problems.append(
+                f"{NOMENCLATURA_FILE.name}: the default specialty catalog should be exactly "
+                f"{sorted(EXPECTED_DEFAULT_SPECIALTIES)} (a taxonomy is CAA-specific), found "
+                f"{sorted(default_codes)}"
+            )
+        if len(default_rows) + len(optin_rows) != EXPECTED_FULL_SPECIALTIES:
+            problems.append(
+                f"{NOMENCLATURA_FILE.name}: default + --full-specialties should be "
+                f"{EXPECTED_FULL_SPECIALTIES} rows, found {len(default_rows) + len(optin_rows)}"
+            )
+        if set(default_rows) & set(optin_rows):
+            problems.append(
+                f"{NOMENCLATURA_FILE.name}: {sorted(set(default_rows) & set(optin_rows))} appear in "
+                "both the default and the opt-in block"
+            )
+
+        # A stray row outside both blocks (e.g. left behind when the default
+        # list is rewritten) would be inserted unconditionally and invisibly.
+        all_rows = re.findall(row, nomenclatura)
+        if len(all_rows) != len(default_rows) + len(optin_rows):
+            stray = sorted(set(dict(all_rows)) - set(default_rows) - set(optin_rows))
+            problems.append(
+                f"{NOMENCLATURA_FILE.name}: {len(all_rows)} specialty rows in the file but "
+                f"{len(default_rows)} default + {len(optin_rows)} opt-in — stray row(s) outside the "
+                f"blocks: {stray or 'duplicate ids'}"
+            )
+
+        for dataset in ("seed-demo-dataset.sql", "seed-starter-dataset.sql"):
+            path = ROOT / "sql" / dataset
+            if not path.is_file():
+                continue
+            referenced = set(re.findall(r"'(spec_[a-z]+)'", path.read_text(encoding="utf-8")))
+            outside_default = sorted(referenced - set(default_rows))
+            if outside_default:
+                problems.append(
+                    f"{dataset} references {outside_default}, which the default specialty catalog "
+                    "does not create -- either add it to the default block or seed the dataset with "
+                    "--full-specialties"
+                )
+
+
 if problems:
     print(f"FAIL: {len(problems)} problem(s) in the seed datasets:")
     for problem in problems:

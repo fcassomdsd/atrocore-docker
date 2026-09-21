@@ -16,7 +16,11 @@
 # DESTRUCTIVE for `specialty` and `activity_type` (rows are replaced). FindingSeverity
 # is upserted instead, so an administrator's tuned day counts are preserved.
 #
-# Usage: scripts/seed-nomenclatura.sh [target-db] --yes
+# The specialty catalog is CAA-specific, so the default is only the three the
+# demo and starter datasets reference (ATS, NAV, MET). Pass --full-specialties
+# to also load the reference sixteen-taxonomy as a starting point.
+#
+# Usage: scripts/seed-nomenclatura.sh [target-db] --yes [--full-specialties]
 
 set -euo pipefail
 
@@ -25,14 +29,15 @@ ENV_FILE="${ROOT_DIR}/.env"
 SQL_FILE="${ROOT_DIR}/sql/seed-nomenclatura-catalog.sql"
 
 CONFIRMED="0"
+FULL_SPECIALTIES="0"
 POSITIONAL=()
 
 for arg in "$@"; do
-  if [[ "${arg}" == "--yes" ]]; then
-    CONFIRMED="1"
-  else
-    POSITIONAL+=("${arg}")
-  fi
+  case "${arg}" in
+    --yes) CONFIRMED="1" ;;
+    --full-specialties) FULL_SPECIALTIES="1" ;;
+    *) POSITIONAL+=("${arg}") ;;
+  esac
 done
 
 TARGET_DB="${POSITIONAL[0]:-}"
@@ -63,16 +68,25 @@ fi
 
 if [[ "${CONFIRMED}" != "1" ]]; then
   echo "This action will REPLACE all rows in 'specialty' and 'activity_type' in database ${TARGET_DB}."
+  if [[ "${FULL_SPECIALTIES}" == "1" ]]; then
+    echo "Specialties: the full reference sixteen (--full-specialties)."
+  else
+    echo "Specialties: the three default rows the demo/starter datasets use (ATS, NAV, MET)."
+  fi
   echo "Run again with --yes to continue."
-  echo "Usage: $0 [target-db] --yes"
+  echo "Usage: $0 [target-db] --yes [--full-specialties]"
   exit 1
 fi
 
 cd "${ROOT_DIR}"
 
 echo "Seeding Nomenclatura catalogs into database ${TARGET_DB}..."
+PSQL_VARS=(-v ON_ERROR_STOP=1)
+if [[ "${FULL_SPECIALTIES}" == "1" ]]; then
+  PSQL_VARS+=(-v full_specialties=1)
+fi
 docker compose exec -T db psql \
-  -v ON_ERROR_STOP=1 \
+  "${PSQL_VARS[@]}" \
   -U "${POSTGRES_PIM_USER}" \
   -d "${TARGET_DB}" < "${SQL_FILE}"
 

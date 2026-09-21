@@ -170,7 +170,7 @@ jobs:
           # Migration 0002 re-pointed the link.
           check "select count(*) from information_schema.columns where table_name='inspection_cadence' and column_name in ('inspected_provider_id','location_id')" "dropped cadence columns" 0
           check "select count(*) from information_schema.columns where table_name='inspection_cadence' and column_name='location_service_id'" "cadence location_service_id" 1
-          check "select count(*) from specialty"                                "specialties"       16
+          check "select count(*) from specialty"                                "specialties"       3
           check "select count(*) from \"user\" where id='1' and is_admin"       "super admin"        1
           check "select count(*) from extensible_enum where code in ('riskLevel','inspectorRoles','findingClass','compliance','usoapCriticalElement','usoapAreaCode','usoapArtifactCategory')" "seeded vocabularies" 7
           check "select count(*) from information_schema.tables where table_schema='public' and table_name in ('service_area','site_visit','finding','corrective_action','documento_o_a_c_i')" "operational tables" 5

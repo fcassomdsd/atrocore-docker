@@ -343,7 +343,7 @@ is the canonical guide for both profiles.
     ./scripts/seed-usoap-vocabularies.sh --yes           # required: the enums the catalog points at
     ./scripts/seed-icao-reference-data.sh --yes          # required: ICAO Annex documents/paragraphs/PQs
     ./scripts/seed-usoap-evidence-expectations.sh --yes  # required: 48 evidence expectations (needs the PQs above)
-    ./scripts/seed-nomenclatura.sh --yes                 # required: spec_* / atype_* / severity catalog
+    ./scripts/seed-nomenclatura.sh --yes                 # required: catalogs; 3 default specialties (ATS/NAV/MET)
     ./scripts/install-layouts.sh --yes           # required: the menu + the 123 tracked layouts
     ./scripts/seed-demo-dataset.sh --yes         # the demo dataset (synthetic; skip for a real deployment)
     # or: make bootstrap / make metadata-install / make db-seed-vocabularies YES=1 …

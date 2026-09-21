@@ -127,24 +127,45 @@ $$;
 
 DELETE FROM public.specialty;
 
+-- ---------------------------------------------------------------------------
+-- The default catalog is deliberately THREE specialties, not sixteen.
+--
+-- A specialty taxonomy is CAA-specific: an authority may not split CNS into
+-- NAV/COM/SUR/ECNS/DPR at all, or may have one "AGA" instead of
+-- APR/AVIS/FAU/PAV/SSEI. Seeding a full taxonomy would put the reference
+-- deployment's classification in every new install and invite an adopter to
+-- keep it. So the default is only what the demo and starter datasets actually
+-- reference (`spec_ats`, `spec_nav`, `spec_met`); everything else is opt-in
+-- via `./scripts/seed-nomenclatura.sh --yes --full-specialties` for a
+-- deployment that wants the reference sixteen as a starting point.
+--
+-- Replacement is destructive by design (this is a managed catalog); an
+-- adopter edits it in the admin UI or in this file.
+-- ---------------------------------------------------------------------------
 INSERT INTO public.specialty (id, name, code, sort_order, deleted, created_at, modified_at, created_by_id, modified_by_id)
 VALUES
-    ('spec_apr',  'Plataforma',                                        'APR',   10,  false, NOW(), NOW(), '1', '1'),
-    ('spec_avis', 'Ayudas Visuales',                                   'AVIS',  20,  false, NOW(), NOW(), '1', '1'),
-    ('spec_fau',  'Control de fauna',                                  'FAU',   30,  false, NOW(), NOW(), '1', '1'),
-    ('spec_pav',  'Pavimento y características físicas',               'PAV',   40,  false, NOW(), NOW(), '1', '1'),
-    ('spec_ssei', 'Servicio de salvamento y extinción de incendios',   'SSEI',  50,  false, NOW(), NOW(), '1', '1'),
-    ('spec_aim',  'Gestión de información aeronáutica',                'AIM',   60,  false, NOW(), NOW(), '1', '1'),
-    ('spec_ats',  'Servicio de tránsito aéreo',                        'ATS',   70,  false, NOW(), NOW(), '1', '1'),
-    ('spec_com',  'Comunicaciones (voz)',                              'COM',   80,  false, NOW(), NOW(), '1', '1'),
-    ('spec_ecns', 'Energía CNS',                                       'ECNS',  90,  false, NOW(), NOW(), '1', '1'),
-    ('spec_emet', 'Equipos meteorológicos',                            'EMET',  100, false, NOW(), NOW(), '1', '1'),
-    ('spec_fis',  'Servicio de información de vuelo',                  'FIS',   110, false, NOW(), NOW(), '1', '1'),
-    ('spec_met',  'Meteorología aeronáutica',                          'MET',   120, false, NOW(), NOW(), '1', '1'),
-    ('spec_nav',  'Navegación (radio ayudas)',                         'NAV',   130, false, NOW(), NOW(), '1', '1'),
+    ('spec_ats',  'Servicio de tránsito aéreo',                        'ATS',   10,  false, NOW(), NOW(), '1', '1'),
+    ('spec_nav',  'Navegación (radio ayudas)',                         'NAV',   20,  false, NOW(), NOW(), '1', '1'),
+    ('spec_met',  'Meteorología aeronáutica',                          'MET',   30,  false, NOW(), NOW(), '1', '1');
+
+\if :{?full_specialties}
+-- Opt-in: the full reference taxonomy (CAA-specific; see the note above).
+INSERT INTO public.specialty (id, name, code, sort_order, deleted, created_at, modified_at, created_by_id, modified_by_id)
+VALUES
+    ('spec_apr',  'Plataforma',                                        'APR',   40,  false, NOW(), NOW(), '1', '1'),
+    ('spec_avis', 'Ayudas Visuales',                                   'AVIS',  50,  false, NOW(), NOW(), '1', '1'),
+    ('spec_fau',  'Control de fauna',                                  'FAU',   60,  false, NOW(), NOW(), '1', '1'),
+    ('spec_pav',  'Pavimento y características físicas',               'PAV',   70,  false, NOW(), NOW(), '1', '1'),
+    ('spec_ssei', 'Servicio de salvamento y extinción de incendios',   'SSEI',  80,  false, NOW(), NOW(), '1', '1'),
+    ('spec_aim',  'Gestión de información aeronáutica',                'AIM',   90,  false, NOW(), NOW(), '1', '1'),
+    ('spec_com',  'Comunicaciones (voz)',                              'COM',   100, false, NOW(), NOW(), '1', '1'),
+    ('spec_ecns', 'Energía CNS',                                       'ECNS',  110, false, NOW(), NOW(), '1', '1'),
+    ('spec_emet', 'Equipos meteorológicos',                            'EMET',  120, false, NOW(), NOW(), '1', '1'),
+    ('spec_fis',  'Servicio de información de vuelo',                  'FIS',   130, false, NOW(), NOW(), '1', '1'),
     ('spec_sar',  'Búsqueda y salvamento',                             'SAR',   140, false, NOW(), NOW(), '1', '1'),
     ('spec_sur',  'Vigilancia (radar)',                                'SUR',   150, false, NOW(), NOW(), '1', '1'),
     ('spec_dpr',  'Procesamiento de datos (radar/ATN)',                'DPR',   160, false, NOW(), NOW(), '1', '1');
+\endif
 
 -- ---------------------------------------------------------------------------
 -- TASK B - ActivityType catalog (tipo de actividad de vigilancia)
@@ -286,4 +307,4 @@ ON CONFLICT (id) DO UPDATE
 
 COMMIT;
 
-\echo 'Nomenclatura catalog seeded: 16 specialties, 5 activity types, 3 finding severities (A/B/C).'
+\echo 'Nomenclatura catalog seeded: 3 default specialties (ATS/NAV/MET; add the rest with --full-specialties), 5 activity types, 3 finding severities (A/B/C).'

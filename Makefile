@@ -40,8 +40,10 @@ help:
 	@echo "  make metadata-drift            Fail if metadata/ differs from the running instance"
 	@echo "  make metadata-export           Copy the instance's metadata back into metadata/"
 	@echo "                                (for an entity edited through the admin UI)"
-	@echo "  make db-seed-nomenclatura [DB=...] YES=1"
-	@echo "                                Seed Specialty/ActivityType/FindingSeverity catalogs"
+	@echo "  make db-seed-nomenclatura [DB=...] YES=1 [FULL_SPECIALTIES=1]"
+	@echo "                                Seed Specialty/ActivityType/FindingSeverity. Specialties"
+	@echo "                                default to the three the datasets use (ATS/NAV/MET);"
+	@echo "                                FULL_SPECIALTIES=1 adds the reference sixteen"
 	@echo "  make install-layouts YES=1"
 	@echo "                                Seed the default layout profile's menu and materialise"
 	@echo "                                metadata/layouts/ into it (needs the stack up)"
@@ -106,13 +108,13 @@ install-layouts:
 db-seed-nomenclatura:
 	@if [ "$(YES)" != "1" ]; then \
 		echo "Refusing destructive seed without YES=1"; \
-		echo "Usage: make db-seed-nomenclatura [DB=target_db] YES=1"; \
+		echo "Usage: make db-seed-nomenclatura [DB=target_db] YES=1 [FULL_SPECIALTIES=1]"; \
 		exit 1; \
 	fi
 	@if [ -n "$(DB)" ]; then \
-		./scripts/seed-nomenclatura.sh "$(DB)" --yes; \
+		./scripts/seed-nomenclatura.sh "$(DB)" --yes $(if $(FULL_SPECIALTIES),--full-specialties,); \
 	else \
-		./scripts/seed-nomenclatura.sh --yes; \
+		./scripts/seed-nomenclatura.sh --yes $(if $(FULL_SPECIALTIES),--full-specialties,); \
 	fi
 
 db-seed-vocabularies:
