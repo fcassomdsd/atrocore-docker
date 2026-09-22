@@ -65,6 +65,22 @@
       "unique": false,
       "index": false
     },
+    "planningLeadDays": {
+      "tooltip": true,
+      "type": "int",
+      "auditableEnabled": false,
+      "auditableDisabled": false,
+      "isCustom": true,
+      "modifiedExtendedDisabled": false,
+      "required": false,
+      "notNull": false,
+      "defaultUnit": "",
+      "disableFormatting": false,
+      "readOnly": false,
+      "unique": false,
+      "index": false,
+      "min": 0
+    },
     "activityType": {
       "tooltip": false,
       "type": "link",
