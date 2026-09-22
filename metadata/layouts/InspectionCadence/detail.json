@@ -36,6 +36,12 @@
       ],
       [
         {
+          "name": "planningLeadDays"
+        },
+        false
+      ],
+      [
+        {
           "name": "description"
         },
         false
