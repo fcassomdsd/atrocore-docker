@@ -16,12 +16,28 @@ services:
     volumes:
       - ./web-data:/var/www/
     restart: unless-stopped
+    # Container hardening (P3.2).
+    #
+    # NOT read_only and NOT user: this container installs the AtroCore
+    # application into the bind-mounted ./web-data at first run
+    # (scripts/bootstrap-web-data.sh), then writes its cache, logs and
+    # uploads there as www-data for the rest of its life. Apache also needs to
+    # start as root to bind :80 before dropping privileges. Both controls are
+    # structurally inapplicable to this service as it is deployed, not merely
+    # postponed -- changing that means changing how AtroCore is installed.
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
     networks:
       - atrocore_net
       - backend_ext_net
 
   db:
-    image: postgres:15-alpine
+    image: postgres:15-alpine@sha256:620dc79c45816cff4f38f0b49c71f15a3bc6bab9439ba1eea3a76d23ebcf1e4d
     environment:
       PGDATA: /var/lib/postgresql/data/pgdata
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -33,6 +49,16 @@ services:
       - .docker/postgres/scripts:/docker-entrypoint-initdb.d
       - ./db-data:/var/lib/postgresql/data/
     restart: unless-stopped
+    # As with compliance_web's db: the official Postgres image chowns its data
+    # directory and drops privileges at startup, so cap_drop: ALL and a
+    # read-only rootfs break it. These two controls apply cleanly.
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
     networks:
       - atrocore_net
 

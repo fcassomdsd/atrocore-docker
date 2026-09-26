@@ -6,6 +6,27 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Fixed
+
+- **`demo-quickstart.sh` no longer lets `compliance_flow/.env` reconfigure every `docker compose` call it makes.** The script sources that file under `set -a` to pick up the Alfresco/AtroCore credentials and the gateway key, which exports *everything* in it — including any variable that configures compose itself. A `COMPOSE_PROJECT_NAME` set there was therefore applied to every subsequent compose invocation **for every project**, so `docker compose exec atro-web …` resolved against the wrong project and failed with `service "atro-web" is not running` — several steps after the cause and with nothing pointing back to it. Found exactly that way, while namespacing an isolated verification workspace. The script now unsets `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE`, `COMPOSE_PROFILES`, `COMPOSE_ENV_FILES`, `COMPOSE_PATH_SEPARATOR`, `DOCKER_HOST` and `DOCKER_CONTEXT` after sourcing: it needs that file's credentials, not its compose configuration.
+
+### Security
+
+- **Container hardening — P3.2.** No service in this platform previously declared a resource limit, a non-root user, a read-only root filesystem, dropped capabilities or `no-new-privileges`. What each service can take differs, and the differences are recorded as comments in the compose files rather than silently skipped:
+
+  - **Full hardening** (read-only rootfs, non-root user, `cap_drop: ALL`, `no-new-privileges`, CPU/memory limits) where the service writes nothing to its own filesystem. Verified by booting each one, not just by rendering the config.
+  - **Partial, with the reason stated in-file**, where a control is structurally inapplicable rather than merely postponed: Postgres chowns its data directory and drops privileges at startup, so `cap_drop: ALL` and a read-only rootfs break it; Node-RED must write `flows.json` into a bind mount, which is its deployment model; AtroCore installs itself into a bind mount at first run and Apache binds `:80` as root; the Alfresco JVM services write caches, logs and indexes inside their own filesystems.
+
+### Added
+
+- **Images are pinned by digest as well as tag — P3.2 (supply chain).** A tag is a mutable pointer: upstream can re-push it at any time, so a tag-only pin does not describe a reproducible build and two builds a week apart could differ with nothing in git changing. Every external image reference now uses `name:tag@sha256:...`, keeping the tag beside the digest so the version stays readable.
+
+- **Supply-chain scanning in CI — P3.2.** No repository in this platform had any security scanning before this. A new `security:scan` job (GitLab, mirrored to GitHub Actions) runs Trivy over the dependency tree and produces a CycloneDX SBOM as an artifact.
+
+  The gate policy was chosen from measurement, not aspiration. **CRITICAL is blocking**: measured at zero across all six repos, so the gate is green today and genuinely stops a regression rather than being red on arrival. **HIGH is reported but not blocking**: 33 findings exist today (21 in `compliance_web`, 12 in `compliance_checklist`), every one with a fix available. Blocking on HIGH immediately would red those pipelines and the gate would be switched off within a day — which is worse than no gate, because a disabled gate still reads as protection. Clear the backlog, then raise the bar.
+
+  `--ignore-unfixed` keeps the gate actionable: a CVE with no available fix is information, not a task. `--skip-dirs` excludes generated and bind-mounted runtime trees — `web-data/` in particular is the AtroCore application installed at container bootstrap, gitignored and absent from a fresh checkout, which vendors its own npm tree; scanning it reports upstream's dependencies as if they were ours. It is not clean (upstream vendors a CRITICAL prototype-pollution advisory in `swiper`), but that belongs in an upstream report and in image scanning, not a gate on tracked source.
+
 ### Added
 
 - **`scripts/preflight-secrets.sh` — a profile-aware credential gate, and the exit criterion for P3.1 (production secrets).** The platform ships working demo credentials on purpose: a shared gateway API key, an Alfresco database password of `alfresco`, a Solr shared secret of `secret`, and two demo identities. That is what makes a clean clone demonstrable in one pass, and it is also the single most likely way this platform gets compromised, because every one of those values is in git and the demo path and the real path are otherwise the same commands. This script is the seam between the two. `--profile demo` (the default) reports the published values and **exits 0**, so the demo and `demo:verify` are never blocked by it. `--profile production` treats every published value as a failure, and additionally catches the structural mistakes that leave a deployment insecure without looking wrong: the three gateway keys (`API_KEY`/`NODE_RED_API_KEY`/`IMPORT_API_KEY`) not matching, so the gateway rejects its own callers; a key short enough to guess; a service left in development mode, which is what arms that service's own startup secret guard; insecure session cookies; and a re-added tracked `.env`, which is the regression guard for the P0 history purge. It reads `.env` files only — no Docker, no running stack, no network — so it works in CI, in a deploy pipeline, or on a laptop. Also available as `make preflight-secrets` / `make preflight-secrets-production`, referenced from the quickstart's closing warning and runbook §10.

@@ -271,3 +271,32 @@ jobs:
       - name: Tear down
         if: always()
         run: ./scripts/demo-verify-ci.sh --teardown || true
+
+  security-scan:
+    # Supply-chain scanning (P3.2). Gate policy chosen from measurement:
+    # CRITICAL is blocking (measured at zero across all six repos, so the gate
+    # is green today and stops regressions); HIGH is reported but not blocking
+    # while 33 known-fixable findings are cleared, because a gate that is red
+    # on arrival gets switched off, and a disabled gate still reads as
+    # protection. --skip-dirs excludes generated/bind-mounted runtime trees.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail on fixable CRITICAL
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          skip-dirs: web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage
+          exit-code: '1'
+      - name: Report HIGH (non-blocking)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln
+          severity: HIGH
+          ignore-unfixed: true
+          skip-dirs: web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage
+          exit-code: '0'
