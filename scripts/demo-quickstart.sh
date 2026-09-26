@@ -612,6 +612,12 @@ cat <<'WARNING'
  hardening (Vault, Keycloak, observability, replication are all still open
  work) -- see docs/COMPLIANCE_INTEGRATION_RUNBOOK.md Sec.10 before this
  instance is reachable by anyone you do not trust.
+
+ Before a real deployment, rotate every credential and then run:
+     ./scripts/preflight-secrets.sh --profile production
+ It refuses any value that is published in these repositories, checks the
+ three gateway keys actually match, and verifies each service is in
+ production mode (which is what arms their own startup secret guards).
 ================================================================================
 
 WARNING

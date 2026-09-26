@@ -779,6 +779,24 @@ Command pattern:
 
 ## 10. Operational Notes
 
+- **There is a script for this now.** `atrocore-docker/scripts/preflight-secrets.sh` checks a
+  whole workspace's `.env` files without needing Docker, a running stack or the network:
+
+      ./scripts/preflight-secrets.sh                        # demo profile (default)
+      ./scripts/preflight-secrets.sh --profile production   # the gate
+
+  The **demo** profile reports the published values and exits 0, so it never blocks the demo. The
+  **production** profile treats every value published in these repositories as a failure, and also
+  catches the structural mistakes that leave a deployment insecure without looking wrong: the three
+  gateway keys not matching each other (the gateway then rejects its own callers), a key short
+  enough to be guessable, a service still in development mode — which is what arms each service's
+  own startup secret guard — and session cookies left insecure. Run it after rotating, before
+  exposing anything. `make preflight-secrets-production` is the same thing.
+
+  Two things it cannot see, because they are not in a `.env`: `compliance_checklist`'s own copy of
+  the gateway key, which is entered in the app, and the demo identities, which live in Alfresco
+  (`compliance_cmis/scripts/seed-demo-identities.sh --remove`).
+
 - **For production-like usage, replace every development/demo default for credentials and secrets before the stack is reachable by anyone you do not trust.** This is a demo/reference stack, not a hardened deployment (§4.8's P3 items — Vault, Keycloak, observability, replication — are all still open). Concretely, at minimum:
   - The gateway `API_KEY` (`compliance_flow/.env`) and its matching `NODE_RED_API_KEY` (`compliance_web/.env`) / `IMPORT_API_KEY` (`compliance_import/.env`) — all three ship with the **same public placeholder value**, committed to their respective repos. Generate one real value (`openssl rand -hex 32`) and set it in all three; `compliance_checklist` needs the same value entered in its own API-key setting.
   - The demo identities' passwords (`closure.reviewer`, `demo.inspector1` — §7.3 above) and, ideally, the accounts themselves (`./scripts/seed-demo-identities.sh --remove`).

@@ -1,4 +1,4 @@
-.PHONY: help up down bootstrap db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao db-seed-usoap-evidence metadata-install metadata-export metadata-drift db-seed-nomenclatura install-layouts db-seed-starter db-seed-starter-remove import-data-packs validate-seeds validate-data-packs db-migrate db-migrate-status
+.PHONY: help up down bootstrap preflight-secrets preflight-secrets-production db-backup db-restore db-seed db-seed-demo db-seed-demo-remove db-seed-vocabularies db-seed-icao db-seed-usoap-evidence metadata-install metadata-export metadata-drift db-seed-nomenclatura install-layouts db-seed-starter db-seed-starter-remove import-data-packs validate-seeds validate-data-packs db-migrate db-migrate-status
 
 help:
 	@echo "Available targets:"
@@ -20,6 +20,8 @@ help:
 	@echo "                                Seed the synthetic demo dataset (additive, safe)"
 	@echo "  make db-seed-demo-remove [DB=...] YES=1"
 	@echo "                                Delete every demo- row"
+	@echo "  make preflight-secrets            check the demo credentials in use (never fails on them)"
+	@echo "  make preflight-secrets-production refuse any credential published in these repos"
 	@echo "  make db-seed-starter [DB=...] YES=1"
 	@echo "                                Seed the placeholder authority dataset (starter- rows,"
 	@echo "                                editable; additive). Use instead of db-seed-demo."
@@ -225,3 +227,12 @@ db-seed:
 	else \
 		./scripts/seed-demo-db.sh "$(if $(DUMP),$(DUMP),atrocore.dump)" "" --yes; \
 	fi
+
+# Credential preflight. The demo profile reports the published demo values and
+# exits 0; the production profile treats every one of them as a failure, along
+# with mismatched gateway keys and services left in development mode.
+preflight-secrets:
+	./scripts/preflight-secrets.sh --profile demo
+
+preflight-secrets-production:
+	./scripts/preflight-secrets.sh --profile production
