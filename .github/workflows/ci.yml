@@ -45,6 +45,18 @@ jobs:
       - run: python3 scripts/validate-seeds.py
       - run: python3 scripts/validate-data-packs.py
 
+  validate-preflight-secrets:
+    # Self-test for scripts/preflight-secrets.sh, the gate that refuses to call
+    # a deployment "production" while it runs on credentials published in these
+    # repositories. Builds throwaway workspaces in a temp dir — no stack, no
+    # Docker, no network. Asserts that a genuinely production-ready workspace
+    # PASSES as well as that the demo one is refused: a gate that can only fail
+    # gets bypassed, and a bypassed gate still reads as protection.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/preflight-secrets.test.sh
+
   validate-fresh-install:
     # Walks the README's steps on an empty database: build, bootstrap the application out of
     # the image, run AtroCore's own install, install the tracked model, sync the schema, seed,

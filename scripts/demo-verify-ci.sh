@@ -233,6 +233,29 @@ SERVER_NAME=localhost
 EOF
 
 # ---------------------------------------------------------------------------
+# The credential preflight, in its demo profile. Two things are being asserted:
+# that the script runs cleanly against a real assembled workspace (its own
+# self-test uses synthetic fixtures), and that the demo profile does NOT fail
+# on the published demo values -- because if it ever did, this guard and the
+# quickstart would both stop working, which is exactly the regression the
+# profile split exists to prevent.
+step "2b. Credential preflight (demo profile)"
+if "${REPO_DIR}/scripts/preflight-secrets.sh" --profile demo --workspace "${WORKSPACE}" >/dev/null 2>&1; then
+  ok "demo profile passes against the assembled workspace"
+else
+  die "preflight-secrets --profile demo failed; the demo path must never be blocked by it"
+fi
+
+# The same workspace must be refused as production, since it is running on the
+# committed demo credentials. A production profile that passed here would mean
+# the gate does not actually detect published values.
+if "${REPO_DIR}/scripts/preflight-secrets.sh" --profile production --workspace "${WORKSPACE}" >/dev/null 2>&1; then
+  die "preflight-secrets --profile production PASSED on the demo credentials; the gate is not working"
+else
+  ok "production profile correctly refuses the demo credentials"
+fi
+
+# ---------------------------------------------------------------------------
 step "3. Docker networks"
 #
 # Nothing is created here on purpose. Each network is *declared* by one project and marked
