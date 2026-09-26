@@ -12,7 +12,7 @@ services:
       PRODUCTION_DOMAIN: ${PRODUCTION_DOMAIN:-localhost}
       TESTING_DOMAIN: ${TESTING_DOMAIN}
     ports:
-      - 80:80
+      - "${BIND_IP:-0.0.0.0}:80:80"
     volumes:
       - ./web-data:/var/www/
     restart: unless-stopped
