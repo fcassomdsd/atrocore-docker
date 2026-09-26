@@ -170,6 +170,16 @@ set -a
 . "${WORKSPACE_ROOT}/compliance_flow/.env"
 set +a
 
+# `set -a` exports *everything* in that file, including any variable that
+# reconfigures docker compose itself. Those would then apply to every compose
+# call this script makes afterwards -- for every project, not just
+# compliance_flow -- so a COMPOSE_PROJECT_NAME set there silently redirects
+# `docker compose exec atro-web` at the wrong project and it fails with
+# `service "atro-web" is not running`, several steps later and nowhere near
+# the cause. Found exactly that way. This script needs the credentials from
+# that file, not its compose configuration, so drop the latter.
+unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_PROFILES COMPOSE_ENV_FILES COMPOSE_PATH_SEPARATOR DOCKER_HOST DOCKER_CONTEXT
+
 if [[ -n "${CALLER_ATROCORE_BASE_URL}" ]]; then
   export ATROCORE_BASE_URL="${CALLER_ATROCORE_BASE_URL}"
 fi

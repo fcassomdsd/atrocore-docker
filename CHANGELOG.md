@@ -6,6 +6,10 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Fixed
+
+- **`demo-quickstart.sh` no longer lets `compliance_flow/.env` reconfigure every `docker compose` call it makes.** The script sources that file under `set -a` to pick up the Alfresco/AtroCore credentials and the gateway key, which exports *everything* in it — including any variable that configures compose itself. A `COMPOSE_PROJECT_NAME` set there was therefore applied to every subsequent compose invocation **for every project**, so `docker compose exec atro-web …` resolved against the wrong project and failed with `service "atro-web" is not running` — several steps after the cause and with nothing pointing back to it. Found exactly that way, while namespacing an isolated verification workspace. The script now unsets `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE`, `COMPOSE_PROFILES`, `COMPOSE_ENV_FILES`, `COMPOSE_PATH_SEPARATOR`, `DOCKER_HOST` and `DOCKER_CONTEXT` after sourcing: it needs that file's credentials, not its compose configuration.
+
 ### Security
 
 - **Container hardening — P3.2.** No service in this platform previously declared a resource limit, a non-root user, a read-only root filesystem, dropped capabilities or `no-new-privileges`. What each service can take differs, and the differences are recorded as comments in the compose files rather than silently skipped:
