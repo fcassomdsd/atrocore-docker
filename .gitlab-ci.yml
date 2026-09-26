@@ -221,6 +221,69 @@ validate:seed:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
+# ---------------------------------------------------------------------------
+# Supply-chain scanning (P3.2). No repository had any security scanning before
+# this.
+#
+# Gate policy, chosen from measurement rather than aspiration:
+#
+#   CRITICAL -> blocking.   Measured across all six repos on 2026-09-26: zero.
+#                           So this gate is green today and genuinely stops a
+#                           regression, rather than being red on arrival.
+#   HIGH     -> reported.   33 findings exist today (21 in compliance_web, 12
+#                           in compliance_checklist), all with fixes available.
+#                           Blocking on HIGH immediately would red every
+#                           pipeline in those two repos and the gate would be
+#                           switched off within a day -- which is worse than no
+#                           gate, because a disabled gate still reads as
+#                           protection. Clear the backlog, then raise the bar
+#                           here to HIGH,CRITICAL.
+#
+# --ignore-unfixed: a CVE with no available fix is information, not an action.
+# The scan is skipped on scheduled pipelines so a new CVE disclosure cannot
+# turn an unrelated nightly run red.
+# ---------------------------------------------------------------------------
+security:scan:
+  stage: validate
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  variables:
+    TRIVY_CACHE_DIR: .trivycache
+    TRIVY_NO_PROGRESS: "true"
+  cache:
+    key: trivy-db
+    paths: [.trivycache]
+  script:
+    # Blocking: any fixable CRITICAL fails the pipeline.
+    # --skip-dirs excludes generated and bind-mounted runtime trees, not source.
+    # web-data/ in particular is the AtroCore application installed at container
+    # bootstrap: it is gitignored, absent from a fresh checkout, and vendors its
+    # own npm tree, so scanning it here reports upstream's dependencies as if
+    # they were this repository's. (It is not clean: upstream currently vendors
+    # a CRITICAL prototype-pollution advisory in swiper. That belongs in an
+    # upstream report and in image scanning, not in a gate on tracked source.)
+    - trivy fs --scanners vuln --severity CRITICAL --ignore-unfixed --skip-dirs web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage --exit-code 1 .
+    # Reporting: HIGH is printed and saved, but does not fail the job yet.
+    - trivy fs --scanners vuln --severity HIGH --ignore-unfixed --skip-dirs web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage --exit-code 0 --format table -o trivy-high.txt . || true
+    - 'echo "--- HIGH findings (not blocking; see the policy comment in .gitlab-ci.yml) ---"'
+    - cat trivy-high.txt || true
+    # SBOM, always produced, never blocking. CycloneDX is the format the
+    # release process will consume once images are published and signed.
+    - trivy fs --format cyclonedx --skip-dirs web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage -o sbom.cdx.json .
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - trivy-high.txt
+      - sbom.cdx.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
 # Releases are CalVer-tagged from CHANGELOG.md and gated on a prepared release
 # entry: the tag is the date of the newest "## [YYYY-MM-DD]" section, the
 # pipeline fails when that section is missing, when CHANGELOG.md is unchanged

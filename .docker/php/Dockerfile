@@ -1,4 +1,4 @@
-FROM php:8.4-apache-bookworm AS base
+FROM php:8.4-apache-bookworm@sha256:8076ffbbac4aa2c8f2b82c3c9c86ae5a1a77ab4559745cc25b10f27922a1e8d2 AS base
 LABEL maintainer="AtroCore GmbH <support@atrocore.com>"
 
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"  \
