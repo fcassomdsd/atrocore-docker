@@ -248,6 +248,13 @@ security:scan:
   image:
     name: aquasec/trivy:latest
     entrypoint: [""]
+  # This job brings its own image, so it must opt out of any global or
+  # `default:` before_script. compliance_checklist's runs `npm ci` and
+  # atrocore-docker's calls the Docker CLI -- neither exists in the Trivy
+  # image, and both fail the job before the scan starts. Declared here for
+  # every repo, not just the two that have one today, so adding a global
+  # before_script later cannot silently break this job.
+  before_script: []
   variables:
     TRIVY_CACHE_DIR: .trivycache
     TRIVY_NO_PROGRESS: "true"
