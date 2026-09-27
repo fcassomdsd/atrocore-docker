@@ -75,6 +75,23 @@ scrape_configs:
       - targets: ["postgres-exporter-web:9187"]
         labels: {database: compliance_web}
 
+  # --- Auth metrics ---------------------------------------------------------
+  #
+  # The only service on this platform that publishes Prometheus metrics of
+  # its own: the six counters
+  # compliance_web/docs/auth/AUTH_CHUNK8_OPERATIONAL_READINESS.md section 6
+  # has named since the auth subsystem shipped, wired up in P3.5.
+  #
+  # Scraped directly rather than probed, because these are about what the
+  # application is doing, not whether it is reachable -- a brute-force
+  # attempt, an Alfresco outage that only manifests as role refreshes
+  # failing. Its /health probe is separate and stays.
+  - job_name: compliance-web-auth
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:4000"]
+        labels: {service: compliance_web}
+
   # --- HTTP health probes ---------------------------------------------------
   #
   # Every one of these is an endpoint this platform ships and P3.5 added or

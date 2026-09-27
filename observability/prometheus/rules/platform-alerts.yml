@@ -246,3 +246,87 @@ groups:
             40% guard keeps the prediction from firing on the noise of a disk
             that is mostly empty.
           action: "Same first check: is WAL archiving failing?"
+
+  - name: platform-auth
+    rules:
+      # From compliance_web/docs/auth/AUTH_CHUNK8_OPERATIONAL_READINESS.md
+      # section 6. These are about what the application is doing rather than
+      # whether it is up, so none of them would be caught by a probe.
+
+      - alert: LoginFailureSpike
+        # Rate over 15m rather than a raw count, and compared against the
+        # success rate rather than a fixed number: a busy authority and a
+        # quiet one have different normal volumes, and a threshold tuned for
+        # one is wrong for the other. More failures than successes, sustained
+        # for ten minutes, is anomalous at any scale.
+        expr: >-
+          rate(auth_login_failed_total[15m])
+          > rate(auth_login_success_total[15m])
+          and rate(auth_login_failed_total[15m]) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "More failed than successful logins over the last 15 minutes"
+          description: >-
+            Either a credential-stuffing attempt, or something broke in a way
+            that looks like bad passwords to users. The second guard keeps
+            this quiet on a genuinely idle system, where one failed login and
+            no successful ones would otherwise satisfy the ratio.
+          action: >-
+            Query the auth_audit_event table for login_failed rows grouped by
+            ip and username. Rate limiting fires on its own per-account; this
+            catches the spread-out case it is designed not to.
+
+      - alert: LoginRateLimiterEngaged
+        expr: increase(auth_login_rate_limited_total[10m]) > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "The login rate limiter has refused {{ $value }} attempts in 10 minutes"
+          description: >-
+            The limiter is doing its job, which is worth knowing about rather
+            than being reassured by: at this volume something is hammering
+            the login endpoint.
+          action: "Group auth_audit_event's login_rate_limited rows by ip. Block at the edge if it is one source."
+
+      - alert: RoleRefreshFailing
+        expr: >-
+          rate(auth_role_refresh_failed_total[10m])
+          / (rate(auth_role_refresh_failed_total[10m]) + rate(auth_role_refresh_success_total[10m])) > 0.5
+        for: 10m
+        labels:
+          severity: critical
+          component: auth
+        annotations:
+          summary: "Over half of role-cache refreshes are failing"
+          description: >-
+            Normally an Alfresco outage, and it fails QUIETLY by design: the
+            session survives on cached roles for a grace period, so users
+            notice nothing until the grace period ends and then everyone
+            loses their permissions at once. This alert is the only warning
+            before that happens.
+
+            A ratio rather than a count, because the absolute number scales
+            with how many people are logged in -- ten failures is a crisis on
+            a quiet morning and noise at nine o'clock.
+          action: >-
+            Check Alfresco is up and the service account still authenticates.
+            docs/auth/ALFRESCO_ROLE_SETUP.md covers the mapping table.
+
+      - alert: CsrfMismatchSpike
+        expr: increase(auth_csrf_mismatch_total[15m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "{{ $value }} CSRF token mismatches in 15 minutes"
+          description: >-
+            A handful is normal -- a stale tab, a user who left a form open
+            over lunch. A run of them is either an attack or a deployment
+            that changed the token contract and broke every open session.
+          action: "Check whether a deploy just happened before assuming it is an attack."

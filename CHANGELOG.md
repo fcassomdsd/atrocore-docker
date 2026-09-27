@@ -22,6 +22,10 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
   **ActiveMQ and Solr get TCP probes, not HTTP ones.** ActiveMQ's web console can be healthy while the broker transport Alfresco connects on is not; Solr sits behind shared-secret comms and answers `401` whether it is fine or on fire.
 
+- **Auth metrics scraped, dashboarded and alerted on — P3.5.** `compliance_web` now publishes the six counters its own operational-readiness doc has named since the auth subsystem shipped, and this stack is what reads them. It is the only service on the platform exposing Prometheus metrics of its own, so it is scraped directly rather than probed: these are about what the application is *doing* — a brute-force attempt, an Alfresco outage that only manifests as role refreshes failing — not whether it is reachable.
+
+  Four rules, each a ratio or a rate rather than a fixed count, because a busy authority and a quiet one have different normal volumes and a threshold tuned for one is wrong for the other. `RoleRefreshFailing` is the one worth knowing about: when Alfresco is unreachable the session survives on cached roles for a grace period, so nobody notices anything until the grace period ends and every user loses their permissions at once. That alert is the only warning before it happens.
+
 - **`scripts/verify-observability.sh`, and `observability:verify` in both CI pipelines.** The drill stops a container on purpose, waits for the alert to reach `firing`, confirms Alertmanager received it, restarts the container and waits for the alert to clear — failing if any step does not happen. It refuses to start unless the probe is already passing, so a "firing" alert afterwards cannot be one that was already there, and it restores the container on any exit including a failure partway. A Prometheus that is running, a Grafana with a dashboard and rules that parse are all easy to mistake for monitoring, and none of them shows that a failure would be *noticed*. Manual/scheduled like `demo:verify` and `restore:verify`.
 
 ### Added

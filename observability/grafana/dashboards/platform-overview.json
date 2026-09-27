@@ -636,6 +636,218 @@
       }
     },
     {
+      "id": 103,
+      "type": "row",
+      "title": "Authentication",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 11,
+      "title": "Logins per second",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "rate(auth_login_success_total[5m])",
+          "refId": "A",
+          "legendFormat": "success"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "rate(auth_login_failed_total[5m])",
+          "refId": "B",
+          "legendFormat": "failed"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "rate(auth_login_rate_limited_total[5m])",
+          "refId": "C",
+          "legendFormat": "rate-limited"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "rate(auth_login_provider_unavailable_total[5m])",
+          "refId": "D",
+          "legendFormat": "Alfresco unreachable"
+        }
+      ],
+      "description": "The first two metrics from AUTH_CHUNK8 §6. Rate-limited attempts and Alfresco outages are counted separately from failures on purpose: a rate-limited attempt never reached the credential check, and an outage is not a wrong password — folding either into the failure count would make a brute-force attempt or an IdP outage read as a user problem.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "reqps",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "title": "Role-cache refresh failure share",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "rate(auth_role_refresh_failed_total[10m]) / (rate(auth_role_refresh_failed_total[10m]) + rate(auth_role_refresh_success_total[10m]))",
+          "refId": "A",
+          "legendFormat": "failure share"
+        }
+      ],
+      "description": "Metric 6, and the quietest failure in the auth system. When Alfresco is unreachable the session survives on cached roles for a grace period, so nobody notices — until the grace period ends and every user loses their permissions at once. Shown as a share rather than a count because the absolute number scales with how many people are logged in.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "title": "Session 401s, CSRF mismatches and rotations",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "rate(auth_session_401_total[5m])",
+          "refId": "A",
+          "legendFormat": "session 401"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "rate(auth_csrf_mismatch_total[5m])",
+          "refId": "B",
+          "legendFormat": "CSRF mismatch"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "rate(auth_session_rotated_total[5m])",
+          "refId": "C",
+          "legendFormat": "session rotated"
+        }
+      ],
+      "description": "Metrics 3, 4 and 5. A handful of CSRF mismatches is normal — a stale tab, a form left open over lunch; a run of them is either an attack or a deploy that changed the token contract and broke every open session, and the first thing to check is which.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "reqps",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 102,
       "type": "row",
       "title": "Logs",
@@ -643,7 +855,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 25
+        "y": 38
       },
       "collapsed": false,
       "panels": []
@@ -656,7 +868,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 39
       },
       "datasource": {
         "type": "loki",
