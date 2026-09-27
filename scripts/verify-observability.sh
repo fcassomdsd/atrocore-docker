@@ -73,9 +73,14 @@ need python3
 # and CI images vary. python3 is already a dependency of other scripts here.
 jget() { python3 -c "$1"; }
 
+# Only true once the container has actually been stopped. Without it the trap
+# printed "restoring <container>" on every early exit -- including a preflight
+# failure, where nothing had been touched -- which reads as though the drill
+# broke something before giving up.
+STOPPED=0
 RESTORED=0
 restore() {
-  if [[ "${RESTORED}" -eq 0 && "${KEEP_BROKEN}" -eq 0 ]]; then
+  if [[ "${STOPPED}" -eq 1 && "${RESTORED}" -eq 0 && "${KEEP_BROKEN}" -eq 0 ]]; then
     RESTORED=1
     printf '\n    restoring %s\n' "${TARGET}"
     docker start "${TARGET}" >/dev/null 2>&1 || true
@@ -177,6 +182,7 @@ ok "probe for ${TARGET_HOST} is passing (baseline established)"
 step "3. Break it — stop ${TARGET}"
 # ---------------------------------------------------------------------------
 docker stop "${TARGET}" >/dev/null
+STOPPED=1
 ok "stopped ${TARGET}"
 
 # ---------------------------------------------------------------------------

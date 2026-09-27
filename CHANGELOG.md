@@ -8,6 +8,14 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **`observability:verify` looked for Prometheus on the wrong host under docker-in-docker.** The whole platform built, the demo ran green and all eleven monitoring containers started — and then the drill failed with "Prometheus is not answering at `http://localhost:9090`". Under dind the daemon publishing those ports is the `docker` service alias, not the job container's loopback.
+
+  `demo-verify-ci.sh` has exactly this logic for `DEMO_HOST`; this wrapper had only the `${DEMO_HOST:-localhost}` half of it, which reads a variable the other script sets in its **own** process and never exports — so it always resolved to `localhost`. GitHub's runner is the opposite case and must stay `localhost` (Docker runs natively there, so published ports really are on loopback), which is why the `docker` default applies only when neither variable is set. All four combinations are covered.
+
+- **The drill claimed to restore a container it had never stopped.** The exit trap printed `restoring <container>` on any early exit, including a preflight failure where nothing had been touched — which reads as though the drill broke something before giving up. It now restores only after the stop actually happened.
+
+### Fixed
+
 - **`demo:verify` now dumps the services' logs when the demo step fails, before the teardown destroys them.** Added after a CI failure that could not be diagnosed at all: the MET canonical import answered `{"success": false, "error": null}` and the job ended. The webscript behind it reports a caught exception as `runtimeError.message`, which is `undefined` for a Java exception surfaced into Rhino — so the HTTP response said nothing and Alfresco's own log line said `undefined`. The only remaining copy of the cause was in the container's log, and `after_script` had already torn the stack down by the time anyone looked.
 
   Alfresco gets 400 lines and goes first, because that is where the webscripts run and therefore where an unexplained import failure is explained; Solr, ActiveMQ, the import service, Node-RED and AtroCore get short tails, enough to see a service that died without burying the Alfresco output. Container states are printed too, since a service that exited explains a failure that otherwise reads as an application bug.
