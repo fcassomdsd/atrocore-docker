@@ -361,6 +361,41 @@ restore:verify:
     - when: manual
       allow_failure: true
 
+# WAL archiving fails silently: a broken archive_command does not stop
+# PostgreSQL, it just retains every segment until the volume fills, hours
+# later. A job that merely boots the database would pass throughout -- which
+# is what the other jobs here do. This one forces a segment switch and
+# asserts it was archived, so the failure is caught at merge time instead of
+# at 3am on a full disk.
+validate:wal-archiving:
+  stage: validate
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    WAL_SERVICE: "db"
+    WAL_USER: "$POSTGRES_PIM_USER"
+    WAL_DB: "$POSTGRES_PIM_DB"
+    # This project's app user is created by an initdb script, not by
+    # POSTGRES_USER, so it is not a superuser and cannot call
+    # pg_switch_wal(). The other two repos need no override.
+    WAL_SUPERUSER: "postgres"
+  # NOT `before_script: []` here, unlike the other repos: this project's
+  # default before_script writes the .env the compose file requires, and the
+  # docker:27 image already has the docker CLI that script calls. Skipping it
+  # would leave compose with no POSTGRES_* values at all.
+  script:
+    - apk add --no-cache bash
+    - bash scripts/verify-wal-archiving.sh
+  after_script:
+    - docker compose down -v --remove-orphans || true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
 compute_release_tag:
   stage: release
   image: alpine:latest

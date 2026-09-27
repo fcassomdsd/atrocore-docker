@@ -8,6 +8,12 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Added
 
+- **A CI check that WAL archiving actually works, not just that it is configured — P3.4.** The failure mode this closes is silent: a broken `archive_command` does not stop PostgreSQL. It keeps serving, `failed_count` climbs, and WAL accumulates until the volume fills — at which point the cause is hours old. Every existing job that boots this database would have passed throughout. `scripts/verify-wal-archiving.sh` forces a segment switch and asserts it was archived, so a broken archiver fails at merge time instead of at 3am on a full disk. Byte-identical across the repos that enable archiving, the same convention as `release-tag.sh`.
+
+  Two details it had to get right, both found by testing rather than reasoning. It counts segments **inside the container**, because under docker-in-docker the CLI and daemon have separate filesystems and a host-side count would read zero regardless of what archiving did. And it asserts archiving is healthy **now** — never failed, or succeeded since it last failed — rather than `failed_count = 0`: those counters are cumulative and survive restarts, so one transient blip would make a zero-check fail forever, and a check that cries wolf gets muted.
+
+### Added
+
 - **WAL archiving and physical base backups, for point-in-time recovery — P3.4.** `archive_mode=on` with `archive_timeout=300`, so the exposure window is five minutes rather than the nightly backup interval. PITR was proven end to end on a throwaway instance before being wired in: recovery to a chosen timestamp kept the rows committed before it and discarded those after.
 
   `backup-platform.sh` now also takes a `pg_basebackup` per database, because **a `pg_dump` cannot be replayed with WAL** — PITR replays onto a *physical* base, so without base backups the archive is inert and the RPO stays bounded by the backup interval. The two coexist deliberately: logical dumps are the restore path (cheap, version-portable, exercised by the drill) and basebackup + WAL is the RPO path (~160 MB against ~376 KB; that difference is the price of PITR). `-Xf` rather than `-Xs`, because streaming WAL cannot be combined with a tar written to stdout — safe here only because archiving is on.
