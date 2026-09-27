@@ -1,0 +1,58 @@
+# Loki — single-binary, filesystem-backed (P3.5).
+#
+# Sized for one host, which is what ADR-005 committed to. No object store, no
+# ring, no replication: the whole point is that this is one more container on
+# the same machine, not a logging cluster. If the platform ever splits across
+# hosts, this configuration is the part that has to change first.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # 31 days. Long enough to investigate something a month after it happened,
+  # which is the realistic lag on a compliance finding; short enough that logs
+  # do not become the thing that fills the disk the alert rules are watching.
+  retention_period: 744h
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  # Alfresco is a verbose logger and this is a single small host. These caps
+  # are a circuit breaker: a log storm should degrade logging, not the
+  # platform being logged.
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  max_query_series: 500
+
+compactor:
+  working_directory: /loki/compactor
+  delete_request_store: filesystem
+  retention_enabled: true
+  retention_delete_delay: 2h
+
+analytics:
+  reporting_enabled: false

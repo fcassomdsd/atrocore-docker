@@ -8,6 +8,24 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Added
 
+- **An observability stack — Prometheus, Alertmanager, Grafana, Loki — under `observability/`, with a drill that proves it alerts. P3.5.**
+
+  **What it is for, in one measurement.** Stop ActiveMQ and ask the platform how it is doing. Verified 2026-09-27: Alfresco's own `-ready-` probe answered `200`, and all seven service health probes reported green — while, per `FOOTPRINT_AUDIT.md`, replanning an existing document hangs forever with no error and nothing in any log to say why. The only thing that noticed was the TCP probe of `activemq:61616`, which fired `ActiveMQBrokerUnreachable` 2m16s after the broker stopped. That gap is the whole justification: health endpoints are deliberately shallow, because a probe that reaches a wedged upstream inherits the wedge, so composing the whole-stack picture from outside has to be someone's job.
+
+  **A separate Compose project, deliberately.** It adds nothing to the six application compose files and sits on nothing's startup path — the lean demo must keep working from a clean clone, and the surest guarantee is that monitoring is something you start, not something that starts with the platform.
+
+  **Six external networks, and why.** Every network it uses is created by an application project, so the platform starts first. There are six because the services that must be reached were never on one network: ActiveMQ, Solr, Share, the transform engine and Alfresco's PostgreSQL live only on `compliance_cmis`'s own project network, and two of those are the silent failures above. Attaching here rather than making five repos join a monitoring network was the deliberate trade — monitoring adapts to the platform, not the reverse.
+
+  **Thresholds set against measured baselines, not round numbers.** The memory alert fires at 98% for 15 minutes, not the conventional 90%, because `FOOTPRINT_AUDIT.md` measured Alfresco idling at 95–97% of its cap — a 90% rule would fire on a healthy stack from day one and be muted within a week, and a muted rule is worse than no rule because it looks like coverage.
+
+  **One rule was wrong until it was run.** WAL archiving was first alerted on by age — "`archive_timeout` is 300s, so nothing archived in an hour is a fault". Running it showed all three databases reporting a last archive 5–9 hours old with a backlog of zero, which is a healthy *idle* system: `archive_timeout` does not force a segment switch on a database that has written no WAL. The rule now watches `pg_archiver_ready_count`, the backlog, which only rises when there is something to archive and it is not being archived. Relatedly, `pg_archiver_failing` asks whether the last attempt failed with none succeeding since, not `failed_count > 0` — the reference Alfresco database reads `failed_count=9, failing=0`, having had a rough patch and recovered, and a count rule would have been red ever since.
+
+  **ActiveMQ and Solr get TCP probes, not HTTP ones.** ActiveMQ's web console can be healthy while the broker transport Alfresco connects on is not; Solr sits behind shared-secret comms and answers `401` whether it is fine or on fire.
+
+- **`scripts/verify-observability.sh`, and `observability:verify` in both CI pipelines.** The drill stops a container on purpose, waits for the alert to reach `firing`, confirms Alertmanager received it, restarts the container and waits for the alert to clear — failing if any step does not happen. It refuses to start unless the probe is already passing, so a "firing" alert afterwards cannot be one that was already there, and it restores the container on any exit including a failure partway. A Prometheus that is running, a Grafana with a dashboard and rules that parse are all easy to mistake for monitoring, and none of them shows that a failure would be *noticed*. Manual/scheduled like `demo:verify` and `restore:verify`.
+
+### Added
+
 - **`GET /health` on AtroCore, and healthchecks on both services — P3.5.** Neither service declared a `healthcheck`, so `docker compose ps` could only ever say `running`; the README said so outright.
 
   The endpoint answers the question this stack actually gets wrong. On a clean clone `./web-data` is bind-mounted empty over `/var/www`, Apache's DocumentRoot points at a directory that does not exist, and every request answers `404` from a container Docker reports as perfectly fine. The runbook documents that trap because it has cost people time. `/health` names it: `200` with `installed:true`, or `503` with `status:"not_installed"` and the command to run.

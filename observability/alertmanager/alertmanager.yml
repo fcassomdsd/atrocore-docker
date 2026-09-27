@@ -1,0 +1,82 @@
+# Alertmanager configuration (P3.5).
+#
+# NOTE ON THE ABSENCE OF ${VARIABLES} HERE
+# ----------------------------------------
+# Alertmanager does not expand environment variables in its configuration
+# file. A `${SMTP_HOST}` written here would be used as a literal hostname, and
+# the failure would show up as mail silently not arriving -- alerting that
+# looks configured and is not, which is worse than alerting that is obviously
+# absent. So this file holds literal values and is edited directly. Secrets are
+# the exception and have a real mechanism: `smtp_auth_password_file`, below.
+#
+# Out of the box there is NO delivery configured, and that is a working state,
+# not a broken one. Alertmanager still receives, groups, inhibits and exposes
+# every alert on its API and UI (http://127.0.0.1:9093), which is where
+# scripts/verify-observability.sh looks -- so the alerting drill proves itself
+# without a mail server having to exist. Turn on email by uncommenting the
+# block below and filling it in.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: platform-default
+  # Group by alertname and component rather than by instance: when Alfresco's
+  # stack goes down, six probes fail at once and that is one incident, not six.
+  group_by: ["alertname", "component"]
+  group_wait: 30s
+  group_interval: 5m
+  # 4h, not the conventional 1h. On a single host with no on-call rota, an
+  # alert that repeats hourly through a weekend is one that gets filtered into
+  # a folder, and a filtered alert is an absent alert.
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: platform-critical
+      group_wait: 10s
+      repeat_interval: 1h
+
+receivers:
+  # A receiver with no notifier. Alerts routed here are still recorded,
+  # grouped and visible; nothing is sent anywhere.
+  - name: platform-default
+
+  - name: platform-critical
+    # --- To enable email, uncomment and fill in -----------------------------
+    #
+    # smtp_auth_password_file, not smtp_auth_password: this file is tracked in
+    # git, and the platform's rule since P3.1 is that a credential in a
+    # repository is a published credential. Mount the password as a file --
+    # a Docker secret, or a file a Vault Agent writes -- and point at it here.
+    # That is the same precedence the application services use.
+    #
+    # email_configs:
+    #   - to: "ops@example.org"
+    #     from: "alerts@example.org"
+    #     smarthost: "smtp.example.org:587"
+    #     auth_username: "alerts@example.org"
+    #     auth_password_file: /run/secrets/smtp_password
+    #     require_tls: true
+    #     send_resolved: true
+    #     headers:
+    #       Subject: "[CRITICAL] {{ .GroupLabels.alertname }} - compliance platform"
+
+inhibit_rules:
+  # When ActiveMQ or Solr is down, slow probes follow all over the stack.
+  # Suppress the downstream noise so the cause stays legible: the measured
+  # lesson from FOOTPRINT_AUDIT.md is that these two failures present as
+  # symptoms elsewhere, and the symptom is what gets investigated first.
+  - source_matchers:
+      - alertname =~ "ActiveMQBrokerUnreachable|SolrUnreachable"
+    target_matchers:
+      - alertname = "HealthProbeSlow"
+    equal: []
+
+  # A database that is down cannot report on its own archiver, so its archiver
+  # alerts say nothing that PostgresDown has not already said.
+  - source_matchers:
+      - alertname = "PostgresDown"
+    target_matchers:
+      - alertname =~ "WALArchivingFailing|WALArchiveBacklogGrowing"
+    equal: ["database"]

@@ -361,6 +361,35 @@ restore:verify:
     - when: manual
       allow_failure: true
 
+# Does the monitoring notice anything? A Prometheus that is running, a Grafana
+# with a dashboard and alert rules that parse are all easy to mistake for
+# monitoring, and none of them shows that a failure would be NOTICED. Every
+# failure this platform is worst at -- a wedged ActiveMQ, a silently failing
+# WAL archiver -- is one where the system looks fine, so "it looks fine" is
+# exactly the evidence that cannot be trusted.
+#
+# This job stops a container on purpose and asserts the alert fires, reaches
+# Alertmanager, and clears again on recovery. Like demo:verify and
+# restore:verify it boots the whole platform -- and then waits out a
+# two-minute alert window on top -- so it is manual or scheduled, never a
+# merge gate.
+observability:verify:
+  stage: validate
+  variables:
+    SIBLING_REF: develop
+  script:
+    - apk add --no-cache python3 curl git nodejs
+    - ./scripts/observability-verify-ci.sh
+  after_script:
+    # Two teardowns, because this job builds two stacks and a failure at any
+    # point must not leave either behind on the runner.
+    - ./scripts/observability-verify-ci.sh --teardown || true
+    - ./scripts/demo-verify-ci.sh --teardown || true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: manual
+      allow_failure: true
+
 # WAL archiving fails silently: a broken archive_command does not stop
 # PostgreSQL, it just retains every segment until the volume fills, hours
 # later. A job that merely boots the database would pass throughout -- which

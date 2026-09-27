@@ -759,6 +759,41 @@ configuration. Worth knowing:
 - `npm run e2e` needs a built app **and** a display (`xvfb-run` on a headless host); CI installs
   both. Without a display it fails before it reaches the app.
 
+## 7.9 Monitoring (optional — `observability/`)
+
+Prometheus, Alertmanager, Grafana and Loki, as a **separate Compose project**
+that adds nothing to the six application stacks and sits on nothing's startup
+path:
+
+    cp observability/.env.example observability/.env   # set the Grafana and DB passwords
+    docker compose -f observability/docker-compose.yaml up -d
+
+Grafana at `http://127.0.0.1:3001`, Prometheus at `:9090`, Alertmanager at
+`:9093` — all loopback-bound by default. Full detail in
+`observability/README.md`.
+
+**Start it after the platform, not before.** Every network it uses is
+`external` and created by one of the six application projects; on a host where
+they have never run it fails with "network not found".
+
+Two things it is worth knowing it catches, because §8 below cannot:
+
+- **A dead ActiveMQ.** Verified 2026-09-27: with the broker stopped, Alfresco's
+  `-ready-` probe answered `200` and every service's `/health` reported green,
+  while (per `FOOTPRINT_AUDIT.md`) replanning an existing document hangs
+  forever with no error. The TCP probe of `activemq:61616` alerted 2m16s after
+  the broker stopped. Nothing else on this platform notices.
+- **WAL archiving stalling.** A failing `archive_command` does not stop
+  PostgreSQL; it retains every segment until the volume fills, hours later.
+
+Prove it works rather than assuming it:
+
+    ./scripts/verify-observability.sh
+
+It stops a container on purpose, waits for the alert to fire, confirms
+Alertmanager received it, restarts the container and waits for the alert to
+clear.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:
@@ -776,6 +811,11 @@ Use these quick cues:
     an application role does not grant an Alfresco ACL (§7.3).
 - Web/API calls to `localhost:4000` fail with a connection error, not an HTTP status:
   - the backend is up but its port is unpublished; start it with the dev override (§7.1).
+- **Everything answers, but an operation never returns** — no error, no timeout, no log line:
+  - suspect ActiveMQ before anything else. `cd compliance_cmis && docker compose ps activemq`.
+    This failure is invisible to every health check in this guide, which is
+    why §7.9 exists; the monitoring stack's `ActiveMQBrokerUnreachable` alert
+    is the only automatic detection of it.
 
 For logs:
 

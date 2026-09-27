@@ -1,0 +1,79 @@
+# Custom postgres-exporter queries (P3.5).
+#
+# One subject: WAL archiving. P3.4 turned on archive_mode with a five-minute
+# archive_timeout, and the hazard it introduced is that a failing
+# archive_command does not stop PostgreSQL -- it retains every WAL segment
+# until archiving succeeds, and the volume fills until the database stops.
+# Silent for hours, then sudden.
+#
+# `ready_count` is the backlog: segments PostgreSQL has marked ready and the
+# archive_command has not yet consumed. It is the metric to alert on, and the
+# reason is a mistake this file originally made. The obvious rule -- "no
+# segment archived in the last hour, and archive_timeout is 300s, so something
+# is wrong" -- is wrong, because archive_timeout does NOT force a segment
+# switch on a database that has written no WAL. An idle database archives
+# nothing, correctly, and an age-based rule would fire every quiet weekend.
+# That was caught by running it: all three databases showed a last archive
+# 5-9 hours old and a backlog of zero, which is a healthy idle system.
+# A backlog, by contrast, only exists when there is something to archive and
+# it is not being archived.
+#
+# Reading it needs pg_ls_archive_statusdir(), which is granted to pg_monitor
+# -- the role observability/.env.example tells you to grant.
+#
+# The state is computed in SQL rather than in PromQL, for two reasons. The
+# comparison `did the last failure happen after the last success` is a
+# statement about the database server's own clock, and doing it in PromQL would
+# silently compare that clock against Prometheus's. And a cumulative
+# `failed_count > 0` rule -- the obvious form -- fires forever after a single
+# transient failure, because those counters survive restarts; the same trap
+# scripts/verify-wal-archiving.sh documents. What an operator needs to know is
+# whether archiving is working NOW.
+
+pg_archiver:
+  query: |
+    SELECT
+      CASE
+        WHEN last_failed_time IS NOT NULL
+         AND (last_archived_time IS NULL OR last_failed_time > last_archived_time)
+        THEN 1 ELSE 0
+      END AS failing,
+      COALESCE(EXTRACT(EPOCH FROM (now() - last_archived_time)), -1) AS last_archive_age_seconds,
+      (SELECT count(*) FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready') AS ready_count,
+      archived_count,
+      failed_count
+    FROM pg_stat_archiver
+  master: true
+  metrics:
+    - failing:
+        usage: "GAUGE"
+        description: "1 when the most recent WAL archive attempt failed and none has succeeded since; 0 when archiving is working now"
+    - last_archive_age_seconds:
+        usage: "GAUGE"
+        description: "Seconds since the last successful WAL archive; -1 if none has ever succeeded (archiving off, or never yet run)"
+    - ready_count:
+        usage: "GAUGE"
+        description: "WAL segments marked .ready and not yet archived -- the archiving backlog, and the thing that fills the disk"
+    - archived_count:
+        usage: "COUNTER"
+        description: "Cumulative successful archives since the stats were last reset"
+    - failed_count:
+        usage: "COUNTER"
+        description: "Cumulative failed archive attempts since the stats were last reset"
+
+# Connection saturation. Not a measured incident, but the one resource a
+# PostgreSQL server runs out of that looks like an application bug: new
+# connections are refused while the server itself is perfectly healthy.
+pg_connections:
+  query: |
+    SELECT
+      (SELECT count(*) FROM pg_stat_activity) AS used,
+      (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') AS max
+  master: true
+  metrics:
+    - used:
+        usage: "GAUGE"
+        description: "Connections currently open"
+    - max:
+        usage: "GAUGE"
+        description: "max_connections"
