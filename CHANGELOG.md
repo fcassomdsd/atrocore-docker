@@ -8,6 +8,14 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **`demo:verify` now dumps the services' logs when the demo step fails, before the teardown destroys them.** Added after a CI failure that could not be diagnosed at all: the MET canonical import answered `{"success": false, "error": null}` and the job ended. The webscript behind it reports a caught exception as `runtimeError.message`, which is `undefined` for a Java exception surfaced into Rhino — so the HTTP response said nothing and Alfresco's own log line said `undefined`. The only remaining copy of the cause was in the container's log, and `after_script` had already torn the stack down by the time anyone looked.
+
+  Alfresco gets 400 lines and goes first, because that is where the webscripts run and therefore where an unexplained import failure is explained; Solr, ActiveMQ, the import service, Node-RED and AtroCore get short tails, enough to see a service that died without burying the Alfresco output. Container states are printed too, since a service that exited explains a failure that otherwise reads as an application bug.
+
+  A failure whose evidence is destroyed by the cleanup costs a full CI cycle per guess.
+
+### Fixed
+
 - **The demo quickstart unset `DOCKER_HOST`, breaking every run under docker-in-docker.** Introduced by P3.2's "stop `compliance_flow/.env` reconfiguring every compose call" fix, which unconditionally unset a list of `COMPOSE_*` and `DOCKER_*` variables after sourcing that file. Under dind the runner sets `DOCKER_HOST=tcp://docker:2375`, because the daemon is a separate service with no shared socket — so from that line onward every docker call fell back to `unix:///var/run/docker.sock`, which does not exist there. Step 0b died with `Cannot connect to the Docker daemon` on a stack that was up and had just passed all five health probes.
 
   It hid for a day because every run in between was **local**, where `DOCKER_HOST` is unset to begin with and unsetting it again changes nothing. The first run of `demo:verify` in GitLab CI after the change failed on it, and took `observability:verify` with it — the latter builds the platform through the same script.
