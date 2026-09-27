@@ -415,6 +415,43 @@ wait_for "web API"   "http://${DEMO_HOST}:4000/health" "200" 60 "compliance_web-
 # ---------------------------------------------------------------------------
 step "6. The demo itself"
 # ---------------------------------------------------------------------------
-( cd "${REPO_DIR}" && ./scripts/demo-quickstart.sh --yes ) || die "the demo quickstart failed"
+# On failure, dump the logs of the services the demo talks to BEFORE the
+# teardown removes them.
+#
+# This exists because of a run that could not be diagnosed at all. The MET
+# canonical import answered `{"success": false, "error": null}` and the job
+# ended -- and the webscript behind it reports a caught exception as
+# `runtimeError.message`, which is `undefined` for a Java exception surfaced
+# into Rhino, so both the HTTP response and Alfresco's own log line said
+# nothing. The only remaining copy of the cause was in the container's log,
+# and `after_script` had already torn the stack down by the time anyone
+# looked. A failure whose evidence is destroyed by the cleanup is a failure
+# that costs a full CI cycle per guess.
+#
+# Alfresco first and with the most lines, because it is where the webscripts
+# run and so where an unexplained import failure is explained. The others are
+# short tails: enough to see a service that died, not enough to bury the
+# Alfresco output.
+dump_service_logs() {
+  printf '\n    --- logs from the services the demo uses (the stack is about to be torn down)\n'
+  _dump() { # _dump <project dir> <service> <lines>
+    printf '\n    ===== %s / %s (last %s lines)\n' "$(basename "$1")" "$2" "$3"
+    ( cd "$1" && docker compose logs --tail "$3" --no-color "$2" 2>&1 ) | sed 's/^/      /' || true
+  }
+  _dump "${WORKSPACE}/compliance_cmis"   alfresco           400
+  _dump "${WORKSPACE}/compliance_cmis"   solr6              40
+  _dump "${WORKSPACE}/compliance_cmis"   activemq           40
+  _dump "${WORKSPACE}/compliance_import" compliance-import  60
+  _dump "${WORKSPACE}/compliance_flow"   node-red           60
+  _dump "${REPO_DIR}"                    atro-web           60
+
+  # Container states too: a service that exited explains a failure that
+  # otherwise reads as an application bug.
+  printf '\n    ===== container states\n'
+  docker ps -a --format '{{.Names}}\t{{.Status}}' | sed 's/^/      /' || true
+}
+
+( cd "${REPO_DIR}" && ./scripts/demo-quickstart.sh --yes ) \
+  || { dump_service_logs; die "the demo quickstart failed"; }
 
 printf '\ndemo-verify-ci: the whole-stack demo ran green\n'
