@@ -77,10 +77,25 @@ WEB_DB="$(env_var "${WORKSPACE}/compliance_web/.env" POSTGRES_DB)"
 [ -n "${ALF_PW}" ]  || die "DB_PASSWORD not found in compliance_cmis/.env"
 [ -n "${WEB_PW}" ]  || die "POSTGRES_PASSWORD not found in compliance_web/.env"
 
-# `docker` rather than 127.0.0.1: under docker-in-docker the daemon publishing
-# these ports is a different host from the one running this script. Same trap
-# demo-verify-ci.sh documents for DEMO_HOST.
-OBS_HOST="${OBS_HOST:-${DEMO_HOST:-localhost}}"
+# Under docker-in-docker the daemon publishing these ports is a different host
+# from the one running this script -- it is the `docker` service alias, not
+# localhost. demo-verify-ci.sh has exactly this logic for DEMO_HOST; this
+# script had only the `${DEMO_HOST:-localhost}` half of it, which reads an
+# environment variable that the other script sets in its OWN process and never
+# exports. So in CI this resolved to localhost, and the drill failed with
+# "Prometheus is not answering" on a stack where all eleven containers were up
+# and every application service had just passed the full demo.
+#
+# GitHub's runner is the other case and must stay localhost: it runs Docker
+# natively on the same host, so published ports really are on loopback. Its
+# workflow sets OBS_HOST explicitly for that reason, which is why this only
+# defaults to `docker` when neither variable is set.
+if [ -n "${CI:-}" ] && [ -z "${OBS_HOST:-}" ] && [ -z "${DEMO_HOST:-}" ]; then
+  OBS_HOST=docker
+else
+  OBS_HOST="${OBS_HOST:-${DEMO_HOST:-localhost}}"
+fi
+echo "    .. reaching the monitoring stack at ${OBS_HOST}"
 
 cat > "${OBS_DIR}/.env" <<ENVEOF
 OBS_BIND_IP=0.0.0.0
