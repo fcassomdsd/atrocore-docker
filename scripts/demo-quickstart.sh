@@ -128,11 +128,18 @@ probe() { # probe <label> <url> <acceptable>
 }
 # AtroCore itself is deliberately NOT probed here: on a clean clone `web-data/` is empty, so
 # Apache has no DocumentRoot and answers 404 — step 0b bootstraps the application and probes it
-# afterwards, which is the whole point of that step. Node-RED is probed on its editor root
-# rather than `/specialties`, because that endpoint proxies to AtroCore and answers 400 until
-# step 0b has run (and the seed after it has data).
+# afterwards, which is the whole point of that step.
+#
+# Node-RED is probed on `/health` (P3.5). This probe has now had three forms, and the reasons
+# it moved are worth keeping: `/specialties` was the original, and it proxies to AtroCore, so it
+# answers 400 until step 0b has run — it was reporting on AtroCore, not on the gateway. The
+# editor root replaced it, which does test the gateway but only that Node-RED's own HTTP server
+# is up: a `flows.json` that fails to load leaves the editor serving happily while every REST
+# endpoint 404s, so the probe passed on a gateway that could not answer a single call. `/health`
+# is served *by a flow*, so reaching it proves the flows loaded, and it is exempt from the
+# X-API-Key guard so it answers the same whether or not this script has a key.
 probe "Alfresco"        "http://${DEMO_HOST}:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-" "200"
-probe "Node-RED"        "http://${DEMO_HOST}:1880/" "200 401"
+probe "Node-RED"        "http://${DEMO_HOST}:1880/health" "200"
 probe "import service"  "http://${DEMO_HOST}:8000/health" "200"
 probe "web backend"     "http://${DEMO_HOST}:4000/health" "200"
 
@@ -238,6 +245,12 @@ schema_ready() {
       "select to_regclass('public.${SCHEMA_PROBE_TABLE}') is not null" 2>/dev/null ) \
     | tr -d '[:space:]' | grep -q '^t$'
 }
+# Two probes, because they fail for different reasons and the distinction is the one that
+# costs time here. `/health` reads the local filesystem and says whether the application was
+# installed into web-data/ at all — the clean-clone trap this step exists to close. The API
+# probe then says whether the installed application actually routes and has auth on; 401 is the
+# expected answer, since an unauthenticated caller must not get a user back.
+probe "AtroCore health" "http://${DEMO_HOST}/health" "200"
 probe "AtroCore" "http://${DEMO_HOST}/api/v1/App/user" "401"
 if schema_ready; then
   ok "operational schema present (public.${SCHEMA_PROBE_TABLE})"
@@ -619,9 +632,10 @@ cat <<'WARNING'
  repos: the gateway API_KEY / NODE_RED_API_KEY / IMPORT_API_KEY are all the
  same public placeholder value, and closure.reviewer / demo.inspector1 are
  demo identities with printed passwords. None of this is production
- hardening (Vault, Keycloak, observability, replication are all still open
- work) -- see docs/COMPLIANCE_INTEGRATION_RUNBOOK.md Sec.10 before this
- instance is reachable by anyone you do not trust.
+ hardening (Vault, Keycloak and replication are all still open work, and
+ monitoring exists but is not running -- it is a separate opt-in stack, see
+ observability/README.md) -- read docs/COMPLIANCE_INTEGRATION_RUNBOOK.md
+ Sec.10 before this instance is reachable by anyone you do not trust.
 
  Before a real deployment, rotate every credential and then run:
      ./scripts/preflight-secrets.sh --profile production

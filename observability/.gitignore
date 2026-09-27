@@ -1,0 +1,3 @@
+# The rendered copy of .env.example. Never tracked: it holds the Grafana
+# admin password and three database passwords.
+.env

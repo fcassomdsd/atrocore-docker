@@ -1,0 +1,368 @@
+# Observability stack — Prometheus, Alertmanager, Grafana, Loki (P3.5).
+#
+# THIS IS A SEPARATE COMPOSE PROJECT, DELIBERATELY.
+#
+# It is not a profile inside any of the six application compose files, and it
+# adds nothing to them. The lean demo must keep working from a clean clone
+# (`demo-quickstart.sh --yes`), and the surest way to keep that true is for
+# monitoring to be something you start, not something that starts with the
+# platform. Nothing here is on any application's startup path.
+#
+# It costs roughly 1 GiB of RAM with the limits below. FOOTPRINT_AUDIT.md puts
+# the platform's own floor at 8 GB minimum / 16 GB recommended, with Alfresco
+# already idling at 95-97% of its cap; on an 8 GB host this stack is the thing
+# that pushes it over. Run it on the 16 GB configuration, or accept that the
+# demo host does not monitor itself.
+#
+#   docker compose -f observability/docker-compose.yaml up -d
+#
+# NETWORKS
+# --------
+# Every network below is `external: true` and created by one of the six
+# application projects. That is not an oversight: this stack observes services
+# it does not own, so it attaches to their networks rather than asking them to
+# attach to one of its own — which would mean editing five compose files and
+# making the demo depend on a monitoring network existing.
+#
+# The consequence is a real startup order: the platform comes up first, this
+# comes up second. Starting it against a host where the applications have
+# never run fails with "network not found", which is the correct answer.
+#
+# Why six networks and not one: the services this has to reach are spread
+# across projects that never shared a network. In particular ActiveMQ, Solr,
+# Share, the transform engine and Alfresco's PostgreSQL are on compliance_cmis's
+# own project network and are reachable nowhere else — and ActiveMQ and Solr
+# are precisely the two whose failure modes FOOTPRINT_AUDIT.md measured as
+# silent, so a monitoring stack that could not see them would miss the two
+# things it most needs to catch.
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0@sha256:6559acbd5d770b15bb3c954629ce190ac3cbbdb2b7f1c30f0385c4e05104e218
+    container_name: obs-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 15 days. Long enough to see a week-over-week trend and to look back at
+      # an incident on Monday morning; short enough that the volume does not
+      # become another thing that fills the disk this stack exists to watch.
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${OBS_BIND_IP:-127.0.0.1}:9090:9090"
+    restart: unless-stopped
+    user: "nobody"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+    networks: [obs_net, backend_net, alfresco_backend, import_backend, cmis_net, web_net, atrocore_net]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0@sha256:d5155cfac40a6d9250ffc97c19db2c5e190c7bc57c6b67125c94903358f8c7d8
+    container_name: obs-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    # No SMTP_* environment here, deliberately: Alertmanager does not expand
+    # environment variables in its configuration file, so passing them would
+    # be the dead-variable pattern this repo has already had to remove twice
+    # -- settings that look wired up and do nothing. Delivery is configured in
+    # alertmanager/alertmanager.yml, with the password read from a file.
+    ports:
+      - "${OBS_BIND_IP:-127.0.0.1}:9093:9093"
+    restart: unless-stopped
+    user: "nobody"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    networks: [obs_net]
+
+  grafana:
+    image: grafana/grafana:11.5.1@sha256:5781759b3d27734d4d548fcbaf60b1180dbf4290e708f01f292faa6ae764c5e6
+    container_name: obs-grafana
+    environment:
+      # No fallback on the password, matching the platform's rule since P3.1:
+      # a committed default is a published credential. Generate one with
+      # `openssl rand -hex 16`.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set - see observability/.env.example}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${OBS_BIND_IP:-127.0.0.1}:3001:3000"
+    restart: unless-stopped
+    user: "472"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 384M
+    depends_on:
+      - prometheus
+      - loki
+    networks: [obs_net]
+
+  loki:
+    image: grafana/loki:3.3.2@sha256:8af2de1abbdd7aa92b27c9bcc96f0f4140c9096b507c77921ffddf1c6ad6c48f
+    container_name: obs-loki
+    command: -config.file=/etc/loki/loki-config.yaml
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+    user: "10001"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    networks: [obs_net]
+
+  promtail:
+    image: grafana/promtail:3.3.2@sha256:cb4990801ec58975c5e231057c2bcf204c85fac428eec65ad66e0016c64b9608
+    container_name: obs-promtail
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    volumes:
+      - ./promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      # Reads container logs off the host rather than asking twelve services to
+      # ship their own. Read-only, and the Docker socket is mounted read-only
+      # purely so Promtail can turn a container id into its name and compose
+      # labels -- without it every log line is an unreadable hex string.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail-positions:/tmp/promtail
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 192M
+    depends_on:
+      - loki
+    networks: [obs_net]
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1@sha256:f40e65878e25c2e78ea037f73a449527a0fb994e303dc3e34cb6b187b4b91435
+    container_name: obs-cadvisor
+    command:
+      # Only the metrics actually used by the rules and the dashboard. cAdvisor's
+      # full set is large enough to be a measurable share of Prometheus's own
+      # memory on a host this size.
+      - --docker_only=true
+      - --housekeeping_interval=15s
+      - --disable_metrics=percpu,sched,tcp,udp,advtcp,process,hugetlb,referenced_memory,cpu_topology,resctrl
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    # cAdvisor reads cgroup and container state that is not readable unprivileged.
+    # It is the one component here that cannot be locked down; it is also the only
+    # source of per-container memory-against-limit, which is what makes the
+    # Alfresco memory-pressure alert possible.
+    privileged: true
+    devices:
+      - /dev/kmsg
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    networks: [obs_net]
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2@sha256:4032c6d5bfd752342c3e631c2f1de93ba6b86c41db6b167b9a35372c139e7706
+    container_name: obs-node-exporter
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+    # Host filesystem free space is not a nice-to-have here. With
+    # archive_mode=on a failing archive_command makes PostgreSQL retain every
+    # WAL segment until archiving succeeds, and the volume fills until the
+    # database stops (P3.4). This exporter is what makes that visible before
+    # it happens.
+    pid: host
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 96M
+    networks: [obs_net]
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0@sha256:b04a9fef4fa086a02fc7fcd8dcdbc4b7b35cc30cdee860fdc6a19dd8b208d63e
+    container_name: obs-blackbox
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    restart: unless-stopped
+    user: "nobody"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 96M
+    # The probes are the point of this stack, so this container needs to reach
+    # everything the applications do.
+    networks: [obs_net, backend_net, alfresco_backend, import_backend, cmis_net, web_net, atrocore_net]
+
+  # --- PostgreSQL exporters -------------------------------------------------
+  #
+  # One per database, because there are three and they live on three different
+  # networks with three different credentials. What they are here for, above
+  # everything else, is pg_stat_archiver: WAL archiving fails silently and the
+  # first visible symptom is a full disk hours later (P3.4).
+  #
+  # Credentials follow the platform's secret precedence from P3.1 --
+  # DATA_SOURCE_PASS_FILE reads a file, so a Vault Agent that writes that file
+  # is a drop-in with no change here.
+
+  postgres-exporter-atrocore:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0@sha256:6999a7657e2f2fb0ca6ebf417213eebf6dc7d21b30708c622f6fcb11183a2bb0
+    container_name: obs-pgexporter-atrocore
+    # No --collector.stat_statements: pg_stat_statements is not installed on
+    # any of these databases, and enabling the collector makes it log a
+    # failed collection on every scrape. A monitoring stack whose own logs
+    # are full of errors it caused is one whose logs nobody reads.
+    command:
+      - --extend.query-path=/etc/postgres-exporter/queries.yaml
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${ATROCORE_PG_USER:-postgres}:${ATROCORE_PG_PASSWORD:?ATROCORE_PG_PASSWORD must be set}@db:5432/${ATROCORE_PG_DB:-postgres}?sslmode=disable"
+    volumes:
+      - ./postgres-exporter/queries.yaml:/etc/postgres-exporter/queries.yaml:ro
+    restart: unless-stopped
+    user: "nobody"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 96M}
+    networks: [obs_net, atrocore_net]
+
+  postgres-exporter-alfresco:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0@sha256:6999a7657e2f2fb0ca6ebf417213eebf6dc7d21b30708c622f6fcb11183a2bb0
+    container_name: obs-pgexporter-alfresco
+    command:
+      - --extend.query-path=/etc/postgres-exporter/queries.yaml
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${ALFRESCO_PG_USER:-alfresco}:${ALFRESCO_PG_PASSWORD:?ALFRESCO_PG_PASSWORD must be set}@postgres:5432/${ALFRESCO_PG_DB:-alfresco}?sslmode=disable"
+    volumes:
+      - ./postgres-exporter/queries.yaml:/etc/postgres-exporter/queries.yaml:ro
+    restart: unless-stopped
+    user: "nobody"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 96M}
+    networks: [obs_net, cmis_net]
+
+  postgres-exporter-web:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0@sha256:6999a7657e2f2fb0ca6ebf417213eebf6dc7d21b30708c622f6fcb11183a2bb0
+    container_name: obs-pgexporter-web
+    command:
+      - --extend.query-path=/etc/postgres-exporter/queries.yaml
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${WEB_PG_USER:-compliance}:${WEB_PG_PASSWORD:?WEB_PG_PASSWORD must be set}@db:5432/${WEB_PG_DB:-compliance}?sslmode=disable"
+    volumes:
+      - ./postgres-exporter/queries.yaml:/etc/postgres-exporter/queries.yaml:ro
+    restart: unless-stopped
+    user: "nobody"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 96M}
+    networks: [obs_net, web_net]
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+  loki-data:
+  promtail-positions:
+
+networks:
+  obs_net:
+    driver: bridge
+  # Created by atrocore-docker: atro-web, and where compliance_flow and
+  # compliance_cmis's proxy also attach.
+  backend_net:
+    name: backend_net
+    external: true
+  # Created by compliance_cmis (as its `backend_net`): node-red,
+  # compliance-import, compliance_web's frontends, the Alfresco proxy.
+  alfresco_backend:
+    name: alfresco_backend
+    external: true
+  # Created by compliance_import.
+  import_backend:
+    name: import-backend
+    external: true
+  # compliance_cmis's own project network. The only place ActiveMQ, Solr,
+  # Share, transform-core-aio and Alfresco's PostgreSQL are reachable.
+  cmis_net:
+    name: compliance_cmis_alfresco_net
+    external: true
+  # compliance_web's own project network. Its backend and PostgreSQL are on
+  # this and nothing else.
+  web_net:
+    name: compliance-web_default
+    external: true
+  # atrocore-docker's own project network, for its PostgreSQL.
+  atrocore_net:
+    name: atrocore-docker_atrocore_net
+    external: true

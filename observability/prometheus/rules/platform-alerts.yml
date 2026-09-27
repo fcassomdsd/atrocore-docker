@@ -1,0 +1,332 @@
+# Alert rules for the compliance platform (P3.5).
+#
+# These are written against failure modes this platform was measured to have,
+# not against a generic checklist. FOOTPRINT_AUDIT.md (2026-09-15) and the P3.4
+# backup work are the sources; each rule's annotation says which observation it
+# comes from and what an operator should do. An alert that does not say what to
+# do is a page someone learns to ignore.
+#
+# Thresholds are set against measured baselines rather than round numbers. The
+# memory rule below is the clearest case: 90% would fire on a healthy idle
+# Alfresco, because Alfresco idles at 95-97% of its cap by measurement. A rule
+# that fires at idle gets muted within a week, and a muted rule is worse than
+# no rule -- it looks like coverage.
+
+groups:
+  - name: platform-availability
+    rules:
+      # --- The two silent failures -------------------------------------------
+      #
+      # These two are the reason this stack exists.
+
+      - alert: ActiveMQBrokerUnreachable
+        expr: probe_success{service="activemq"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: activemq
+        annotations:
+          summary: "ActiveMQ broker port 61616 is not accepting connections"
+          description: >-
+            The broker Alfresco connects to is unreachable. This is the worst
+            failure mode measured on this platform (FOOTPRINT_AUDIT.md): it
+            fails NOTHING synchronously. Alfresco keeps answering, the health
+            probes keep passing, and specific operations -- replanning an
+            existing document in particular -- hang indefinitely with no error
+            and no timeout. Users report "it's slow", not "it's broken", and
+            nothing in any log says otherwise. Without this alert the condition
+            is invisible.
+          action: >-
+            cd compliance_cmis && docker compose ps activemq && docker compose
+            logs --tail=100 activemq. Restart it; Alfresco reconnects through
+            its failover transport without needing a restart of its own.
+
+      - alert: SolrUnreachable
+        expr: probe_success{service="solr"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: solr
+        annotations:
+          summary: "Solr is not accepting connections on 8983"
+          description: >-
+            Search is down. Measured behaviour (FOOTPRINT_AUDIT.md): the
+            Alfresco Web Scripts fail cleanly, but calls through the Node-RED
+            gateway hang. Finding lookups are unaffected -- the canonical import
+            path resolves findings by a deterministic node path and only falls
+            back to search -- but anything that genuinely searches will stall.
+          action: >-
+            cd compliance_cmis && docker compose logs --tail=100 solr6. After a
+            restart the index may need to catch up before results are complete;
+            a passing probe means reachable, not reindexed.
+
+      # --- Health endpoints -------------------------------------------------
+
+      - alert: ServiceHealthProbeFailing
+        expr: probe_success{probe_kind="health"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} is failing its health probe"
+          description: >-
+            The service is not answering its health endpoint from outside.
+            Either the container is gone or the process is wedged -- the probe
+            cannot tell those apart, which is why it is worth having: both need
+            the same first look.
+          action: "docker ps -a | grep -i <service>; then docker compose logs --tail=100 <service> in that service's repo."
+
+      - alert: HealthProbeSlow
+        expr: probe_duration_seconds{probe_kind="health"} > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} health probe is taking over 2s"
+          description: >-
+            These endpoints do no I/O beyond their own process; a healthy one
+            answers in milliseconds. Seconds means the process is saturated or
+            blocked, and on this platform that is usually the early shape of a
+            hang rather than a slow query.
+          action: "Check container CPU and memory on the platform dashboard before it becomes an outage."
+
+      # --- Containers -------------------------------------------------------
+
+      # There is deliberately no "container disappeared" rule here. cAdvisor
+      # stops exporting a container's series once it is gone, so the obvious
+      # expressions either never fire or fire on every one-shot job, and the
+      # tempting `absent_over_time` form with several containers in one regex
+      # only fires when ALL of them vanish at once -- a rule that looks like
+      # coverage and is not. A killed container is caught by the probe rules
+      # above, which are strictly better: they also catch a container that is
+      # still running and no longer answering, which is this platform's
+      # characteristic failure.
+
+      - alert: ContainerRestartLoop
+        expr: changes(container_start_time_seconds{container!=""}[30m]) >= 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.container }} has restarted 3+ times in 30 minutes"
+          description: >-
+            A crash loop. `restart: unless-stopped` hides it: between crashes
+            `docker compose ps` shows the container running, so this is
+            invisible unless someone happens to look at the uptime column.
+          action: "docker logs --tail=200 {{ $labels.container }}"
+
+      - alert: ContainerMemoryNearLimit
+        # The `> 0` on the divisor is a guard, not decoration: a container with
+        # no memory limit reports a spec limit of 0, and dividing by it yields
+        # +Inf, which satisfies any threshold. Without it this rule fires
+        # permanently on every unlimited container.
+        expr: >-
+          container_memory_working_set_bytes{container!=""}
+          / (container_spec_memory_limit_bytes{container!=""} > 0) > 0.98
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.container }} is above 98% of its memory limit"
+          description: >-
+            Threshold 98%, not the conventional 90%, and 15 minutes rather than
+            5 -- because FOOTPRINT_AUDIT.md measured Alfresco idling at 95-97%
+            of its cap in normal operation. A 90% rule would fire on a healthy
+            stack from the moment it was deployed, and would be muted before it
+            ever caught anything. Above 98% and sustained, the next allocation
+            is an OOM kill.
+          action: >-
+            Raise the service's deploy.resources.limits.memory, or give the host
+            more RAM. FOOTPRINT_AUDIT.md's floor is 8 GB minimum / 16 GB
+            recommended, and the observability stack itself costs ~1 GB.
+
+  - name: platform-data
+    rules:
+      # --- WAL archiving ----------------------------------------------------
+      #
+      # P3.4 turned on archive_mode. The hazard that came with it is that a
+      # failing archive_command does not stop PostgreSQL: it retains every WAL
+      # segment until archiving succeeds, and the volume fills until the
+      # database stops. Silent, then sudden. These two rules are the reason
+      # P3.4's changelog said "named as an alert in P3.5".
+
+      - alert: WALArchivingFailing
+        expr: pg_archiver_failing == 1
+        for: 10m
+        labels:
+          severity: critical
+          component: postgresql
+        annotations:
+          summary: "WAL archiving is failing on the {{ $labels.database }} database"
+          description: >-
+            The most recent archive attempt failed and none has succeeded
+            since. Expressed as last-failed-after-last-archived rather than
+            `failed_count > 0` on purpose: those counters are cumulative and
+            survive restarts, so a count rule fires forever after one transient
+            blip -- the same trap scripts/verify-wal-archiving.sh documents.
+            This form reports the CURRENT state and clears by itself when
+            archiving recovers.
+          action: >-
+            Check the archive directory exists and is writable by uid 999
+            (`chown -R 999:999`, the failure this has actually had), then
+            `docker compose logs db`. Until it clears, WAL accumulates and the
+            recovery point stops advancing -- both the disk and the RPO are at
+            risk.
+
+      - alert: WALArchiveBacklogGrowing
+        expr: pg_archiver_ready_count > 5
+        for: 15m
+        labels:
+          severity: warning
+          component: postgresql
+        annotations:
+          summary: "{{ $value }} WAL segments are queued and unarchived on {{ $labels.database }}"
+          description: >-
+            Segments PostgreSQL has marked ready that the archive_command has
+            not consumed. A healthy archiver drains these in seconds, so a
+            sustained backlog means archiving has stalled in a way that is not
+            being reported as an outright failure -- distinct from
+            WALArchivingFailing, and able to outlive it.
+
+            This rule is about BACKLOG rather than the age of the last
+            archive, and the distinction was learned the hard way: the obvious
+            "nothing archived in an hour, and archive_timeout is 300s"
+            formulation is wrong, because archive_timeout does not force a
+            segment switch on a database that has written no WAL. An idle
+            database archives nothing, correctly, and the age rule fires every
+            quiet weekend until someone mutes it. A backlog only exists when
+            there is something to archive and it is not being archived.
+          action: >-
+            Run scripts/verify-wal-archiving.sh against that database -- it
+            forces a switch and asserts the segment lands. Until it drains,
+            every one of these segments is occupying the data volume.
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: postgresql
+        annotations:
+          summary: "The {{ $labels.database }} database is not answering"
+          description: "The exporter cannot connect. Either the server is down or it is refusing connections."
+          action: "docker compose ps db (or postgres, in compliance_cmis) and check its logs."
+
+      # --- Disk -------------------------------------------------------------
+
+      - alert: DiskFillingUp
+        expr: >-
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"} < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Less than 15% free on {{ $labels.mountpoint }}"
+          description: >-
+            15% rather than 10%, because of what fills this disk: retained WAL
+            from a failing archiver, and the Alfresco content store. Neither
+            stops on its own, and the last 10% of a disk goes quickly once WAL
+            is accumulating. PostgreSQL stops when it runs out.
+          action: "Check WALArchivingFailing first -- it is the usual cause. Otherwise prune old backup sets."
+
+      - alert: DiskWillFillIn24h
+        expr: >-
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}[6h], 24*3600) < 0
+          and node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"} < 0.40
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.mountpoint }} is on track to be full within 24 hours"
+          description: >-
+            A trend rule, not a threshold one, and the pair matters: a runaway
+            archiver can cross from comfortable to full inside a single night,
+            so the static 15% rule would fire with no time left to act. The
+            40% guard keeps the prediction from firing on the noise of a disk
+            that is mostly empty.
+          action: "Same first check: is WAL archiving failing?"
+
+  - name: platform-auth
+    rules:
+      # From compliance_web/docs/auth/AUTH_CHUNK8_OPERATIONAL_READINESS.md
+      # section 6. These are about what the application is doing rather than
+      # whether it is up, so none of them would be caught by a probe.
+
+      - alert: LoginFailureSpike
+        # Rate over 15m rather than a raw count, and compared against the
+        # success rate rather than a fixed number: a busy authority and a
+        # quiet one have different normal volumes, and a threshold tuned for
+        # one is wrong for the other. More failures than successes, sustained
+        # for ten minutes, is anomalous at any scale.
+        expr: >-
+          rate(auth_login_failed_total[15m])
+          > rate(auth_login_success_total[15m])
+          and rate(auth_login_failed_total[15m]) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "More failed than successful logins over the last 15 minutes"
+          description: >-
+            Either a credential-stuffing attempt, or something broke in a way
+            that looks like bad passwords to users. The second guard keeps
+            this quiet on a genuinely idle system, where one failed login and
+            no successful ones would otherwise satisfy the ratio.
+          action: >-
+            Query the auth_audit_event table for login_failed rows grouped by
+            ip and username. Rate limiting fires on its own per-account; this
+            catches the spread-out case it is designed not to.
+
+      - alert: LoginRateLimiterEngaged
+        expr: increase(auth_login_rate_limited_total[10m]) > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "The login rate limiter has refused {{ $value }} attempts in 10 minutes"
+          description: >-
+            The limiter is doing its job, which is worth knowing about rather
+            than being reassured by: at this volume something is hammering
+            the login endpoint.
+          action: "Group auth_audit_event's login_rate_limited rows by ip. Block at the edge if it is one source."
+
+      - alert: RoleRefreshFailing
+        expr: >-
+          rate(auth_role_refresh_failed_total[10m])
+          / (rate(auth_role_refresh_failed_total[10m]) + rate(auth_role_refresh_success_total[10m])) > 0.5
+        for: 10m
+        labels:
+          severity: critical
+          component: auth
+        annotations:
+          summary: "Over half of role-cache refreshes are failing"
+          description: >-
+            Normally an Alfresco outage, and it fails QUIETLY by design: the
+            session survives on cached roles for a grace period, so users
+            notice nothing until the grace period ends and then everyone
+            loses their permissions at once. This alert is the only warning
+            before that happens.
+
+            A ratio rather than a count, because the absolute number scales
+            with how many people are logged in -- ten failures is a crisis on
+            a quiet morning and noise at nine o'clock.
+          action: >-
+            Check Alfresco is up and the service account still authenticates.
+            docs/auth/ALFRESCO_ROLE_SETUP.md covers the mapping table.
+
+      - alert: CsrfMismatchSpike
+        expr: increase(auth_csrf_mismatch_total[15m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "{{ $value }} CSRF token mismatches in 15 minutes"
+          description: >-
+            A handful is normal -- a stale tab, a user who left a form open
+            over lunch. A run of them is either an attack or a deployment
+            that changed the token contract and broke every open session.
+          action: "Check whether a deploy just happened before assuming it is an attack."

@@ -1,0 +1,75 @@
+# Promtail — ship container logs to Loki (P3.5).
+#
+# Reads the Docker daemon's own log files rather than asking twelve services
+# in six repositories to adopt a log shipper. That is the trade this makes: no
+# application change anywhere, at the cost of parsing whatever each service
+# already writes.
+#
+# Which is why P3.5 also puts structured JSON logging into compliance_import
+# and compliance_web. The pipeline below extracts fields from JSON where a
+# service emits it, and stores the line as-is where it does not -- so Alfresco
+# and ActiveMQ are searchable as text while the services this project controls
+# are queryable by field.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/promtail/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+
+    relabel_configs:
+      # Without this every stream is labelled with a 64-character container id
+      # and the logs are effectively unsearchable.
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_project"]
+        target_label: project
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: service
+      - source_labels: ["__meta_docker_container_log_stream"]
+        target_label: stream
+      # Do not log the logging. Promtail reading its own output, then shipping
+      # it, then reading that, is a feedback loop that ends in a full disk.
+      - source_labels: ["container"]
+        regex: "obs-(promtail|loki)"
+        action: drop
+
+    pipeline_stages:
+      # Only services that emit JSON get parsed. `drop_malformed: false` means
+      # a plain-text line from Alfresco passes straight through rather than
+      # being discarded -- losing Alfresco's logs to a parser that did not
+      # apply to them would be a poor trade for structured fields elsewhere.
+      - match:
+          selector: '{service=~"compliance-import|backend"}'
+          stages:
+            - json:
+                expressions:
+                  level: level
+                  event: event
+                  request_id: request_id
+                drop_malformed: false
+            - labels:
+                level:
+                event:
+      # Everything else: keep the line, and pull out a severity where the
+      # service writes a conventional one, so "show me errors" works across
+      # services that never agreed on a format.
+      - match:
+          selector: '{service!~"compliance-import|backend"}'
+          stages:
+            - regex:
+                expression: '(?i)\b(?P<level>TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|SEVERE)\b'
+            - labels:
+                level:

@@ -16,6 +16,21 @@ services:
     volumes:
       - ./web-data:/var/www/
     restart: unless-stopped
+    # Health (P3.5). /health is served from the image at /opt, not from the
+    # bind-mounted application tree -- see .docker/health.conf.
+    #
+    # start_period is 40s rather than the usual few seconds because this
+    # container's first start does real work: startup.sh writes a vhost per
+    # domain, sets up cron and only then execs apache2-foreground. Failures
+    # during start_period do not count against retries, so the window costs
+    # nothing when the container is fine and avoids a spurious `unhealthy` on
+    # a cold boot.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     # Container hardening (P3.2).
     #
     # NOT read_only and NOT user: this container installs the AtroCore
@@ -62,6 +77,17 @@ services:
     # retry cannot fail on an already-archived segment.
     command: postgres -c archive_mode=on -c "archive_command=test ! -f /wal-archive/%f && cp %p /wal-archive/%f" -c archive_timeout=300 -c wal_level=replica
     restart: unless-stopped
+    # Health (P3.5). pg_isready against this container's own socket, with the
+    # database name given explicitly: with no -d it defaults to the connecting
+    # user's name, which is not a database here, and pg_isready reports the
+    # server up regardless -- so the wrong form passes for the wrong reason and
+    # would keep passing if the database were dropped.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_PIM_DB} -h 127.0.0.1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     # As with compliance_web's db: the official Postgres image chowns its data
     # directory and drops privileges at startup, so cap_drop: ALL and a
     # read-only rootfs break it. These two controls apply cleanly.

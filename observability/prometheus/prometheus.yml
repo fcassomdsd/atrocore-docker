@@ -1,0 +1,178 @@
+# Prometheus scrape and alerting configuration for the compliance platform (P3.5).
+#
+# Two kinds of target appear below, and the split is deliberate.
+#
+# Exporters (cAdvisor, node-exporter, the three postgres-exporters) are scraped
+# directly: they publish numbers about resources.
+#
+# Everything the platform itself runs is reached through blackbox-exporter
+# instead, because none of these services publishes Prometheus metrics and
+# retrofitting a /metrics endpoint into Alfresco, ActiveMQ and Solr is not a
+# thing this project gets to do. A blackbox probe answers the question that
+# actually matters operationally -- can this be reached, and did it answer in
+# time -- and it answers it from outside the service, which is the only vantage
+# point that still works when the service is wedged rather than dead.
+#
+# That distinction is the whole reason this stack exists. FOOTPRINT_AUDIT.md
+# measured that a dead ActiveMQ does not fail anything synchronously: specific
+# operations simply hang forever, with no error and no timeout. An in-process
+# health check cannot report that, because the process reporting is the one
+# that is stuck. An external probe with its own timeout can.
+
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    platform: compliance
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # --- Prometheus's own health ---------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # --- Container resources --------------------------------------------------
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    # cAdvisor labels every series with the full container name; keep it as
+    # `container` so alerts and dashboards can name a service.
+    metric_relabel_configs:
+      - source_labels: [name]
+        target_label: container
+      # Drop the series for containers Docker creates and destroys constantly
+      # (build steps, one-shot migrate jobs); they are churn, not signal.
+      - source_labels: [container]
+        regex: "(compliance-migrate|buildx_buildkit.*)"
+        action: drop
+
+  # --- Host resources -------------------------------------------------------
+  #
+  # Mainly for filesystem free space. With archive_mode=on a failing
+  # archive_command makes PostgreSQL retain WAL until the disk is full; that is
+  # the single most damaging slow failure this platform has, and it is a host
+  # metric, not a container one.
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # --- PostgreSQL -----------------------------------------------------------
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter-atrocore:9187"]
+        labels: {database: atrocore}
+      - targets: ["postgres-exporter-alfresco:9187"]
+        labels: {database: alfresco}
+      - targets: ["postgres-exporter-web:9187"]
+        labels: {database: compliance_web}
+
+  # --- Auth metrics ---------------------------------------------------------
+  #
+  # The only service on this platform that publishes Prometheus metrics of
+  # its own: the six counters
+  # compliance_web/docs/auth/AUTH_CHUNK8_OPERATIONAL_READINESS.md section 6
+  # has named since the auth subsystem shipped, wired up in P3.5.
+  #
+  # Scraped directly rather than probed, because these are about what the
+  # application is doing, not whether it is reachable -- a brute-force
+  # attempt, an Alfresco outage that only manifests as role refreshes
+  # failing. Its /health probe is separate and stays.
+  - job_name: compliance-web-auth
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:4000"]
+        labels: {service: compliance_web}
+
+  # --- HTTP health probes ---------------------------------------------------
+  #
+  # Every one of these is an endpoint this platform ships and P3.5 added or
+  # verified. They are liveness endpoints by design -- each reports on its own
+  # process and deliberately does not probe its upstreams, because a health
+  # check that reaches a wedged upstream inherits the wedge. Composing them
+  # here, from outside, is where the whole-stack picture is supposed to come
+  # from.
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://atro-web:80/health
+          - http://node-red:1880/health
+          - http://compliance-import:8000/health
+          - http://backend:4000/health
+          - http://proxy:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-
+        labels: {probe_kind: health}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Share has no health endpoint of its own; its login page answering at all is
+  # the available signal. 200-or-302, since it redirects.
+  - job_name: blackbox-http-share
+    metrics_path: /probe
+    params:
+      module: [http_2xx_or_redirect]
+    static_configs:
+      - targets:
+          - http://share:8080/share
+          - http://transform-core-aio:8090/ready
+        labels: {probe_kind: health}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # --- TCP probes -----------------------------------------------------------
+  #
+  # ActiveMQ and Solr get TCP probes rather than HTTP ones on purpose.
+  #
+  # ActiveMQ's :61616 is the port Alfresco actually connects on
+  # (`failover:(nio://activemq:61616)`), and the broker being down on that port
+  # is the exact condition that produces the measured indefinite hang. Its web
+  # console on :8161 can be up while the broker transport is not.
+  #
+  # Solr is behind Alfresco's shared-secret comms, so an unauthenticated HTTP
+  # probe of /solr/admin/ping answers 401 whether Solr is healthy or not -- a
+  # check that reports the same thing in both states. The listener accepting a
+  # connection is the honest signal available without putting the Solr secret
+  # into this stack's configuration.
+  - job_name: blackbox-tcp
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+          - activemq:61616
+        labels: {probe_kind: broker, service: activemq}
+      - targets:
+          - solr6:8983
+        labels: {probe_kind: search, service: solr}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # --- The exporters themselves --------------------------------------------
+  - job_name: blackbox-exporter
+    static_configs:
+      - targets: ["blackbox-exporter:9115"]

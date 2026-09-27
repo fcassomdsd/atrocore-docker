@@ -19,7 +19,11 @@ Use this checklist if you are running the project for the first time:
 1. Copy `.env.example` to `.env`.
 2. Fill in database credentials in `.env`.
 3. Start containers with `docker compose up -d --build`.
-4. Wait until `db` and `atro-web` are `running` in `docker compose ps` (the compose services define no healthcheck, so they never report `healthy`).
+4. Wait until `db` and `atro-web` report `healthy` in `docker compose ps`. `atro-web`'s check is
+   `GET /health`, which reports whether the AtroCore application is installed into `web-data/`
+   — on a clean clone it is not, and the container stays `unhealthy` until step 5 below has run.
+   That is the intended answer, not a fault: an empty `web-data/` leaves Apache with no
+   DocumentRoot, and this is the one failure that used to show up only as a bare `404`.
 5. **Install the application.** `docker compose up` scaffolds the application *files* but does not install it: a fresh instance has `'isInstalled' => false` and an empty `user` table, so `/api/v1/App/user` answers `500` and every consumer sees a broken AtroCore. This runs AtroCore's own install wizard with the credentials the platform uses (`ATROCORE_USERNAME`/`ATROCORE_PASSWORD` in `../compliance_flow/.env`).
 
    ```bash

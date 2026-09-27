@@ -272,6 +272,64 @@ jobs:
         if: always()
         run: ./scripts/demo-verify-ci.sh --teardown || true
 
+  observability-verify:
+    # Mirrors GitLab's observability:verify. Same design as demo-verify above
+    # and for the same reason: it builds the whole platform, then a monitoring
+    # stack on top of it, then waits out a two-minute alert window -- so it is
+    # a button or a schedule, never a merge gate.
+    #
+    # What it proves is narrower and more important than "the stack starts".
+    # It stops a container on purpose and asserts that the alert fires,
+    # reaches Alertmanager, and clears again on recovery. Every failure this
+    # platform is worst at is one where everything looks fine, so a monitoring
+    # stack that has only ever been observed running has not been tested.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      SKELETON_VARIANT: atrocore
+      BUILD_VARIANT: base
+      PRODUCTION_DOMAIN: localhost
+      PRODUCTION_STABILITY: stable
+      TESTING_DOMAIN: ''
+      TESTING_STABILITY: rc
+      POSTGRES_PASSWORD: ci_postgres_password
+      POSTGRES_PIM_USER: ci_user
+      POSTGRES_PIM_PASSWORD: ci_password
+      POSTGRES_PIM_DB: atrocore
+      POSTGRES_PIM_DB_TEST: ''
+      DEMO_HOST: localhost
+      OBS_HOST: localhost
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Write .env
+        run: |
+          cat > .env <<EOF
+          SKELETON_VARIANT=${SKELETON_VARIANT}
+          BUILD_VARIANT=${BUILD_VARIANT}
+          PRODUCTION_DOMAIN=${PRODUCTION_DOMAIN}
+          PRODUCTION_STABILITY=${PRODUCTION_STABILITY}
+          TESTING_DOMAIN=${TESTING_DOMAIN}
+          TESTING_STABILITY=${TESTING_STABILITY}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PIM_USER=${POSTGRES_PIM_USER}
+          POSTGRES_PIM_PASSWORD=${POSTGRES_PIM_PASSWORD}
+          POSTGRES_PIM_DB=${POSTGRES_PIM_DB}
+          POSTGRES_PIM_DB_TEST=${POSTGRES_PIM_DB_TEST}
+          EOF
+
+      - run: ./scripts/observability-verify-ci.sh
+
+      - name: Tear down
+        if: always()
+        run: |
+          ./scripts/observability-verify-ci.sh --teardown || true
+          ./scripts/demo-verify-ci.sh --teardown || true
+
   security-scan:
     # Supply-chain scanning (P3.2). Gate policy chosen from measurement:
     # CRITICAL is blocking (measured at zero across all six repos, so the gate

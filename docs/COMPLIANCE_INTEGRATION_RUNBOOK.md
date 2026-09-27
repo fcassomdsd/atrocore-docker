@@ -175,6 +175,18 @@ and the schema is created:
 Without this, `http://localhost` has no DocumentRoot, the API answers `500`, and every seed
 fails on missing tables. §7.2 repeats it in the demo context.
 
+Health check — `/health` tells you which of those two states you are in:
+
+    curl -f http://localhost/health
+
+`{"status":"ok","installed":true,"configured":true}` means the application is on disk and the
+installer has written `data/config.php`. `503` with `"status":"not_installed"` means `web-data/`
+is empty and the commands above have not run. It is served from the image, not from
+`web-data/`, so it answers even when there is no application at all — which is the case it
+exists to name. It reads the local filesystem only and never opens a database connection, so
+it says nothing about whether Postgres is reachable; `docker compose ps` covers that through
+the `db` service's own healthcheck.
+
 Console commands must run as **`www-data`** (`-u www-data`). `docker compose exec` defaults
 to root, and root-owned files in `data/cache` make the web process fail on its next cache
 write — a `500` on every API route, with nothing in the Apache log to explain it.
@@ -205,7 +217,15 @@ Health check:
     docker compose up -d
     docker compose ps
 
-Basic endpoint check (example):
+Health check:
+
+    curl -f http://localhost:1880/health
+
+Exempt from the API-key guard, and served by a flow rather than by Node-RED itself — so a `200`
+means `flows.json` loaded and the gateway is answering, not merely that the runtime is up. It
+does not probe AtroCore or Alfresco; see `compliance_flow/README.md` for why.
+
+Basic endpoint check (example) — this one does reach AtroCore:
 
     curl -i http://localhost:1880/specialties
 
@@ -739,6 +759,41 @@ configuration. Worth knowing:
 - `npm run e2e` needs a built app **and** a display (`xvfb-run` on a headless host); CI installs
   both. Without a display it fails before it reaches the app.
 
+## 7.9 Monitoring (optional — `observability/`)
+
+Prometheus, Alertmanager, Grafana and Loki, as a **separate Compose project**
+that adds nothing to the six application stacks and sits on nothing's startup
+path:
+
+    cp observability/.env.example observability/.env   # set the Grafana and DB passwords
+    docker compose -f observability/docker-compose.yaml up -d
+
+Grafana at `http://127.0.0.1:3001`, Prometheus at `:9090`, Alertmanager at
+`:9093` — all loopback-bound by default. Full detail in
+`observability/README.md`.
+
+**Start it after the platform, not before.** Every network it uses is
+`external` and created by one of the six application projects; on a host where
+they have never run it fails with "network not found".
+
+Two things it is worth knowing it catches, because §8 below cannot:
+
+- **A dead ActiveMQ.** Verified 2026-09-27: with the broker stopped, Alfresco's
+  `-ready-` probe answered `200` and every service's `/health` reported green,
+  while (per `FOOTPRINT_AUDIT.md`) replanning an existing document hangs
+  forever with no error. The TCP probe of `activemq:61616` alerted 2m16s after
+  the broker stopped. Nothing else on this platform notices.
+- **WAL archiving stalling.** A failing `archive_command` does not stop
+  PostgreSQL; it retains every segment until the volume fills, hours later.
+
+Prove it works rather than assuming it:
+
+    ./scripts/verify-observability.sh
+
+It stops a container on purpose, waits for the alert to fire, confirms
+Alertmanager received it, restarts the container and waits for the alert to
+clear.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:
@@ -756,6 +811,11 @@ Use these quick cues:
     an application role does not grant an Alfresco ACL (§7.3).
 - Web/API calls to `localhost:4000` fail with a connection error, not an HTTP status:
   - the backend is up but its port is unpublished; start it with the dev override (§7.1).
+- **Everything answers, but an operation never returns** — no error, no timeout, no log line:
+  - suspect ActiveMQ before anything else. `cd compliance_cmis && docker compose ps activemq`.
+    This failure is invisible to every health check in this guide, which is
+    why §7.9 exists; the monitoring stack's `ActiveMQBrokerUnreachable` alert
+    is the only automatic detection of it.
 
 For logs:
 
@@ -797,7 +857,7 @@ Command pattern:
   the gateway key, which is entered in the app, and the demo identities, which live in Alfresco
   (`compliance_cmis/scripts/seed-demo-identities.sh --remove`).
 
-- **For production-like usage, replace every development/demo default for credentials and secrets before the stack is reachable by anyone you do not trust.** This is a demo/reference stack, not a hardened deployment (§4.8's P3 items — Vault, Keycloak, observability, replication — are all still open). Concretely, at minimum:
+- **For production-like usage, replace every development/demo default for credentials and secrets before the stack is reachable by anyone you do not trust.** This is a demo/reference stack, not a hardened deployment (Vault, Keycloak and replication are all still open; monitoring now exists but is a separate opt-in stack that the demo does not start — §7.9). Concretely, at minimum:
   - The gateway `API_KEY` (`compliance_flow/.env`) and its matching `NODE_RED_API_KEY` (`compliance_web/.env`) / `IMPORT_API_KEY` (`compliance_import/.env`) — all three ship with the **same public placeholder value**, committed to their respective repos. Generate one real value (`openssl rand -hex 32`) and set it in all three; `compliance_checklist` needs the same value entered in its own API-key setting.
   - The demo identities' passwords (`closure.reviewer`, `demo.inspector1` — §7.3 above) and, ideally, the accounts themselves (`./scripts/seed-demo-identities.sh --remove`).
   - `AUTH_TICKET_ENCRYPTION_KEY` (`compliance_web`), `NODE_RED_CREDENTIAL_SECRET` and `ADMIN_PASSWORD_HASH` (`compliance_flow`), and every `POSTGRES_*_PASSWORD` across the six `.env` files.

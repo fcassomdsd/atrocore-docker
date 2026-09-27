@@ -8,6 +8,48 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Added
 
+- **An observability stack — Prometheus, Alertmanager, Grafana, Loki — under `observability/`, with a drill that proves it alerts. P3.5.**
+
+  **What it is for, in one measurement.** Stop ActiveMQ and ask the platform how it is doing. Verified 2026-09-27: Alfresco's own `-ready-` probe answered `200`, and all seven service health probes reported green — while, per `FOOTPRINT_AUDIT.md`, replanning an existing document hangs forever with no error and nothing in any log to say why. The only thing that noticed was the TCP probe of `activemq:61616`, which fired `ActiveMQBrokerUnreachable` 2m16s after the broker stopped. That gap is the whole justification: health endpoints are deliberately shallow, because a probe that reaches a wedged upstream inherits the wedge, so composing the whole-stack picture from outside has to be someone's job.
+
+  **A separate Compose project, deliberately.** It adds nothing to the six application compose files and sits on nothing's startup path — the lean demo must keep working from a clean clone, and the surest guarantee is that monitoring is something you start, not something that starts with the platform.
+
+  **Six external networks, and why.** Every network it uses is created by an application project, so the platform starts first. There are six because the services that must be reached were never on one network: ActiveMQ, Solr, Share, the transform engine and Alfresco's PostgreSQL live only on `compliance_cmis`'s own project network, and two of those are the silent failures above. Attaching here rather than making five repos join a monitoring network was the deliberate trade — monitoring adapts to the platform, not the reverse.
+
+  **Thresholds set against measured baselines, not round numbers.** The memory alert fires at 98% for 15 minutes, not the conventional 90%, because `FOOTPRINT_AUDIT.md` measured Alfresco idling at 95–97% of its cap — a 90% rule would fire on a healthy stack from day one and be muted within a week, and a muted rule is worse than no rule because it looks like coverage.
+
+  **One rule was wrong until it was run.** WAL archiving was first alerted on by age — "`archive_timeout` is 300s, so nothing archived in an hour is a fault". Running it showed all three databases reporting a last archive 5–9 hours old with a backlog of zero, which is a healthy *idle* system: `archive_timeout` does not force a segment switch on a database that has written no WAL. The rule now watches `pg_archiver_ready_count`, the backlog, which only rises when there is something to archive and it is not being archived. Relatedly, `pg_archiver_failing` asks whether the last attempt failed with none succeeding since, not `failed_count > 0` — the reference Alfresco database reads `failed_count=9, failing=0`, having had a rough patch and recovered, and a count rule would have been red ever since.
+
+  **ActiveMQ and Solr get TCP probes, not HTTP ones.** ActiveMQ's web console can be healthy while the broker transport Alfresco connects on is not; Solr sits behind shared-secret comms and answers `401` whether it is fine or on fire.
+
+- **Auth metrics scraped, dashboarded and alerted on — P3.5.** `compliance_web` now publishes the six counters its own operational-readiness doc has named since the auth subsystem shipped, and this stack is what reads them. It is the only service on the platform exposing Prometheus metrics of its own, so it is scraped directly rather than probed: these are about what the application is *doing* — a brute-force attempt, an Alfresco outage that only manifests as role refreshes failing — not whether it is reachable.
+
+  Four rules, each a ratio or a rate rather than a fixed count, because a busy authority and a quiet one have different normal volumes and a threshold tuned for one is wrong for the other. `RoleRefreshFailing` is the one worth knowing about: when Alfresco is unreachable the session survives on cached roles for a grace period, so nobody notices anything until the grace period ends and every user loses their permissions at once. That alert is the only warning before it happens.
+
+- **`scripts/verify-observability.sh`, and `observability:verify` in both CI pipelines.** The drill stops a container on purpose, waits for the alert to reach `firing`, confirms Alertmanager received it, restarts the container and waits for the alert to clear — failing if any step does not happen. It refuses to start unless the probe is already passing, so a "firing" alert afterwards cannot be one that was already there, and it restores the container on any exit including a failure partway. A Prometheus that is running, a Grafana with a dashboard and rules that parse are all easy to mistake for monitoring, and none of them shows that a failure would be *noticed*. Manual/scheduled like `demo:verify` and `restore:verify`.
+
+### Added
+
+- **`GET /health` on AtroCore, and healthchecks on both services — P3.5.** Neither service declared a `healthcheck`, so `docker compose ps` could only ever say `running`; the README said so outright.
+
+  The endpoint answers the question this stack actually gets wrong. On a clean clone `./web-data` is bind-mounted empty over `/var/www`, Apache's DocumentRoot points at a directory that does not exist, and every request answers `404` from a container Docker reports as perfectly fine. The runbook documents that trap because it has cost people time. `/health` names it: `200` with `installed:true`, or `503` with `status:"not_installed"` and the command to run.
+
+  It ships in the **image** at `/opt/atrocore-health/`, not under `/var/www`, because the bind mount hides anything the image puts there — a health file installed into the application tree would be missing in exactly the situation it is meant to report on. Reached through a server-level `Alias` rather than a file in `public/`: `Alias` resolves during `translate_name`, so the request never lands under DocumentRoot and AtroCore's own `.htaccess` rewrites — which would send it to the front controller and answer `404` — never apply.
+
+  `configured` (has the installer written `data/config.php`?) is reported but does **not** affect the status. Between bootstrap and the install wizard there is a legitimate window where the application is installed and unconfigured; a container that flipped to `unhealthy` during its own provisioning would be wrong about itself.
+
+  It does not touch PostgreSQL. A probe that opens a database connection can block on a wedged server for as long as the driver allows, and a liveness probe that hangs is worse than none — Docker reports `starting` forever, the restart policy never fires, and the silence looks like health. Every check is a `stat()` on a local path. Database reachability is the `db` service's own `pg_isready` check, which passes `-d` explicitly: with no database name it defaults to the connecting user's name, which is not a database here, and still reports the server up — so the short form passes for the wrong reason and would keep passing if the database were dropped.
+
+  Verified both ways against the built image: installed → `200`, an empty `web-data` → `503` with the hint, `/` and `/api/v1/App/user` unchanged at `200`/`401`, container reaching `healthy`.
+
+### Changed
+
+- **The demo quickstart now probes real health endpoints — P3.5.** The Node-RED probe has had three forms and the reasons it moved are the point. `/specialties` was the original: it proxies to AtroCore, so it answered `400` until the metadata step had run — it was reporting on AtroCore, not on the gateway. The editor root replaced it, which tests the gateway but only that Node-RED's HTTP server is up: a `flows.json` that fails to load leaves the editor serving while every REST endpoint `404`s, so it passed on a gateway that could not answer a single call. `compliance_flow`'s new `/health` is served *by a flow*, so a `200` proves the flows loaded.
+
+  AtroCore now gets two probes after bootstrap rather than one, because they fail for different reasons: `/health` says whether the application was installed at all, and `/api/v1/App/user` says whether the installed application routes and has auth on.
+
+### Added
+
 - **A CI check that WAL archiving actually works, not just that it is configured — P3.4.** The failure mode this closes is silent: a broken `archive_command` does not stop PostgreSQL. It keeps serving, `failed_count` climbs, and WAL accumulates until the volume fills — at which point the cause is hours old. Every existing job that boots this database would have passed throughout. `scripts/verify-wal-archiving.sh` forces a segment switch and asserts it was archived, so a broken archiver fails at merge time instead of at 3am on a full disk. Byte-identical across the repos that enable archiving, the same convention as `release-tag.sh`.
 
   Two details it had to get right, both found by testing rather than reasoning. It counts segments **inside the container**, because under docker-in-docker the CLI and daemon have separate filesystems and a host-side count would read zero regardless of what archiving did. And it asserts archiving is healthy **now** — never failed, or succeeded since it last failed — rather than `failed_count = 0`: those counters are cumulative and survive restarts, so one transient blip would make a zero-check fail forever, and a check that cries wolf gets muted.
