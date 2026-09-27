@@ -6,6 +6,16 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Added
+
+- **Platform-wide backup and restore — P3.4.** Exactly one of four datasets was covered before this: `backup-db.sh` dumps the AtroCore database, and nothing touched Alfresco's database, `compliance_web`'s database, or the Alfresco content store. A database backup without its matching content store does not restore a working system. `scripts/backup-platform.sh` covers all four, with a `MANIFEST` carrying a SHA-256 per file and a retention sweep; `scripts/restore-platform.sh` restores a set and **verifies every checksum before touching anything**, because restoring half a corrupt set is worse than not starting.
+
+  **The ordering is a correctness property, not a preference.** Databases are dumped first and the content store second. Alfresco's database holds references to content-store files, so capturing content first would let a document created between the two steps be referenced by the later dump and absent from the backup — a dangling reference that surfaces as a broken document. In this order the worst case is a content file with no database row: an orphan, harmless. Restore mirrors it exactly (content first, databases last). This makes an online backup degrade safely; it does not make it atomic, and the header says so.
+
+  Deliberately **not** backed up: Solr indexes (derived state, rebuilt by reindexing — storing a stale copy of something reconstructible is worse than storing nothing), AtroCore's `web-data/` (reinstalled at container bootstrap), and `.env` files (secrets belong in a secret manager, not in a backup set that gets copied around).
+
+- **`deploy/systemd/compliance-backup.{service,timer}`** — the schedule as a tracked artifact rather than something typed on a host, so it is reviewable and survives a rebuild. `Persistent=true` so a backup missed while the host was off runs at next boot instead of being silently skipped.
+
 ### Changed
 
 - **`BIND_IP` controls which host interface published ports listen on — P3.3.** Every published port in this repo now binds through `${BIND_IP:-0.0.0.0}`. The default preserves current behaviour exactly: the demo quickstart and `demo-verify-ci.sh` reach services over the network, and under dind `DEMO_HOST` is `docker` rather than localhost, so a hardcoded loopback bind would break the whole-stack guard. A production deployment sets `BIND_IP=127.0.0.1`, leaving `compliance_web`'s TLS edge on 443 as the only externally published port. See "An ideal production configuration.md" §2.3.

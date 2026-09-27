@@ -1,0 +1,18 @@
+# Runs the backup nightly at 02:30 with a randomised delay.
+#
+# Persistent=true matters: if the host was off at 02:30 the run happens at the
+# next boot rather than being silently skipped, which is exactly the night you
+# would later wish it had not been.
+
+[Unit]
+Description=Nightly compliance platform backup
+Documentation=file:///opt/compliance-platform/atrocore-docker/scripts/backup-platform.sh
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=compliance-backup.service
+
+[Install]
+WantedBy=timers.target
