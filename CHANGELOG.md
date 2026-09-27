@@ -6,6 +6,18 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Fixed
+
+- **The demo quickstart unset `DOCKER_HOST`, breaking every run under docker-in-docker.** Introduced by P3.2's "stop `compliance_flow/.env` reconfiguring every compose call" fix, which unconditionally unset a list of `COMPOSE_*` and `DOCKER_*` variables after sourcing that file. Under dind the runner sets `DOCKER_HOST=tcp://docker:2375`, because the daemon is a separate service with no shared socket — so from that line onward every docker call fell back to `unix:///var/run/docker.sock`, which does not exist there. Step 0b died with `Cannot connect to the Docker daemon` on a stack that was up and had just passed all five health probes.
+
+  It hid for a day because every run in between was **local**, where `DOCKER_HOST` is unset to begin with and unsetting it again changes nothing. The first run of `demo:verify` in GitLab CI after the change failed on it, and took `observability:verify` with it — the latter builds the platform through the same script.
+
+  The intent was never "clear these variables", it was "do not let this `.env` reconfigure docker". It now **snapshots the caller's values before sourcing and restores them after**, which says exactly that: whatever the caller set survives, and anything the `.env` introduced is dropped. Verified in all three shapes — a caller value the `.env` tries to override survives, a value present only in the `.env` is dropped, and a caller's own `COMPOSE_PROJECT_NAME` is kept.
+
+  A reachability check now runs immediately after the restore, so this class of failure fails on one line naming the cause rather than several steps later inside a script that runs a throwaway container.
+
+- **Probe labels printed a malformed address for URLs with no explicit port.** The label used the text after the last colon, which is the port only when there is one; `http://localhost/health` rendered as `://localhost/health`. It now prints the whole URL — this is the line someone reads when a probe fails.
+
 ### Added
 
 - **An observability stack — Prometheus, Alertmanager, Grafana, Loki — under `observability/`, with a drill that proves it alerts. P3.5.**

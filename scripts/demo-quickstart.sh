@@ -122,7 +122,11 @@ probe() { # probe <label> <url> <acceptable>
   local code
   code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$2" 2>/dev/null || true)
   case "$3" in
-    *"$code"*) ok "$1 (:${2##*:} -> $code)" ;;
+    # The whole URL, not `:${2##*:}`. That printed the text after the last
+    # colon, which is the port only when there is one -- a URL without an
+    # explicit port rendered as `://localhost/health`, which reads like a
+    # malformed address in the one place someone looks when a probe fails.
+    *"$code"*) ok "$1 ($2 -> $code)" ;;
     *) die "$1 did not answer (HTTP ${code:-none}) — is the stack up? see runbook §5" ;;
   esac
 }
@@ -172,6 +176,18 @@ ok "Alfresco/Solr/ActiveMQ/transform-core-aio container health checked"
 # hostname only the runner can resolve.
 CALLER_ATROCORE_BASE_URL="${ATROCORE_BASE_URL:-}"
 
+# Snapshot the caller's docker/compose configuration before sourcing, so it can
+# be put back exactly afterwards. See the note below the source for why this is
+# a save-and-restore rather than an unset.
+DOCKER_ENV_VARS=(
+  COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_PROFILES COMPOSE_ENV_FILES
+  COMPOSE_PATH_SEPARATOR DOCKER_HOST DOCKER_CONTEXT
+)
+declare -A CALLER_DOCKER_ENV=()
+for _v in "${DOCKER_ENV_VARS[@]}"; do
+  [[ -n "${!_v+set}" ]] && CALLER_DOCKER_ENV["${_v}"]="${!_v}"
+done
+
 set -a
 # shellcheck disable=SC1091
 . "${WORKSPACE_ROOT}/compliance_flow/.env"
@@ -185,7 +201,40 @@ set +a
 # `service "atro-web" is not running`, several steps later and nowhere near
 # the cause. Found exactly that way. This script needs the credentials from
 # that file, not its compose configuration, so drop the latter.
-unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_PROFILES COMPOSE_ENV_FILES COMPOSE_PATH_SEPARATOR DOCKER_HOST DOCKER_CONTEXT
+#
+# RESTORE, not unset. This was an unconditional `unset` of the same list, and
+# that was wrong in a way that only CI could show: under docker-in-docker the
+# runner sets DOCKER_HOST=tcp://docker:2375, because the daemon is a separate
+# service with no shared socket. Unsetting it made every docker call after
+# this point fall back to unix:///var/run/docker.sock, which does not exist
+# there -- so step 0b died with "Cannot connect to the Docker daemon" on a
+# stack that was up and had just passed all five health probes.
+#
+# It stayed hidden for a day because every run until then was local, where
+# DOCKER_HOST is unset to begin with and unsetting it again changes nothing.
+# The first run of demo:verify in GitLab CI after the change failed on it.
+#
+# The intent was never "clear these variables", it was "do not let this .env
+# reconfigure docker". Restoring the caller's own values says exactly that:
+# whatever the caller set survives, and anything the .env introduced is
+# dropped.
+for _v in "${DOCKER_ENV_VARS[@]}"; do
+  if [[ -n "${CALLER_DOCKER_ENV[${_v}]+set}" ]]; then
+    export "${_v}=${CALLER_DOCKER_ENV[${_v}]}"
+  else
+    unset "${_v}"
+  fi
+done
+
+# Fail here, clearly, rather than several steps later inside a script that
+# runs a throwaway container. The bug above surfaced as an opaque docker error
+# in the middle of the AtroCore install; this turns that whole class of
+# failure into one line naming the cause.
+if ! docker info >/dev/null 2>&1; then
+  die "the docker daemon is unreachable after reading compliance_flow/.env.
+         DOCKER_HOST is '${DOCKER_HOST:-<unset>}'. Every step from here runs containers,
+         so this fails now rather than deep inside the AtroCore install."
+fi
 
 if [[ -n "${CALLER_ATROCORE_BASE_URL}" ]]; then
   export ATROCORE_BASE_URL="${CALLER_ATROCORE_BASE_URL}"
