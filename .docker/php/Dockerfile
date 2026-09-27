@@ -43,6 +43,14 @@ WORKDIR /var/www
 COPY php/scripts /var/www/scripts
 RUN chmod +x scripts/*.sh
 
+# The /health endpoint (P3.5). It goes in /opt, not /var/www, because
+# docker-compose.yaml bind-mounts ./web-data over /var/www at runtime and a
+# bind mount hides whatever the image placed at that path -- anything shipped
+# under /var/www is invisible in the running container.
+COPY health.php /opt/atrocore-health/health.php
+COPY health.conf /etc/apache2/conf-available/atrocore-health.conf
+RUN a2enconf atrocore-health
+
 COPY startup.sh /startup.sh
 RUN chmod +x /startup.sh
 

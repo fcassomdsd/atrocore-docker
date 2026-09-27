@@ -8,6 +8,26 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Added
 
+- **`GET /health` on AtroCore, and healthchecks on both services — P3.5.** Neither service declared a `healthcheck`, so `docker compose ps` could only ever say `running`; the README said so outright.
+
+  The endpoint answers the question this stack actually gets wrong. On a clean clone `./web-data` is bind-mounted empty over `/var/www`, Apache's DocumentRoot points at a directory that does not exist, and every request answers `404` from a container Docker reports as perfectly fine. The runbook documents that trap because it has cost people time. `/health` names it: `200` with `installed:true`, or `503` with `status:"not_installed"` and the command to run.
+
+  It ships in the **image** at `/opt/atrocore-health/`, not under `/var/www`, because the bind mount hides anything the image puts there — a health file installed into the application tree would be missing in exactly the situation it is meant to report on. Reached through a server-level `Alias` rather than a file in `public/`: `Alias` resolves during `translate_name`, so the request never lands under DocumentRoot and AtroCore's own `.htaccess` rewrites — which would send it to the front controller and answer `404` — never apply.
+
+  `configured` (has the installer written `data/config.php`?) is reported but does **not** affect the status. Between bootstrap and the install wizard there is a legitimate window where the application is installed and unconfigured; a container that flipped to `unhealthy` during its own provisioning would be wrong about itself.
+
+  It does not touch PostgreSQL. A probe that opens a database connection can block on a wedged server for as long as the driver allows, and a liveness probe that hangs is worse than none — Docker reports `starting` forever, the restart policy never fires, and the silence looks like health. Every check is a `stat()` on a local path. Database reachability is the `db` service's own `pg_isready` check, which passes `-d` explicitly: with no database name it defaults to the connecting user's name, which is not a database here, and still reports the server up — so the short form passes for the wrong reason and would keep passing if the database were dropped.
+
+  Verified both ways against the built image: installed → `200`, an empty `web-data` → `503` with the hint, `/` and `/api/v1/App/user` unchanged at `200`/`401`, container reaching `healthy`.
+
+### Changed
+
+- **The demo quickstart now probes real health endpoints — P3.5.** The Node-RED probe has had three forms and the reasons it moved are the point. `/specialties` was the original: it proxies to AtroCore, so it answered `400` until the metadata step had run — it was reporting on AtroCore, not on the gateway. The editor root replaced it, which tests the gateway but only that Node-RED's HTTP server is up: a `flows.json` that fails to load leaves the editor serving while every REST endpoint `404`s, so it passed on a gateway that could not answer a single call. `compliance_flow`'s new `/health` is served *by a flow*, so a `200` proves the flows loaded.
+
+  AtroCore now gets two probes after bootstrap rather than one, because they fail for different reasons: `/health` says whether the application was installed at all, and `/api/v1/App/user` says whether the installed application routes and has auth on.
+
+### Added
+
 - **A CI check that WAL archiving actually works, not just that it is configured — P3.4.** The failure mode this closes is silent: a broken `archive_command` does not stop PostgreSQL. It keeps serving, `failed_count` climbs, and WAL accumulates until the volume fills — at which point the cause is hours old. Every existing job that boots this database would have passed throughout. `scripts/verify-wal-archiving.sh` forces a segment switch and asserts it was archived, so a broken archiver fails at merge time instead of at 3am on a full disk. Byte-identical across the repos that enable archiving, the same convention as `release-tag.sh`.
 
   Two details it had to get right, both found by testing rather than reasoning. It counts segments **inside the container**, because under docker-in-docker the CLI and daemon have separate filesystems and a host-side count would read zero regardless of what archiving did. And it asserts archiving is healthy **now** — never failed, or succeeded since it last failed — rather than `failed_count = 0`: those counters are cumulative and survive restarts, so one transient blip would make a zero-check fail forever, and a check that cries wolf gets muted.

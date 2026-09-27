@@ -175,6 +175,18 @@ and the schema is created:
 Without this, `http://localhost` has no DocumentRoot, the API answers `500`, and every seed
 fails on missing tables. §7.2 repeats it in the demo context.
 
+Health check — `/health` tells you which of those two states you are in:
+
+    curl -f http://localhost/health
+
+`{"status":"ok","installed":true,"configured":true}` means the application is on disk and the
+installer has written `data/config.php`. `503` with `"status":"not_installed"` means `web-data/`
+is empty and the commands above have not run. It is served from the image, not from
+`web-data/`, so it answers even when there is no application at all — which is the case it
+exists to name. It reads the local filesystem only and never opens a database connection, so
+it says nothing about whether Postgres is reachable; `docker compose ps` covers that through
+the `db` service's own healthcheck.
+
 Console commands must run as **`www-data`** (`-u www-data`). `docker compose exec` defaults
 to root, and root-owned files in `data/cache` make the web process fail on its next cache
 write — a `500` on every API route, with nothing in the Apache log to explain it.
@@ -205,7 +217,15 @@ Health check:
     docker compose up -d
     docker compose ps
 
-Basic endpoint check (example):
+Health check:
+
+    curl -f http://localhost:1880/health
+
+Exempt from the API-key guard, and served by a flow rather than by Node-RED itself — so a `200`
+means `flows.json` loaded and the gateway is answering, not merely that the runtime is up. It
+does not probe AtroCore or Alfresco; see `compliance_flow/README.md` for why.
+
+Basic endpoint check (example) — this one does reach AtroCore:
 
     curl -i http://localhost:1880/specialties
 
