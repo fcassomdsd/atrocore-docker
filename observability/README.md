@@ -158,3 +158,20 @@ project network, and two of those are the silent failures above.
 
 Attaching here rather than asking five repos to join a monitoring network is
 the deliberate trade: monitoring adapts to the platform, not the reverse.
+
+**Stop this before tearing the platform down**, or `docker compose down` in an
+application project leaves its network behind:
+
+```
+Network import-backend  Removing
+Network import-backend  Resource is still in use
+```
+
+Verified, not assumed. It is harmless — the next `up` reuses the network —
+but it looks like a failed teardown, and on a CI runner it leaves something
+behind. `scripts/observability-verify-ci.sh --teardown` runs before the
+platform teardown for this reason.
+
+```bash
+docker compose -f observability/docker-compose.yaml down
+```

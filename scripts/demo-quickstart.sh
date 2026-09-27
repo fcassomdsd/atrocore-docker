@@ -632,9 +632,10 @@ cat <<'WARNING'
  repos: the gateway API_KEY / NODE_RED_API_KEY / IMPORT_API_KEY are all the
  same public placeholder value, and closure.reviewer / demo.inspector1 are
  demo identities with printed passwords. None of this is production
- hardening (Vault, Keycloak, observability, replication are all still open
- work) -- see docs/COMPLIANCE_INTEGRATION_RUNBOOK.md Sec.10 before this
- instance is reachable by anyone you do not trust.
+ hardening (Vault, Keycloak and replication are all still open work, and
+ monitoring exists but is not running -- it is a separate opt-in stack, see
+ observability/README.md) -- read docs/COMPLIANCE_INTEGRATION_RUNBOOK.md
+ Sec.10 before this instance is reachable by anyone you do not trust.
 
  Before a real deployment, rotate every credential and then run:
      ./scripts/preflight-secrets.sh --profile production

@@ -857,7 +857,7 @@ Command pattern:
   the gateway key, which is entered in the app, and the demo identities, which live in Alfresco
   (`compliance_cmis/scripts/seed-demo-identities.sh --remove`).
 
-- **For production-like usage, replace every development/demo default for credentials and secrets before the stack is reachable by anyone you do not trust.** This is a demo/reference stack, not a hardened deployment (§4.8's P3 items — Vault, Keycloak, observability, replication — are all still open). Concretely, at minimum:
+- **For production-like usage, replace every development/demo default for credentials and secrets before the stack is reachable by anyone you do not trust.** This is a demo/reference stack, not a hardened deployment (Vault, Keycloak and replication are all still open; monitoring now exists but is a separate opt-in stack that the demo does not start — §7.9). Concretely, at minimum:
   - The gateway `API_KEY` (`compliance_flow/.env`) and its matching `NODE_RED_API_KEY` (`compliance_web/.env`) / `IMPORT_API_KEY` (`compliance_import/.env`) — all three ship with the **same public placeholder value**, committed to their respective repos. Generate one real value (`openssl rand -hex 32`) and set it in all three; `compliance_checklist` needs the same value entered in its own API-key setting.
   - The demo identities' passwords (`closure.reviewer`, `demo.inspector1` — §7.3 above) and, ideally, the accounts themselves (`./scripts/seed-demo-identities.sh --remove`).
   - `AUTH_TICKET_ENCRYPTION_KEY` (`compliance_web`), `NODE_RED_CREDENTIAL_SECRET` and `ADMIN_PASSWORD_HASH` (`compliance_flow`), and every `POSTGRES_*_PASSWORD` across the six `.env` files.
