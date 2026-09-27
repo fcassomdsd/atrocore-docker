@@ -64,6 +64,22 @@ for i in $(seq 1 40); do
   [ "$(psql_q 'select 1')" = "1" ] && break
   sleep 2
 done
+
+# Make the archive directory writable by the database before testing.
+#
+# This is setup, not the thing under test. Docker creates a missing
+# bind-mount target as root:root, so on any host where the directory does not
+# already exist with the right ownership -- a fresh deployment, or a CI runner
+# under dind, where the daemon's filesystem is not the runner's -- PostgreSQL
+# cannot write to it and archiving fails. Exactly the situation the three
+# bootstrap scripts in this platform exist to handle for other bind mounts.
+#
+# A deployment must do the same: the archive directory has to be writable by
+# the uid PostgreSQL runs as. It is called out in the systemd unit's install
+# notes for that reason.
+"${COMPOSE[@]}" exec -T -u root "${WAL_SERVICE}" sh -c \
+  "mkdir -p ${WAL_ARCHIVE} && chown postgres:postgres ${WAL_ARCHIVE} 2>/dev/null || chmod 777 ${WAL_ARCHIVE}" \
+  >/dev/null 2>&1 || true
 [ "$(psql_q 'select 1')" = "1" ] || fail "${WAL_SERVICE} never became ready"
 ok "${WAL_SERVICE} is accepting connections"
 
