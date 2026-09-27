@@ -8,6 +8,18 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Added
 
+- **WAL archiving and physical base backups, for point-in-time recovery — P3.4.** `archive_mode=on` with `archive_timeout=300`, so the exposure window is five minutes rather than the nightly backup interval. PITR was proven end to end on a throwaway instance before being wired in: recovery to a chosen timestamp kept the rows committed before it and discarded those after.
+
+  `backup-platform.sh` now also takes a `pg_basebackup` per database, because **a `pg_dump` cannot be replayed with WAL** — PITR replays onto a *physical* base, so without base backups the archive is inert and the RPO stays bounded by the backup interval. The two coexist deliberately: logical dumps are the restore path (cheap, version-portable, exercised by the drill) and basebackup + WAL is the RPO path (~160 MB against ~376 KB; that difference is the price of PITR). `-Xf` rather than `-Xs`, because streaming WAL cannot be combined with a tar written to stdout — safe here only because archiving is on.
+
+  The MANIFEST now records each WAL archive's path and segment count, with a note that the archive is a continuous store and is deliberately *not* copied into every backup set.
+
+- **`restore:verify` CI job** — manual/scheduled like `demo:verify`, because it boots the whole stack. Nothing schedules it yet.
+
+**Operational hazard:** with `archive_mode=on` a failing `archive_command` makes PostgreSQL retain every WAL segment until archiving succeeds, filling the volume until the database stops. Silent until sudden. `pg_stat_archiver.failed_count` is named as an alert in P3.5.
+
+### Added
+
 - **Platform-wide backup and restore — P3.4.** Exactly one of four datasets was covered before this: `backup-db.sh` dumps the AtroCore database, and nothing touched Alfresco's database, `compliance_web`'s database, or the Alfresco content store. A database backup without its matching content store does not restore a working system. `scripts/backup-platform.sh` covers all four, with a `MANIFEST` carrying a SHA-256 per file and a retention sweep; `scripts/restore-platform.sh` restores a set and **verifies every checksum before touching anything**, because restoring half a corrupt set is worse than not starting.
 
   **The ordering is a correctness property, not a preference.** Databases are dumped first and the content store second. Alfresco's database holds references to content-store files, so capturing content first would let a document created between the two steps be referenced by the later dump and absent from the backup — a dangling reference that surfaces as a broken document. In this order the worst case is a content file with no database row: an orphan, harmless. Restore mirrors it exactly (content first, databases last). This makes an online backup degrade safely; it does not make it atomic, and the header says so.

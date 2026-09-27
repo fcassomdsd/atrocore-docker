@@ -336,6 +336,31 @@ demo:verify:
     - when: manual
       allow_failure: true
 
+# The restore drill. Like demo:verify it builds five projects and boots the
+# whole stack, so it is manual/scheduled rather than a merge gate -- but it is
+# the only thing that turns the RPO/RTO targets in the platform's production
+# plan (section 5.2) from aspiration into measurement.
+#
+# It deliberately DESTROYS the system it just built: three schemas dropped to
+# zero tables, the content store wiped to zero files, both asserted, then
+# restored from a checksum-verified set and compared against what was recorded
+# beforehand. A backup that has never been restored is a file, not a recovery
+# plan, and the previous CI check -- "the dump is non-empty" -- said nothing
+# about whether it restores.
+restore:verify:
+  stage: validate
+  variables:
+    SIBLING_REF: develop
+  script:
+    - apk add --no-cache python3 curl git nodejs
+    - ./scripts/restore-verify-ci.sh
+  after_script:
+    - ./scripts/demo-verify-ci.sh --teardown || true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: manual
+      allow_failure: true
+
 compute_release_tag:
   stage: release
   image: alpine:latest

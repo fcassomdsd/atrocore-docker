@@ -19,6 +19,17 @@
 # WHAT IS AND IS NOT BACKED UP
 #   Backed up:  AtroCore DB, Alfresco DB, compliance_web DB, Alfresco content
 #               store.
+#   Also captured: a physical base backup per database (pg_basebackup), which
+#   is what makes the WAL archive usable. A pg_dump CANNOT be combined with
+#   WAL -- point-in-time recovery replays WAL onto a *physical* base, so
+#   without basebackups the archive is inert and RPO stays bounded by the
+#   backup interval rather than by archive_timeout.
+#
+#   The two serve different jobs and both are kept:
+#     - the logical dumps are the restore path (simple, version-portable,
+#       exercised by restore-verify-ci.sh)
+#     - basebackup + WAL is the RPO path (recover to a point in time)
+#
 #   Not backed up, on purpose:
 #     - Solr indexes. Derived state; rebuilt by reindexing. Backing them up
 #       would store a stale copy of something reconstructible.
@@ -124,6 +135,36 @@ dump_db "compliance_web DB" "${WORKSPACE}/compliance_web" db \
   "$(env_var "${WEB_ENV}" POSTGRES_DB)" \
   "${SET_DIR}/compliance_web.dump"
 
+# --- physical base backups, for point-in-time recovery ---------------------
+step "1b. Base backups (for WAL replay)"
+basebackup() { # basebackup <label> <dir> <service> <user> <outdir>
+  local label="$1" dir="$2" svc="$3" user="$4" out="$5"
+  if ! compose_running "${dir}" "${svc}"; then
+    warn "${label}: not running — skipped"; SKIPPED=$((SKIPPED + 1)); return
+  fi
+  # -Xf, not -Xs: streaming WAL cannot be combined with a tar written to
+  # stdout ("cannot stream write-ahead logs in tar mode to stdout"), and
+  # writing to a path inside the container then copying it out would need
+  # space the container may not have. -Xf fetches the required WAL at the end
+  # instead, which is safe here because archive_mode is on, so any segment it
+  # needs is also in the archive.
+  #
+  # These are large -- a mostly-empty Alfresco database produces ~160 MB
+  # against a 376 KB logical dump -- because a base backup is a physical copy
+  # including free space. That is the price of point-in-time recovery; the
+  # logical dumps remain the cheap, fast restore path.
+  if ( cd "${dir}" && docker compose exec -T "${svc}" \
+        pg_basebackup -U "${user}" -D - -Ft -Xf ) > "${out}" 2>/dev/null && [ -s "${out}" ]; then
+    ok "${label}: $(du -h "${out}" | cut -f1) -> $(basename "${out}")"
+  else
+    warn "${label}: base backup failed — PITR will not be possible from this set"
+    rm -f "${out}"
+  fi
+}
+basebackup "AtroCore base"      "${REPO_DIR}" db "$(env_var "${ATRO_ENV}" POSTGRES_PIM_USER)" "${SET_DIR}/atrocore.basebackup.tar"
+basebackup "Alfresco base"      "${WORKSPACE}/compliance_cmis" postgres alfresco              "${SET_DIR}/alfresco.basebackup.tar"
+basebackup "compliance_web base" "${WORKSPACE}/compliance_web" db "$(env_var "${WEB_ENV}" POSTGRES_USER)" "${SET_DIR}/compliance_web.basebackup.tar"
+
 # --- content store second --------------------------------------------------
 step "2. Alfresco content store"
 ALF_DATA="${WORKSPACE}/compliance_cmis/data/alf_data"
@@ -148,6 +189,20 @@ step "3. Manifest"
   echo "# compliance-platform backup set"
   echo "created_utc: ${TIMESTAMP}"
   echo "host: $(hostname)"
+  echo "wal_archives:"
+  for spec in "atrocore:${REPO_DIR}/wal-archive" \
+              "alfresco:${WORKSPACE}/compliance_cmis/data/wal-archive" \
+              "compliance_web:${WORKSPACE}/compliance_web/data/wal-archive"; do
+    name="${spec%%:*}"; path="${spec#*:}"
+    if [ -d "${path}" ]; then
+      echo "  - name: ${name}"
+      echo "    path: ${path}"
+      echo "    segments: $(find "${path}" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    fi
+  done
+  echo "# PITR = the newest *.basebackup.tar in this set, plus WAL from the"
+  echo "# archive paths above. The archive is a continuous store and is NOT"
+  echo "# copied into every set; back it up separately or ship it offsite."
   echo "files:"
   for f in "${SET_DIR}"/*; do
     [ "$(basename "$f")" = "MANIFEST" ] && continue
