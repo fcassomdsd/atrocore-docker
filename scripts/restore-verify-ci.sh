@@ -88,12 +88,24 @@ step "4. DESTROY — this is the part that makes the drill meaningful"
 ( cd "${WORKSPACE}/compliance_cmis" && docker compose stop alfresco >/dev/null 2>&1 )
 ok "Alfresco stopped (its content store cannot be replaced underneath it)"
 
-for spec in "${REPO_DIR}|db|${ATRO_USER}|${ATRO_DB}" \
-            "${WORKSPACE}/compliance_cmis|postgres|alfresco|alfresco" \
-            "${WORKSPACE}/compliance_web|db|${WEB_USER}|${WEB_DB}"; do
-  IFS='|' read -r d s u b <<< "${spec}"
-  psql_at "$d" "$s" "$u" "$b" "drop schema public cascade; create schema public;" >/dev/null
-  n="$(table_count "$d" "$s" "$u" "$b")"
+# Dropping the public schema needs an owner, not the application user.
+# atrocore-docker's app user (POSTGRES_PIM_USER) is created by an initdb
+# script and does not own the schema -- the drop fails with "must be owner of
+# schema public". The other two stacks set POSTGRES_USER, which initdb makes a
+# superuser, so there the app user and the owner are the same account.
+# Ownership is handed back after recreating the schema, or the restore has
+# nowhere to put anything.
+for spec in "${REPO_DIR}|db|postgres|${ATRO_DB}|${ATRO_USER}" \
+            "${WORKSPACE}/compliance_cmis|postgres|alfresco|alfresco|alfresco" \
+            "${WORKSPACE}/compliance_web|db|${WEB_USER}|${WEB_DB}|${WEB_USER}"; do
+  IFS='|' read -r d s owner b appuser <<< "${spec}"
+  # stderr is deliberately NOT suppressed here: a destroy that silently fails
+  # is the one thing that would let a restore appear to succeed against data
+  # that was never removed.
+  err="$( ( cd "$d" && docker compose exec -T "$s" psql -U "$owner" -d "$b" -v ON_ERROR_STOP=1 -tAc \
+    "drop schema public cascade; create schema public; alter schema public owner to \"${appuser}\"; grant all on schema public to \"${appuser}\";" ) 2>&1 )" \
+    || die "$(basename "$d") drop failed: ${err}"
+  n="$(table_count "$d" "$s" "${appuser}" "$b")"
   [ "${n:-0}" -eq 0 ] || die "$(basename "$d") database still has ${n} tables after the drop"
 done
 ok "all three databases dropped to zero tables"
@@ -142,9 +154,31 @@ done
 ok "Alfresco ready (${i} attempt(s))"
 
 if [ -f "${WORKSPACE}/compliance_flow/scripts/smoke-flows.mjs" ]; then
-  ( cd "${WORKSPACE}/compliance_flow" && node scripts/smoke-flows.mjs ) \
-    && ok "gateway smoke matrix passed against the restored system" \
-    || printf '    warn smoke matrix reported failures — search-backed reads lag until Solr reindexes\n'
+  # The harness reads API_KEY from the environment. Pass it explicitly rather
+  # than sourcing the .env: `set -a; . .env` also exports COMPOSE_* and
+  # redirects every later docker compose call, which is a bug already fixed
+  # once in demo-quickstart.sh.
+  SMOKE_OUT="$(cd "${WORKSPACE}/compliance_flow" \
+    && API_KEY="$(env_var "${WORKSPACE}/compliance_flow/.env" API_KEY)" \
+       node scripts/smoke-flows.mjs 2>&1)"
+  SMOKE_RC=$?
+  echo "${SMOKE_OUT}" | tail -3 | sed 's/^/    /'
+
+  if [ "${SMOKE_RC}" -eq 0 ]; then
+    ok "gateway smoke matrix passed against the restored system"
+  elif echo "${SMOKE_OUT}" | grep -q "X-API-Key header is required"; then
+    # Do not dress this up as search lag. A blanket 401 means the harness was
+    # run without a key -- the check did not exercise the restored system at
+    # all, and reporting it as an expected Solr delay would be a diagnostic
+    # that lies about its own failure.
+    die "smoke matrix could not authenticate (401) — the check did not run; this says nothing about the restore"
+  elif echo "${SMOKE_OUT}" | grep -qE "0 passed"; then
+    die "smoke matrix passed nothing — the restored system is not serving"
+  else
+    # Partial failure IS the expected shape: Solr is deliberately not backed
+    # up, so search-backed reads lag until Alfresco reindexes.
+    printf '    warn smoke matrix partially failed — expected while Solr reindexes (it is derived state and not backed up)\n'
+  fi
 fi
 
 printf '\nrestore-verify: the backup restored a working system\n'
