@@ -50,6 +50,15 @@ KEEP_BROKEN=0
 FIRE_TIMEOUT="${FIRE_TIMEOUT:-360}"
 CLEAR_TIMEOUT="${CLEAR_TIMEOUT:-300}"
 
+# How long to wait for Prometheus's first scrape cycle. Generous, because a
+# monitoring stack that has just started knows nothing yet and the alternative
+# is a drill that fails against a perfectly good stack purely for being early.
+SCRAPE_TIMEOUT="${SCRAPE_TIMEOUT:-180}"
+
+# How long to wait for Prometheus and Alertmanager to start listening. A
+# container Docker calls running is not necessarily serving yet.
+STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-90}"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --target) TARGET="${2:?--target needs a container name}"; shift 2 ;;
@@ -95,13 +104,27 @@ step "1. Preflight — the monitoring stack itself"
 # ---------------------------------------------------------------------------
 [[ -f "${OBS_DIR}/docker-compose.yaml" ]] || die "observability/docker-compose.yaml not found"
 
-curl -fsS -m 10 "${PROM}/-/healthy" >/dev/null 2>&1 \
-  || die "Prometheus is not answering at ${PROM} — start it first:
+# Wait, briefly, rather than demanding it answer on the first try. A container
+# that Docker reports as running is not necessarily listening yet, and this
+# drill is normally invoked seconds after `compose up` -- failing there would
+# be a false negative about a stack that is fine.
+wait_for_healthy() { # wait_for_healthy <label> <base url>
+  local deadline=$((SECONDS + STARTUP_TIMEOUT))
+  while (( SECONDS < deadline )); do
+    curl -fsS -m 10 "$2/-/healthy" >/dev/null 2>&1 && return 0
+    info "$1 is not answering yet (${SECONDS}s elapsed) — waiting"
+    sleep 5
+  done
+  return 1
+}
+
+wait_for_healthy Prometheus "${PROM}" \
+  || die "Prometheus is not answering at ${PROM} after ${STARTUP_TIMEOUT}s — start it first:
          docker compose -f observability/docker-compose.yaml up -d"
 ok "Prometheus healthy"
 
-curl -fsS -m 10 "${ALERTMANAGER}/-/healthy" >/dev/null 2>&1 \
-  || die "Alertmanager is not answering at ${ALERTMANAGER}"
+wait_for_healthy Alertmanager "${ALERTMANAGER}" \
+  || die "Alertmanager is not answering at ${ALERTMANAGER} after ${STARTUP_TIMEOUT}s"
 ok "Alertmanager healthy"
 
 # Rules that fail to load leave Prometheus running and alerting on nothing --
@@ -125,20 +148,41 @@ step "2. Preflight — targets are actually being scraped"
 # ---------------------------------------------------------------------------
 # A target that has never been scraped cannot alert, and Prometheus reports
 # that as a quiet "unknown" rather than an error.
-read -r UP_COUNT DOWN_LIST < <(curl -fsS -m 10 "${PROM}/api/v1/targets?state=active" \
-  | jget "import json,sys
+# WAIT for the first scrape rather than reading once.
+#
+# Prometheus scrapes every 30s and knows nothing until its first cycle
+# completes, so a stack started seconds ago reports every target as `unknown`.
+# Locally that is invisible -- the stack has usually been up for hours by the
+# time anyone runs this -- but in CI the monitoring stack is brand new, and
+# this read once and found nothing.
+count_up_targets() {
+  curl -fsS -m 10 "${PROM}/api/v1/targets?state=active" 2>/dev/null \
+    | jget "import json,sys
 d=json.load(sys.stdin)['data']['activeTargets']
-up=[t for t in d if t['health']=='up']
-down=[t['labels'].get('instance', t['scrapeUrl']) for t in d if t['health']!='up']
-print(len(up), ','.join(down) if down else '-')")
+print(len([t for t in d if t['health']=='up']))" 2>/dev/null || echo 0
+}
 
+deadline=$((SECONDS + SCRAPE_TIMEOUT))
+UP_COUNT=0
+while (( SECONDS < deadline )); do
+  UP_COUNT=$(count_up_targets)
+  [[ "${UP_COUNT}" -gt 0 ]] && break
+  info "no target has been scraped yet (${SECONDS}s elapsed) — waiting for the first cycle"
+  sleep 10
+done
+
+# Zero is a FAILURE, not a number to report. This line used to be an
+# unconditional `ok "${UP_COUNT} scrape targets up"`, which cheerfully printed
+# `ok   0 scrape targets up` -- a check that passes while measuring nothing is
+# exactly the kind of false coverage this whole drill exists to prevent, and
+# it is worse here than anywhere because it is the drill that vouches for
+# everything else.
+[[ "${UP_COUNT}" -gt 0 ]] \
+  || die "Prometheus has no targets up after ${SCRAPE_TIMEOUT}s. It is running and its rules
+         loaded, so this is not a config parse error -- check that it can reach the
+         application networks (every one is external and created by an application project)."
 ok "${UP_COUNT} scrape targets up"
-if [[ "${DOWN_LIST}" != "-" ]]; then
-  # Not fatal. This drill is routinely run against a partially started
-  # platform, and a down target for a service that is deliberately not running
-  # is the correct reading, not a fault in the monitoring.
-  info "targets not up (expected if that part of the platform is stopped): ${DOWN_LIST}"
-fi
+
 
 docker inspect "${TARGET}" >/dev/null 2>&1 \
   || die "container '${TARGET}' does not exist — pass --target <name>, or start the platform first"
@@ -172,11 +216,41 @@ esac
 [[ -n "${TARGET_HOST}" ]] \
   || die "no health probe is configured for '${TARGET}' — this drill can only verify a container that Prometheus probes"
 
-BEFORE=$(probe_value)
+# Same reasoning: the series does not exist until the blackbox job has been
+# scraped at least once, so wait for it rather than reading once and
+# concluding the service is down.
+deadline=$((SECONDS + SCRAPE_TIMEOUT))
+BEFORE=none
+while (( SECONDS < deadline )); do
+  BEFORE=$(probe_value)
+  [[ "${BEFORE}" == "1" ]] && break
+  info "baseline probe for ${TARGET_HOST} reads '${BEFORE}' (${SECONDS}s elapsed) — waiting"
+  sleep 10
+done
+
 [[ "${BEFORE}" == "1" ]] \
-  || die "probe for ${TARGET_HOST} reads '${BEFORE}', not 1 — it must be passing before the drill breaks it,
-         otherwise a 'firing' alert afterwards proves nothing. Wait for the first scrape, or fix the service."
+  || die "probe for ${TARGET_HOST} reads '${BEFORE}', not 1, after ${SCRAPE_TIMEOUT}s — it must be passing
+         before the drill breaks it, otherwise a 'firing' alert afterwards proves nothing.
+         'none' means the series does not exist: Prometheus has not scraped that blackbox
+         target. Any other value means the service really is not answering."
 ok "probe for ${TARGET_HOST} is passing (baseline established)"
+
+# Report the stragglers only now. Taken straight after the first scrape this
+# listed most of the stack, because a target Prometheus has not reached yet
+# and one that is genuinely down look identical that early -- an alarming
+# list on a perfectly healthy run. By this point the stack has settled, so
+# what is still down is worth naming.
+DOWN_LIST=$(curl -fsS -m 10 "${PROM}/api/v1/targets?state=active" \
+  | jget "import json,sys
+d=json.load(sys.stdin)['data']['activeTargets']
+down=[t['labels'].get('instance', t['scrapeUrl']) for t in d if t['health']!='up']
+print(','.join(down) if down else '-')")
+if [[ "${DOWN_LIST}" != "-" ]]; then
+  # Not fatal. This drill is routinely run against a partially started
+  # platform, and a down target for a service that is deliberately not running
+  # is the correct reading, not a fault in the monitoring.
+  info "targets still not up (expected if that part of the platform is stopped): ${DOWN_LIST}"
+fi
 
 # ---------------------------------------------------------------------------
 step "3. Break it — stop ${TARGET}"

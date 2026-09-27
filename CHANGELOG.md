@@ -8,6 +8,16 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **The alerting drill assumed a warm Prometheus, and reported an empty one as a pass.** With the dind host resolved, `observability:verify` reached Prometheus and then failed on a stack that was fine: `ok 0 scrape targets up`, followed by a baseline probe reading `none`. Prometheus scrapes every 30s and knows nothing until its first cycle completes, and in CI the monitoring stack is seconds old — locally it has usually been up for hours, which is why this never showed.
+
+  Three impatient reads are now bounded waits: for Prometheus and Alertmanager to start **listening** (a container Docker calls running is not necessarily serving), for the first scrape cycle, and for the baseline probe to report the target as up.
+
+  The worse half was `ok "${UP_COUNT} scrape targets up"` printing `ok 0 scrape targets up`. **A check that passes while measuring nothing is exactly the false coverage this drill exists to prevent**, and it is worse here than anywhere, because this is the check that vouches for everything else. Zero targets is now a hard failure with a message pointing at the likely cause — the six external networks.
+
+  The "targets not up" list also moved to after the stack settles. Taken straight after the first scrape it named most of the platform, because a target Prometheus has not reached yet and one that is genuinely down look identical that early.
+
+### Fixed
+
 - **`observability:verify` looked for Prometheus on the wrong host under docker-in-docker.** The whole platform built, the demo ran green and all eleven monitoring containers started — and then the drill failed with "Prometheus is not answering at `http://localhost:9090`". Under dind the daemon publishing those ports is the `docker` service alias, not the job container's loopback.
 
   `demo-verify-ci.sh` has exactly this logic for `DEMO_HOST`; this wrapper had only the `${DEMO_HOST:-localhost}` half of it, which reads a variable the other script sets in its **own** process and never exports — so it always resolved to `localhost`. GitHub's runner is the opposite case and must stay `localhost` (Docker runs natively there, so published ports really are on loopback), which is why the `docker` default applies only when neither variable is set. All four combinations are covered.
