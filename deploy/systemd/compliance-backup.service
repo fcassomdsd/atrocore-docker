@@ -1,0 +1,48 @@
+# Nightly platform backup.
+#
+# Install (as root):
+#   cp deploy/systemd/compliance-backup.* /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now compliance-backup.timer
+#
+# Adjust WorkingDirectory and BACKUP_DIR for the deployment. BACKUP_DIR must
+# point at a volume SEPARATE from the one holding the data: a backup on the
+# same disk as the database protects against exactly one failure mode, and
+# not the one that usually happens.
+#
+# PREREQUISITE, and it fails silently if missed: the WAL archive directory
+# (WAL_ARCHIVE_DIR, default ./wal-archive beside each compose file) must exist
+# and be WRITABLE BY THE UID POSTGRESQL RUNS AS. Docker creates a missing
+# bind-mount target as root:root, PostgreSQL then cannot archive into it, and
+# nothing stops -- the database keeps serving while WAL accumulates until the
+# volume fills. Create it deliberately:
+#
+#   mkdir -p /srv/wal-archive/{atrocore,alfresco,compliance}
+#   chown -R 999:999 /srv/wal-archive     # the postgres uid in these images
+#
+# scripts/verify-wal-archiving.sh checks that archiving actually works and is
+# the thing to run after changing any of this.
+#
+# The unit is tracked in the repository rather than written by hand on the
+# host, so the schedule is reviewable and survives a rebuild -- the same
+# reason the seeds and the quickstart are tracked.
+
+[Unit]
+Description=Compliance platform backup (databases + Alfresco content store)
+Documentation=file:///opt/compliance-platform/atrocore-docker/scripts/backup-platform.sh
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/compliance-platform/atrocore-docker
+Environment=BACKUP_DIR=/srv/backups/compliance-platform
+ExecStart=/opt/compliance-platform/atrocore-docker/scripts/backup-platform.sh --yes --retention-days 30
+# A failed backup must be loud. Without this the timer keeps firing and the
+# only evidence of months of failure is the absence of files nobody checked.
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

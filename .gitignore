@@ -11,3 +11,6 @@ docker-compose.override.yaml
 # Local scratch files (a CI job id and a job trace) kept out of the tree on purpose.
 .ci-job
 .trace.txt
+
+# continuously written WAL archive (P3.4)
+wal-archive/
