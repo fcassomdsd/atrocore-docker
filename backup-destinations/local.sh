@@ -51,7 +51,9 @@ case "${VERB}" in
 
   list)
     [ -n "${ROOT}" ] && [ -d "${ROOT}" ] || exit 0
-    find "${ROOT}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+    # Not -printf: that is GNU-only, and this may run anywhere. BusyBox
+    # find has no such flag and would simply error, listing nothing.
+    find "${ROOT}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's#.*/##' | sort
     ;;
 
   prune)
@@ -63,7 +65,7 @@ case "${VERB}" in
       if set_is_older_than "${id}" "${KEEP}"; then
         rm -rf "${ROOT:?}/${id}" && pruned=$((pruned + 1))
       fi
-    done < <(find "${ROOT}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort)
+    done < <(find "${ROOT}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's#.*/##' | sort)
     echo "${pruned}"
     ;;
 

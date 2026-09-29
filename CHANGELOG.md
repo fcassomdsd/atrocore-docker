@@ -8,6 +8,24 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Added
 
+- **`scripts/ship-wal-archive.sh` — WAL shipped offsite, asynchronously.** Backup sets bound the recovery point to the last backup; WAL closes it to five minutes, but only once the segments leave the host.
+
+  **It is deliberately not `archive_command`,** and the script says so where someone would go to change it. `archive_command` runs *inside* PostgreSQL, synchronously, once per 16 MB segment, and PostgreSQL will not recycle a segment until it returns success. A network there makes latency a database problem and a failure a disk problem — the volume fills and the database stops. Archiving stays local and certain; this ships what accumulated, and an unreachable destination just means segments queue.
+
+  It reuses the destination drivers unchanged: a batch is staged with a `MANIFEST` in the same shape a backup set has, then pushed through `backup-offsite.sh`, so MANIFEST-last, pre-push verification and capability handling all apply without a second implementation.
+
+  Three safety properties, each tested rather than asserted:
+
+  - **Shipped is recorded only after the push succeeds.** The other order loses segments permanently — marked done, never retried, then deleted by the next prune. Verified by pointing the destination at an unwritable path: the push fails and the state file stays empty.
+  - **`--prune-local` is off by default** and removes a segment only when it is both confirmed shipped *and* older than the given age. Verified that an *unshipped* 90-day-old segment survives a prune request.
+  - **Segments are read through a container when the invoking user cannot read them.** All three archives here are owned by uid 70, mode 0600. Detected, not assumed.
+
+  Three bugs came out of running this against the real archives. `find -printf` is GNU-only and the container is Alpine, so the first version listed **nothing** against an archive holding 252 segments and reported "nothing new to ship" — the exact silent success the script's own comments warn about, produced by the script itself. The staging copy ran as root and preserved mode 0600, so the batch it built was unreadable by the user that then had to checksum it. And a failing `find` inside a command substitution killed the script under `set -e` *before* the guard meant to catch it could run. The `local` driver had the same `-printf` assumption and is now portable too.
+
+  `WAL_SHIP_BATCH_MAX` (default 512) caps a run — at 16 MB a segment, a few hundred is several gigabytes of staging.
+
+### Added
+
 - **Offsite backups, with the destination as a pluggable driver.** `backup-platform.sh` wrote sets to a local directory, which protects the data but not the host — a fire or a failed array takes the backups with it.
 
   `scripts/backup-offsite.sh` adds `push`, `pull`, `list`, `prune` and `verify` on top of a five-verb driver contract. Three drivers ship: **`local`** (a second disk or NFS mount), **`rsync-ssh`** (any second host, no cloud account needed), and **`s3`** (AWS and anything S3-compatible).

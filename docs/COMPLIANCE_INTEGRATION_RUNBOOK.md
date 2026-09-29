@@ -829,12 +829,45 @@ the destination already holds sets that are not its own.
 back is a hope rather than a backup, and it is the cheapest check that turns
 one into the other.
 
-> **Still local-only:** the WAL archive. `archive_command` runs inside
-> PostgreSQL, synchronously, once per segment — putting a network on that
-> path makes latency a database problem and a failure a full-disk problem
-> (§5.2). WAL must be archived locally and shipped asynchronously, and that
-> shipper is not written yet. Until it is, the recovery point offsite is the
-> newest set you have pushed, not the last five minutes.
+### WAL, shipped asynchronously
+
+Backup sets bound your recovery point to the last backup. WAL closes the gap
+to five minutes (`archive_timeout=300`) — but only once it is offsite too.
+
+    ./scripts/ship-wal-archive.sh                  # all three archives
+    ./scripts/ship-wal-archive.sh --dry-run        # what would be shipped
+    ./scripts/ship-wal-archive.sh --prune-local 45 # also expire shipped, old segments
+
+**Point it at a different path or prefix from your backup sets.** WAL is small
+and frequent, sets are large and rare, and they want different retention.
+
+> **Do not put the destination in `archive_command`.** It runs *inside*
+> PostgreSQL, synchronously, once per 16 MB segment, and PostgreSQL will not
+> recycle a segment until it returns success. A network there makes latency a
+> database problem — a slow destination throttles WAL recycling and
+> eventually writes — and a failure a disk problem, because unarchived
+> segments accumulate until the volume fills and the database stops. Archive
+> locally, ship separately. If the destination is unreachable the segments
+> queue and the database does not care.
+
+Three properties worth knowing:
+
+- **Segments are recorded as shipped only after the push succeeds.** The
+  other order loses data permanently: a failed transfer would mark them done,
+  never retry, and the next local prune would delete them.
+- **`--prune-local` is off by default.** A segment is removed only when it is
+  both confirmed shipped *and* older than the age given. Pass an age **at
+  least as long as your backup-set retention** — deleting WAL newer than your
+  oldest base backup destroys point-in-time recovery from it, and nothing will
+  tell you until a restore.
+- **Segments are read through a container when they are not readable by the
+  invoking user.** PostgreSQL writes them mode 0600 as its own uid; all three
+  archives here are owned by uid 70. This is detected, not assumed, so an
+  unreadable archive is an error rather than a quiet "nothing to ship".
+
+`WAL_SHIP_BATCH_MAX` (default 512) caps a run. At 16 MB a segment, a backlog
+of a few hundred is several gigabytes of staging — worth bounding on a small
+host.
 
 ## 8. Failure Isolation Guide
 
