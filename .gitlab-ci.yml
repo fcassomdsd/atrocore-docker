@@ -368,11 +368,26 @@ restore:verify:
   stage: validate
   variables:
     SIBLING_REF: develop
+    # Exercise the OFFSITE leg, not just a same-host restore. The set is
+    # pushed to a destination, pulled back into a different directory, the
+    # local copy is deleted, and the restore consumes only what came back.
+    #
+    # The `local` driver here points at a scratch directory on the runner,
+    # so this proves the push/pull/restore-from-pulled code path -- not
+    # remoteness, which no CI runner can demonstrate. The path is the part
+    # that rots: restore-platform.sh was unable to restore anything for days
+    # because nothing exercised it.
+    BACKUP_DESTINATION: local
+    BACKUP_DEST_PATH: /tmp/restore-drill-offsite
   script:
     - apk add --no-cache python3 curl git nodejs
+    - mkdir -p /tmp/restore-drill-offsite
     - ./scripts/restore-verify-ci.sh
   after_script:
     - ./scripts/demo-verify-ci.sh --teardown || true
+    # The pulled copy and the scratch destination are several hundred MB of
+    # backup artifacts. A runner that keeps them fills up over a few runs.
+    - rm -rf /tmp/restore-drill-offsite "${CI_PROJECT_DIR}/../restore-pulled" || true
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - when: manual
