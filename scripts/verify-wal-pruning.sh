@@ -9,8 +9,16 @@
 #
 # Runs against synthetic fixtures -- empty files named like WAL segments, and
 # tar files containing nothing but a backup_label -- so it needs no database,
-# no backup set and no stack, and can be a merge gate. It needs Docker, for
-# pg_archivecleanup.
+# no backup set and no stack, and can be a merge gate.
+#
+# It needs pg_archivecleanup, and takes it from PATH when one is installed,
+# otherwise from a container. That is not only convenience: under
+# docker-in-docker a bind mount does NOT reach the caller's filesystem, so
+# these fixtures are invisible to the daemon and the container path measures
+# an empty directory. CI hit exactly that -- 15 passed, 3 failed, because
+# pg_archivecleanup had nothing to clean. prune-wal-archive.sh now refuses
+# when the mount and the naked eye disagree, and this picks the mode that can
+# actually see the fixtures.
 #
 # WHAT IT IS ACTUALLY TESTING
 # ---------------------------
@@ -39,7 +47,14 @@ eq() { # eq <label> <expected> <actual>
   if [ "$2" = "$3" ]; then ok "$1"; else no "$1 — expected '$2', got '$3'"; fi
 }
 
-docker info >/dev/null 2>&1 || { echo "cannot reach the Docker daemon" >&2; exit 1; }
+if command -v pg_archivecleanup >/dev/null 2>&1; then
+  export WAL_PRUNE_LOCAL=1
+  MODE="pg_archivecleanup from PATH"
+else
+  docker info >/dev/null 2>&1 || {
+    echo "needs either pg_archivecleanup on PATH or a reachable Docker daemon" >&2; exit 1; }
+  MODE="pg_archivecleanup in a container"
+fi
 
 WORK="$(mktemp -d -t wal-prune-test-XXXXXX)"
 trap 'rm -rf "${WORK}"' EXIT INT TERM
@@ -56,7 +71,7 @@ label_tar() {
 
 seg() { printf '000000010000000000000%03X\n' "$1"; }
 
-printf '%swal retention conformance%s\n' "${BLD}" "${RST}"
+printf '%swal retention conformance%s (%s)\n' "${BLD}" "${RST}" "${MODE}"
 
 printf '\n%s=== 1. The anchor%s\n' "${BLD}" "${RST}"
 

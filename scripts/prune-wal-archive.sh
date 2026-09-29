@@ -14,6 +14,8 @@
 #   --archive  override the archive directory; requires --dataset.
 #   --anchor   prune against this WAL segment instead of looking one up.
 #              For the case where the sets live offsite and none is local.
+#   --local    run pg_archivecleanup from PATH instead of in a container
+#              (also WAL_PRUNE_LOCAL=1). Needs an archive you can read.
 #   --yes      actually delete. WITHOUT IT THIS IS A DRY RUN.
 #   --quiet    only print what changed; for the nightly caller.
 #
@@ -63,6 +65,28 @@
 # you hold. That is dead weight, not recovery capability. Look at the dry
 # run before believing it.
 #
+# HOW pg_archivecleanup IS RUN, AND THE MOUNT IT DEPENDS ON
+# ---------------------------------------------------------
+# Normally in a container, because a real archive is written by the database's
+# uid at mode 0700 and the invoking user cannot read it. That makes the tool
+# depend on a bind mount resolving to the directory the caller meant -- and
+# where the Docker daemon is not on the same filesystem as the caller, as
+# under docker-in-docker, it silently does not. Docker creates an empty
+# directory instead, pg_archivecleanup finds nothing to do, and the run
+# reports "would remove 0 of 0 segments" and exits 0. That is the exact shape
+# of failure this tool exists to prevent: an archive growing without bound
+# while something reports success every night. Found by this repository's own
+# CI, where the conformance test's fixtures live on the job container and the
+# mount reached the dind daemon.
+#
+# So when the archive IS readable from here, the count seen through the mount
+# is checked against the count seen directly, and a disagreement is fatal. When
+# it is not readable -- the normal case on a real host -- there is nothing to
+# compare against and the container's view is trusted.
+#
+# WAL_PRUNE_LOCAL=1 runs pg_archivecleanup from PATH instead, for hosts that
+# have it installed and archives the caller can read.
+#
 # pg_archivecleanup does the comparison. It is the tool PostgreSQL ships for
 # this, it understands .backup and .partial suffixes and leaves .history files
 # alone, and reimplementing its ordering in shell to save a container would be
@@ -84,6 +108,9 @@ DATASET=""; ARCHIVE=""; ANCHOR=""; APPLY=0; QUIET=0
 # from compose so the nightly job keeps working when a sibling repo is not
 # checked out.
 PRUNE_IMAGE="${WAL_PRUNE_IMAGE:-postgres:16-alpine}"
+# Run pg_archivecleanup directly rather than through a container. Off by
+# default: the container path is the one a real archive needs.
+LOCAL="${WAL_PRUNE_LOCAL:-0}"
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YEL=$'\033[33m'; BLD=$'\033[1m'; RST=$'\033[0m'
 [ -t 1 ] || { RED=""; GRN=""; YEL=""; BLD=""; RST=""; }
@@ -99,6 +126,7 @@ while [ $# -gt 0 ]; do
     --dest)    DEST="${2:?--dest needs a directory}"; shift 2 ;;
     --archive) ARCHIVE="${2:?--archive needs a directory}"; shift 2 ;;
     --anchor)  ANCHOR="${2:?--anchor needs a WAL segment name}"; shift 2 ;;
+    --local)   LOCAL=1; shift ;;
     --yes|-y)  APPLY=1; shift ;;
     --quiet)   QUIET=1; shift ;;
     -h|--help) sed -n '5,69p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -126,7 +154,22 @@ else
 fi
 
 [ "${APPLY}" -eq 1 ] || info "DRY RUN — nothing will be deleted. Re-run with --yes to apply."
-docker info >/dev/null 2>&1 || die "cannot reach the Docker daemon"
+if [ "${LOCAL}" -eq 1 ]; then
+  command -v pg_archivecleanup >/dev/null 2>&1 || die "--local needs pg_archivecleanup on PATH"
+  info "running pg_archivecleanup directly (--local)"
+else
+  docker info >/dev/null 2>&1 || die "cannot reach the Docker daemon"
+fi
+
+# count_segments <dir> -- through the same lens the cleanup will use
+count_segments() {
+  if [ "${LOCAL}" -eq 1 ]; then
+    find "$1" -type f 2>/dev/null | wc -l | tr -d ' '
+  else
+    docker run --rm -v "$1:/wal:ro" alpine:latest \
+      sh -c 'find /wal -type f 2>/dev/null | wc -l' | tr -d ' '
+  fi
+}
 
 TOTAL_REMOVED=0
 FAILURES=0
@@ -144,9 +187,19 @@ for i in "${!NAMES[@]}"; do
   # uid and are not always readable by the invoking user, and an archive that
   # cannot be listed must never be treated as an empty one -- the same trap
   # restore-pitr.sh guards against.
-  before="$(docker run --rm -v "${arch}:/wal:ro" alpine:latest \
-    sh -c 'find /wal -type f 2>/dev/null | wc -l' | tr -d ' ')"
+  before="$(count_segments "${arch}")"
   case "${before}" in ''|*[!0-9]*) die "${name}: could not list ${arch}" ;; esac
+
+  # Does the lens agree with the naked eye? Only asked when the naked eye can
+  # see: on a real host this directory belongs to the database's uid and the
+  # find below returns nothing for want of permission, which is not evidence
+  # of anything and is skipped.
+  if [ "${LOCAL}" -eq 0 ] && [ -r "${arch}" ]; then
+    direct="$(find "${arch}" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "${direct}" -gt 0 ] && [ "${before}" -ne "${direct}" ]; then
+      die "${name}: the container sees ${before} file(s) in ${arch} but this host sees ${direct} — the bind mount is not reaching the directory you meant (docker-in-docker, a remote daemon, or a path that does not exist on the daemon's filesystem). Refusing: pruning what a mount cannot see reports success and removes nothing."
+    fi
+  fi
 
   anchor="${ANCHOR}"
   if [ -z "${anchor}" ]; then
@@ -164,7 +217,10 @@ for i in "${!NAMES[@]}"; do
   # -n is pg_archivecleanup's own dry run, so the dry-run path and the real
   # path make the same decision with the same code rather than one predicting
   # the other.
-  if [ "${APPLY}" -eq 1 ]; then
+  if [ "${LOCAL}" -eq 1 ]; then
+    if [ "${APPLY}" -eq 1 ]; then out="$(pg_archivecleanup -d "${arch}" "${anchor}" 2>&1)"; rc=$?
+    else                          out="$(pg_archivecleanup -n "${arch}" "${anchor}" 2>&1)"; rc=$?; fi
+  elif [ "${APPLY}" -eq 1 ]; then
     out="$(docker run --rm -u 0 -v "${arch}:/wal" "${PRUNE_IMAGE}" \
       pg_archivecleanup -d /wal "${anchor}" 2>&1)"
     rc=$?
@@ -180,8 +236,7 @@ for i in "${!NAMES[@]}"; do
     continue
   fi
 
-  after="$(docker run --rm -v "${arch}:/wal:ro" alpine:latest \
-    sh -c 'find /wal -type f 2>/dev/null | wc -l' | tr -d ' ')"
+  after="$(count_segments "${arch}")"
   case "${after}" in ''|*[!0-9]*) die "${name}: could not re-list ${arch}" ;; esac
 
   if [ "${APPLY}" -eq 1 ]; then
@@ -195,7 +250,7 @@ for i in "${!NAMES[@]}"; do
   else
     # -n lists one path per line on stdout; -d logs "removing file ..." to
     # stderr. Both are captured, so count either form rather than assuming one.
-    would="$(printf '%s\n' "${out}" | grep -cE '^/wal/|removing file')"
+    would="$(printf '%s\n' "${out}" | grep -cE '^/|removing file')"
     [ "${after}" = "${before}" ] || die "${name}: a dry run deleted files — refusing to continue"
     TOTAL_REMOVED=$((TOTAL_REMOVED + would))
     info "${name}: would remove ${would} of ${before} segment(s) (~$((would * 16)) MB)"

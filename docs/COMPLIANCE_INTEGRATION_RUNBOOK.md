@@ -1110,10 +1110,32 @@ each, 3 segments replayed per dataset, marker A present and marker B absent,
 from archives now holding 9, 9 and 13 segments. `restore-platform.sh` still
 parses the set to exactly its seven files.
 
+**It refuses when the mount cannot see the archive.** `pg_archivecleanup`
+normally runs in a container, because a real archive belongs to the database's
+uid at mode 0700 and the invoking user cannot read it — which makes the tool
+depend on a bind mount resolving to the directory you meant. Where the Docker
+daemon is not on the caller's filesystem (docker-in-docker, a remote daemon, a
+path that does not exist on the daemon's side) it silently does not: Docker
+creates an empty directory, `pg_archivecleanup` finds nothing, and the run
+reports *would remove 0 of 0 segments* and exits 0. An archive growing without
+bound while something reports success every night is precisely what this tool
+exists to prevent, so when the archive is readable from here the count seen
+through the mount is compared with the count seen directly and a disagreement
+is fatal. When it is not readable — the normal case on a real host — there is
+nothing to compare and the container's view is trusted. `--local`
+(`WAL_PRUNE_LOCAL=1`) skips the container entirely for hosts that have
+`pg_archivecleanup` installed and an archive the caller can read.
+
+This was found by this repository's own CI. The conformance test's fixtures
+live on the job container; the job used dind; the mount reached the daemon;
+three checks failed with nothing pruned.
+
 `scripts/verify-wal-pruning.sh` (18 checks, `validate:wal-retention`, a merge
 gate) is the conformance test. It runs on synthetic fixtures — empty files
 named like WAL segments, and tars containing nothing but a `backup_label` — so
-it needs no database and no stack. What it checks is the boundary rather than
+it needs no database and no stack. It takes `pg_archivecleanup` from PATH when
+one is installed and from a container otherwise, so CI exercises the direct
+path and a developer without the binary exercises the container path. What it checks is the boundary rather than
 the deletion: that the anchor is the oldest retained backup and not the
 newest, that it is ordered by the segment part rather than the timeline
 prefix, that the anchor segment and everything after it survive, that

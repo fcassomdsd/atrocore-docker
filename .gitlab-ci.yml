@@ -495,18 +495,27 @@ validate:backup-destination:
 #
 # Synthetic fixtures only: empty files named like WAL segments and tars
 # containing nothing but a backup_label. No database, no stack, so it is a
-# merge gate. Needs dind for pg_archivecleanup.
+# merge gate.
+#
+# No dind, and that is a correctness requirement rather than a saving. The
+# first version of this job used it, and a bind mount under dind reaches the
+# DAEMON's filesystem, not the job container's -- so the fixtures were
+# invisible, pg_archivecleanup cleaned an empty directory, and three checks
+# failed. pg_archivecleanup comes from Alpine's postgresql16 package instead
+# and runs directly on files this job can see.
+#
+# Coverage limit: this exercises the --local path. The container path is what
+# a real archive needs, since those directories belong to the database's uid,
+# and it is exercised by developers running this test on a machine without
+# pg_archivecleanup installed. prune-wal-archive.sh now refuses outright when
+# the mount and the filesystem disagree about what is in the archive, which
+# is the defect dind surfaced.
 validate:wal-retention:
   stage: validate
-  image: docker:27
-  services:
-    - docker:27-dind
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
+  image: alpine:3
   before_script: []
   script:
-    - apk add --no-cache bash coreutils findutils tar
+    - apk add --no-cache bash coreutils findutils tar postgresql16
     - bash scripts/verify-wal-pruning.sh
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
