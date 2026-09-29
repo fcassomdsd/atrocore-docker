@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly verification of the newest offsite backup
+Documentation=file:///opt/compliance-platform/atrocore-docker/deploy/systemd/README.md
+
+[Timer]
+OnCalendar=Sun 04:00:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=compliance-backup-verify.service
+
+[Install]
+WantedBy=timers.target

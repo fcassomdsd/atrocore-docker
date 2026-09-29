@@ -78,7 +78,13 @@ while read -r name; do
   if [ -z "${have}" ]; then red "    FAIL ${name} listed in MANIFEST but missing"; bad=$((bad+1))
   elif [ "${want}" != "${have}" ]; then red "    FAIL ${name} checksum mismatch"; bad=$((bad+1))
   else ok "${name} checksum ok"; fi
-done < <(sed -n 's/^  - name: //p' "${FROM}/MANIFEST")
+# Only the `files:` section. The MANIFEST has TWO `- name:` lists -- the
+# other is `wal_archives:`, which names archive directories, not files in
+# this set. A line-oriented sed cannot tell them apart, so this read the
+# three archive labels as missing files and refused to restore every set
+# taken since WAL archiving was added. Found by running a real backup
+# through the offsite push, which uses the same verification.
+done < <(awk '/^files:/ {infiles=1; next} /^[^ #]/ {infiles=0} infiles && /^  - name: / {sub(/^  - name: /, ""); print}' "${FROM}/MANIFEST")
 [ "${bad}" -eq 0 ] || die "${bad} file(s) failed verification — refusing to restore a corrupt set"
 
 echo

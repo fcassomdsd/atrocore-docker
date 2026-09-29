@@ -869,6 +869,23 @@ Three properties worth knowing:
 of a few hundred is several gigabytes of staging — worth bounding on a small
 host.
 
+## 7.11 Scheduling (`deploy/systemd/`)
+
+Three timers turn the backup scripts from things somebody has to remember
+into things that happen: a nightly set pushed offsite and pruned, WAL shipped
+every fifteen minutes, and a weekly read-back verification. Install with
+`scripts/install-backup-timers.sh --system`; full detail in
+`deploy/systemd/README.md`.
+
+Every run records its outcome where Prometheus can see it, because a timer
+that stops firing and a timer that fails nightly both look exactly like a
+healthy system. Five alerts watch those metrics, and the one to understand is
+**`BackupNeverRan`** — it fires on `absent()`, because a timer nobody enabled
+produces no metric at all and every threshold rule reads that as fine.
+
+`BACKUP_METRICS_DIR` must name the same directory the observability stack
+mounts for node-exporter, or the metrics are written and never read.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:
@@ -886,6 +903,13 @@ Use these quick cues:
     an application role does not grant an Alfresco ACL (§7.3).
 - Web/API calls to `localhost:4000` fail with a connection error, not an HTTP status:
   - the backend is up but its port is unpublished; start it with the dev override (§7.1).
+- **A restore refuses a set that looks complete**, reporting the WAL archive
+  names as missing files:
+  - fixed in 2026-09-29. Before that, `restore-platform.sh` parsed both
+    `- name:` lists in the MANIFEST and read the three `wal_archives:` labels
+    as files, so it refused **every set taken after WAL archiving was added**.
+    If you are running an older checkout, that is what you are seeing, and the
+    set itself is fine.
 - **Everything answers, but an operation never returns** — no error, no timeout, no log line:
   - suspect ActiveMQ before anything else. `cd compliance_cmis && docker compose ps activemq`.
     This failure is invisible to every health check in this guide, which is

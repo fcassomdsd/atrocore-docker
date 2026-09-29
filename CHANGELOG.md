@@ -6,6 +6,39 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Fixed
+
+- **`restore-platform.sh` could not restore any backup set taken after WAL archiving was added.** A MANIFEST contains **two** `- name:` lists — `files:`, which names the files in the set with a sha256 each, and `wal_archives:`, which names archive *directories* that are deliberately not in the set. The verification loop matched `- name:` with a line-oriented `sed`, which cannot tell them apart, so it read the three archive labels as missing files:
+
+  ```
+  FAIL atrocore listed in MANIFEST but missing
+  FAIL alfresco listed in MANIFEST but missing
+  FAIL compliance_web listed in MANIFEST but missing
+  3 file(s) failed verification — refusing to restore a corrupt set
+  ```
+
+  The sets were intact throughout. **The restore path refused them.** Nothing caught it because no test had ever fed the parser a manifest containing a `wal_archives:` block — the restore drill predates that block, and it is scheduled by nothing.
+
+  Found by accident: the new offsite `push` reuses the same verification, so the first real backup pushed through it failed in exactly the same way.
+
+  Both readers now parse only the `files:` section, and `scripts/verify-manifest-parsing.sh` covers it against a manifest in the real shape — including that the two copies of the expression stay identical, and that a manifest with no `wal_archives:` block still parses. Mutation-tested by restoring the original parser.
+
+### Added
+
+- **Three systemd timers, and the means to tell whether they are still running.** Nightly (take a set, push it offsite, prune — in that order, prune last and only after a successful push, so a bad night never leaves fewer backups than it started with), WAL every fifteen minutes, and a weekly read-back verification of the newest offsite set.
+
+  The nightly unit from P3.4 is **extended rather than duplicated** — it already existed and a parallel unit would have been a conflicting second schedule.
+
+  **`scripts/with-backup-metrics.sh`** records each run as a Prometheus metric via node-exporter's textfile collector, because a timer that stops firing and a timer that fails every night both look exactly like a healthy system from outside. Five alerts consume it, and the important one is **`BackupNeverRan`**: it fires on `absent()`, since a timer nobody enabled produces no metric and every threshold rule reads that as fine.
+
+  Two details that cost a debugging cycle each. The metric label is **`backup_job`, not `job`** — `job` is reserved, Prometheus overwrites it with the scrape job name and renames the collision to `exported_job`, so the rules as first written matched nothing and would have **never fired**; found only by querying Prometheus end to end. And a *failed* run carries the previous success timestamp forward rather than dropping the series, because otherwise one failure erases the history and "no data" reads as "no backups have ever run".
+
+  **`scripts/install-backup-timers.sh`** fills in the installation path — systemd has no notion of "the directory this unit came from", and editing six files by hand is how one ends up pointing at the wrong checkout. `--user` installs them as user units for testing without root, commenting out the `docker.service` ordering, which is a system unit the user manager cannot see and which makes a user unit refuse to start.
+
+  Verified by running the units through systemd against a real platform: the nightly took a 700 MB set, pushed it offsite and pruned; the WAL unit shipped segments; a deliberately broken destination produced `exit_code=1` with the previous success preserved; node-exporter published the metrics and Prometheus scraped them; and each `…NeverRan` alert was observed going **pending → inactive** as its job ran for the first time.
+
+  Watching that happen found a further gap. Only the nightly job had an `absent()` rule. With the verification job never once executed, `OffsiteVerificationStale` sat **inactive** — because `time() - <no data>` is not a comparison that can be true, so a staleness rule says nothing until its job has succeeded at least once. "Nobody has ever verified an offsite backup" was therefore silent, which is precisely the condition the `absent()` rules exist for. All three jobs now have one.
+
 ### Added
 
 - **`scripts/ship-wal-archive.sh` — WAL shipped offsite, asynchronously.** Backup sets bound the recovery point to the last backup; WAL closes it to five minutes, but only once the segments leave the host.

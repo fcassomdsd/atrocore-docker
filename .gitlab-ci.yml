@@ -396,6 +396,12 @@ validate:backup-destination:
     - apk add --no-cache bash coreutils findutils
     - mkdir -p /tmp/conformance
     - BACKUP_DESTINATION=local BACKUP_DEST_PATH=/tmp/conformance bash scripts/verify-backup-destination.sh
+    # The MANIFEST parser. A backup manifest has two `- name:` lists and the
+    # original parser could not tell them apart, which made
+    # restore-platform.sh refuse every set taken after WAL archiving was
+    # added. Nothing caught it because no test had ever fed it a manifest
+    # with a wal_archives block.
+    - sh scripts/verify-manifest-parsing.sh
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "develop"'

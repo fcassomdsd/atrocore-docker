@@ -1,0 +1,23 @@
+# Weekly: read the newest offsite set back and re-check every checksum.
+#
+# Pushing a set is not evidence that anything arrived intact. An offsite copy
+# nobody has ever read back is a hope, and this is the cheapest thing that
+# turns it into a backup.
+[Unit]
+Description=Verify the newest offsite compliance platform backup
+Documentation=file:///opt/compliance-platform/atrocore-docker/docs/COMPLIANCE_INTEGRATION_RUNBOOK.md
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/compliance-platform/atrocore-docker
+EnvironmentFile=/etc/compliance-platform/backup.env
+ExecStart=/opt/compliance-platform/atrocore-docker/scripts/with-backup-metrics.sh verify /opt/compliance-platform/atrocore-docker/scripts/backup-offsite.sh verify
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=2h
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

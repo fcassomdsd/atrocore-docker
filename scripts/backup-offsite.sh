@@ -93,7 +93,8 @@ check_manifest() { # check_manifest <dir> -> 0 if every file matches
     checked=$((checked + 1))
     if [ -z "${have}" ]; then red "    missing: ${name}"; bad=$((bad + 1))
     elif [ "${want}" != "${have}" ]; then red "    checksum mismatch: ${name}"; bad=$((bad + 1)); fi
-  done < <(sed -n 's/^  - name: //p' "${dir}/MANIFEST")
+    # Only the `files:` section -- see the note in restore-platform.sh.
+  done < <(awk '/^files:/ {infiles=1; next} /^[^ #]/ {infiles=0} infiles && /^  - name: / {sub(/^  - name: /, ""); print}' "${dir}/MANIFEST")
   [ "${checked}" -gt 0 ] || { red "    MANIFEST lists no files"; return 1; }
   [ "${bad}" -eq 0 ] || return 1
   info "${checked} file(s) checksum-verified"

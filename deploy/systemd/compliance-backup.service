@@ -1,14 +1,13 @@
-# Nightly platform backup.
+# Nightly platform backup: take a set, push it offsite, expire old sets.
 #
-# Install (as root):
-#   cp deploy/systemd/compliance-backup.* /etc/systemd/system/
-#   systemctl daemon-reload
-#   systemctl enable --now compliance-backup.timer
+# Install with scripts/install-backup-timers.sh, which fills in the paths --
+# see deploy/systemd/README.md.
 #
-# Adjust WorkingDirectory and BACKUP_DIR for the deployment. BACKUP_DIR must
-# point at a volume SEPARATE from the one holding the data: a backup on the
-# same disk as the database protects against exactly one failure mode, and
-# not the one that usually happens.
+# BACKUP_DIR must point at a volume SEPARATE from the one holding the data:
+# a backup on the same disk as the database protects against exactly one
+# failure mode, and not the one that usually happens. The offsite push then
+# covers the case where the whole host is gone, which the separate volume
+# does not.
 #
 # PREREQUISITE, and it fails silently if missed: the WAL archive directory
 # (WAL_ARCHIVE_DIR, default ./wal-archive beside each compose file) must exist
@@ -36,13 +35,24 @@ Requires=docker.service
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/compliance-platform/atrocore-docker
-Environment=BACKUP_DIR=/srv/backups/compliance-platform
-ExecStart=/opt/compliance-platform/atrocore-docker/scripts/backup-platform.sh --yes --retention-days 30
+# Destination and credentials live here, not in this file: the unit is
+# tracked in git and a credential in a tracked file is a published one.
+EnvironmentFile=/etc/compliance-platform/backup.env
+# backup-nightly.sh is the sequence -- set, push, prune -- and prune runs
+# only after a successful push, so a bad night never leaves fewer backups
+# than it started with. with-backup-metrics.sh records the outcome where
+# Prometheus can see it: a timer that quietly stops firing looks exactly
+# like a healthy system otherwise.
+ExecStart=/opt/compliance-platform/atrocore-docker/scripts/with-backup-metrics.sh nightly /opt/compliance-platform/atrocore-docker/scripts/backup-nightly.sh
 # A failed backup must be loud. Without this the timer keeps firing and the
 # only evidence of months of failure is the absence of files nobody checked.
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=3600
+TimeoutStartSec=4h
+# This competes with the running platform for disk. Better that it takes
+# longer than that inspections are slow while it runs.
+Nice=10
+IOSchedulingClass=idle
 
 [Install]
 WantedBy=multi-user.target
