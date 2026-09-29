@@ -84,6 +84,47 @@ SET_DIR="$(find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d | sort | tail -
 ok "backup set: ${SET_DIR}"
 
 # ---------------------------------------------------------------------------
+# The offsite leg, when a destination is configured.
+#
+# Without it this drill proves that a set taken on this host restores on this
+# host -- which is a real property, and not the one that matters when the
+# host is gone. With it, the set is pushed offsite, pulled back into a
+# DIFFERENT directory, the local copy is deleted, and the restore consumes
+# only what came back. That is the claim an offsite backup actually makes.
+#
+# Deleting the local set is the part that makes it honest: leaving it in
+# place, a restore could read the wrong directory and nobody would know the
+# offsite copy had never been exercised.
+#
+# Skipped silently when BACKUP_DESTINATION is unset, so the original drill
+# behaves exactly as before.
+if [ -n "${BACKUP_DESTINATION:-}" ]; then
+  step "3b. Round-trip the set through the offsite destination"
+  SET_ID="$(basename "${SET_DIR}")"
+
+  BACKUP_DIR="${BACKUP_ROOT}" "${SCRIPT_DIR}/backup-offsite.sh" push --set "${SET_DIR}" \
+    || die "offsite push failed"
+
+  # Outside BACKUP_ROOT deliberately. Anything inside it is subject to
+  # backup-platform.sh's retention sweep and to "newest directory here is
+  # the set" discovery, and a restore source that another tool may prune or
+  # mistake for a backup set is not a restore source.
+  PULLED="${WORKSPACE}/restore-pulled/${SET_ID}"
+  rm -rf "${PULLED}"
+  BACKUP_DIR="${BACKUP_ROOT}" "${SCRIPT_DIR}/backup-offsite.sh" pull "${SET_ID}" --into "${PULLED}" \
+    || die "offsite pull failed"
+
+  # Gone, so the restore cannot silently fall back to it.
+  rm -rf "${SET_DIR}"
+  [ -d "${SET_DIR}" ] && die "could not remove the local set; refusing to continue"
+
+  SET_DIR="${PULLED}"
+  ok "restoring from the offsite copy at ${SET_DIR}"
+else
+  ok "no BACKUP_DESTINATION set — restoring from the local set (offsite leg skipped)"
+fi
+
+# ---------------------------------------------------------------------------
 step "4. DESTROY — this is the part that makes the drill meaningful"
 ( cd "${WORKSPACE}/compliance_cmis" && docker compose stop alfresco >/dev/null 2>&1 )
 ok "Alfresco stopped (its content store cannot be replaced underneath it)"

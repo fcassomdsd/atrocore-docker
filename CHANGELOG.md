@@ -18,6 +18,16 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
   Documented as a procedure in the runbook (§7.10), including that Solr is deliberately not restored and that `smoke-flows.mjs` is the check which decides whether recovery is complete.
 
+- **The restore drill now restores from the offsite copy, not the local set.** After the backup step it pushes the set to a destination, pulls it back into a different directory, **deletes the local copy**, and restores only from what came back.
+
+  Deleting the local set is what makes it honest. Left in place, a restore could read the wrong directory and nobody would learn that the offsite copy had never been exercised — which is the same shape as the defect this drill exists to catch.
+
+  Without a set-and-forget guard this would only ever have been a claim: `restore-platform.sh` was unable to restore anything for days precisely because nothing ran the drill. `restore:verify` now sets `BACKUP_DESTINATION=local` against a scratch directory on the runner, so it exercises the push/pull/restore-from-pulled path on every run. It does not prove *remoteness* — no CI runner can — but the path is the part that rots.
+
+  The offsite leg is skipped silently when `BACKUP_DESTINATION` is unset, so the drill behaves exactly as before for anyone running it by hand without a destination.
+
+  The pulled copy is written outside `BACKUP_DIR`, because anything inside it is subject to retention pruning and to "the newest directory here is the set" discovery — a restore source another tool may delete or mistake for a backup is not a restore source.
+
 ### Fixed
 
 - **`restore-platform.sh` could not restore any backup set taken after WAL archiving was added.** A MANIFEST contains **two** `- name:` lists — `files:`, which names the files in the set with a sha256 each, and `wal_archives:`, which names archive *directories* that are deliberately not in the set. The verification loop matched `- name:` with a line-oriented `sed`, which cannot tell them apart, so it read the three archive labels as missing files:
