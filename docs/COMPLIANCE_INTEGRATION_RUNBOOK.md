@@ -794,6 +794,48 @@ It stops a container on purpose, waits for the alert to fire, confirms
 Alertmanager received it, restarts the container and waits for the alert to
 clear.
 
+## 7.10 Offsite backups (`backup-destinations/`)
+
+`backup-platform.sh` writes backup sets to a local directory. That protects
+the data but not the host: a fire, a theft or a failed array takes the sets
+with it. `scripts/backup-offsite.sh` is the other half.
+
+    export BACKUP_DESTINATION=rsync-ssh
+    export BACKUP_DEST_SSH=backup@dr.authority.example
+    export BACKUP_DEST_PATH=/srv/oversight-backups
+
+    ./scripts/backup-platform.sh --yes      # take the set
+    ./scripts/backup-offsite.sh push        # copy it offsite
+    ./scripts/backup-offsite.sh verify      # read it back and re-check every sha256
+    ./scripts/backup-offsite.sh prune       # expire old sets at the destination
+
+Three drivers ship — `local` (a second disk or an NFS mount), `rsync-ssh`
+(any second host), and `s3` (AWS, MinIO, Ceph, Wasabi, most national cloud
+offerings). Each authority's infrastructure differs, so the destination is a
+**driver**, not a setting: see `backup-destinations/README.md` for the
+five-verb contract and for writing your own.
+
+**Run the conformance test against your destination before relying on it:**
+
+    BACKUP_DESTINATION=<driver> ./scripts/verify-backup-destination.sh
+
+It pushes a synthetic set, pulls it back, compares every byte, and exercises
+pruning. Nobody here can test your Azure tenancy or your tape robot — the
+contract is verified in CI, the backend is verified by you. Point it at a
+*scratch* path or bucket: it exercises `prune`, and it refuses to start if
+the destination already holds sets that are not its own.
+
+**`verify` is the one to schedule.** An offsite copy nobody has ever read
+back is a hope rather than a backup, and it is the cheapest check that turns
+one into the other.
+
+> **Still local-only:** the WAL archive. `archive_command` runs inside
+> PostgreSQL, synchronously, once per segment — putting a network on that
+> path makes latency a database problem and a failure a full-disk problem
+> (§5.2). WAL must be archived locally and shipped asynchronously, and that
+> shipper is not written yet. Until it is, the recovery point offsite is the
+> newest set you have pushed, not the last five minutes.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:

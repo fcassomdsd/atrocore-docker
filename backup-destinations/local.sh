@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Backup destination: a local path.
+#
+# For a second disk, an NFS or SMB mount, or an attached USB drive.
+#
+#   BACKUP_DEST_PATH   required. The directory sets are written under.
+#
+# A path on the SAME disk as the data is not offsite and protects against
+# nothing this exists for. Nothing here can tell the difference; only the
+# operator can.
+
+set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/set-age.sh"
+
+VERB="${1:-}"; shift || true
+ROOT="${BACKUP_DEST_PATH:-}"
+
+need_root() {
+  [ -n "${ROOT}" ] || { echo "local: BACKUP_DEST_PATH is not set" >&2; exit 2; }
+}
+
+case "${VERB}" in
+  capabilities)
+    echo "name=local path"
+    echo "fetch=yes"
+    echo "prune=yes"
+    ;;
+
+  push)
+    need_root
+    SRC="${1:?push needs <set-dir>}"; ID="${2:?push needs <set-id>}"
+    mkdir -p "${ROOT}/${ID}"
+    # Everything except MANIFEST first, MANIFEST last: a set carrying a
+    # MANIFEST is treated as complete, so it must be the last thing to
+    # appear even on a destination where a copy is unlikely to fail.
+    # "Unlikely" is how a full disk gets discovered during a restore.
+    find "${SRC}" -maxdepth 1 -type f ! -name MANIFEST -print0 \
+      | xargs -0 -I{} cp -f {} "${ROOT}/${ID}/"
+    [ -f "${SRC}/MANIFEST" ] && cp -f "${SRC}/MANIFEST" "${ROOT}/${ID}/MANIFEST"
+    ;;
+
+  pull)
+    need_root
+    ID="${1:?pull needs <set-id>}"; DEST="${2:?pull needs <dest-dir>}"
+    [ -d "${ROOT}/${ID}" ] || { echo "local: no such set: ${ID}" >&2; exit 1; }
+    mkdir -p "${DEST}"
+    cp -f "${ROOT}/${ID}"/* "${DEST}/"
+    ;;
+
+  list)
+    [ -n "${ROOT}" ] && [ -d "${ROOT}" ] || exit 0
+    find "${ROOT}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+    ;;
+
+  prune)
+    need_root
+    KEEP="${1:?prune needs <keep-days>}"
+    pruned=0
+    while IFS= read -r id; do
+      [ -n "${id}" ] || continue
+      if set_is_older_than "${id}" "${KEEP}"; then
+        rm -rf "${ROOT:?}/${id}" && pruned=$((pruned + 1))
+      fi
+    done < <(find "${ROOT}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort)
+    echo "${pruned}"
+    ;;
+
+  *) echo "local: unknown verb '${VERB}'" >&2; exit 2 ;;
+esac

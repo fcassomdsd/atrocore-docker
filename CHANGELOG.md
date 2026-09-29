@@ -6,6 +6,29 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Added
+
+- **Offsite backups, with the destination as a pluggable driver.** `backup-platform.sh` wrote sets to a local directory, which protects the data but not the host — a fire or a failed array takes the backups with it.
+
+  `scripts/backup-offsite.sh` adds `push`, `pull`, `list`, `prune` and `verify` on top of a five-verb driver contract. Three drivers ship: **`local`** (a second disk or NFS mount), **`rsync-ssh`** (any second host, no cloud account needed), and **`s3`** (AWS and anything S3-compatible).
+
+  **The seam is where it is because the existing boundary was already right.** A backup set is self-describing — dumps, base backups, the content tarball and a `MANIFEST` with a sha256 per file — and `restore-platform.sh` already works from a local directory. So a driver only moves a directory; the ordering rules, the checksum gate and the restore drill are untouched. Verifying an offsite copy is "fetch it back and run the existing drill", not a second implementation of the part that has to be right.
+
+  Four decisions worth knowing:
+
+  - **`MANIFEST` is written last, always.** A set carrying a manifest is treated as complete, so sending it first would let a half-transferred set look restorable. Same rule, same reason, as the release update feed in `compliance_checklist`.
+  - **`push` verifies the local set before sending it.** Shipping an already-corrupt set wastes the transfer and produces an offsite copy that looks fine until the day it is needed.
+  - **Age is computed from the set id, never a file timestamp.** Object stores have no directory mtime, copying rewrites file times, and `rsync -a` preserves them while `cp` does not — three answers to one question. `lib/set-age.sh` is shared so drivers cannot disagree, and an id it cannot parse is never old enough to delete.
+  - **Capabilities are declared.** `fetch=no` (WORM storage, tape, a courier) makes `verify` refuse rather than pretend; `prune=self` (an S3 lifecycle rule) stops the client fighting the bucket policy.
+
+- **`scripts/verify-backup-destination.sh` — the conformance test an adopter runs against their own storage.** This platform ships three drivers and can test three drivers; an authority may back up to a national cloud or a tape robot that nobody here can reach. A driver never exercised against its real backend is a guess, and the first anyone learns of it is a restore. **We verify the contract; they verify their backend** — that is what makes "pluggable" a property rather than a claim.
+
+  It exercises `prune`, so it **refuses to start** if the destination holds sets that are not its own synthetic ones. That guard is the only thing between the test and someone's real backups.
+
+  Verified against all three drivers on real backends: a local filesystem, a real `sshd` with `rsync` over it, and a live S3 API. Two bugs came out of running it rather than reasoning about it — the first version pruned with `prune 30` against whatever destination it was pointed at (which would have deleted real sets, hence the guard), and its cleanup used a set id stamped with the current second, which `prune 0` correctly declines to treat as older than that same second. The second only appeared in a bare Alpine container, where the test runs faster than on a developer's machine.
+
+- **`validate:backup-destination` in CI**, running the conformance test against the `local` driver — a merge gate, since it needs no external service. It does not prove any authority's destination works; it protects the contract every driver is written against.
+
 ### Fixed
 
 - **The alerting drill assumed a warm Prometheus, and reported an empty one as a pass.** With the dind host resolved, `observability:verify` reached Prometheus and then failed on a stack that was fine: `ok 0 scrape targets up`, followed by a baseline probe reading `none`. Prometheus scrapes every 30s and knows nothing until its first cycle completes, and in CI the monitoring stack is seconds old — locally it has usually been up for hours, which is why this never showed.
