@@ -262,27 +262,44 @@ security:scan:
     key: trivy-db
     paths: [.trivycache]
   script:
-    # Blocking: any fixable CRITICAL fails the pipeline.
-    # --skip-dirs excludes generated and bind-mounted runtime trees, not source.
-    # web-data/ in particular is the AtroCore application installed at container
-    # bootstrap: it is gitignored, absent from a fresh checkout, and vendors its
-    # own npm tree, so scanning it here reports upstream's dependencies as if
-    # they were this repository's. (It is not clean: upstream currently vendors
-    # a CRITICAL prototype-pollution advisory in swiper. That belongs in an
-    # upstream report and in image scanning, not in a gate on tracked source.)
-    - trivy fs --scanners vuln --severity CRITICAL --ignore-unfixed --skip-dirs web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage --exit-code 1 .
-    # Reporting: HIGH is printed and saved, but does not fail the job yet.
-    - trivy fs --scanners vuln --severity HIGH --ignore-unfixed --skip-dirs web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage --exit-code 0 --format table -o trivy-high.txt . || true
-    - 'echo "--- HIGH findings (not blocking; see the policy comment in .gitlab-ci.yml) ---"'
-    - cat trivy-high.txt || true
-    # SBOM, always produced, never blocking. CycloneDX is the format the
-    # release process will consume once images are published and signed.
+    # Blocking on CRITICAL **and** HIGH, both fixable-only.
+    #
+    # P3.2 shipped this with HIGH merely reported, because 33 fixable HIGH
+    # findings existed and a gate that is red on arrival gets switched off
+    # within a day -- and a disabled gate is worse than none, because it
+    # still reads as protection. That backlog is now cleared: 0 CRITICAL and
+    # 0 HIGH across all six repositories, measured 2026-09-29. So the bar
+    # rises, which was the stated plan.
+    #
+    # --ignore-unfixed is what makes this survivable. A newly disclosed
+    # advisory with no fix available does not block anyone; only one that
+    # could be acted on does.
+    #
+    # When a fixable HIGH lands that genuinely cannot be taken right now,
+    # add it to .trivyignore WITH A REASON AND A DATE -- do not weaken this
+    # job. An exception that is written down and reviewed is a decision; a
+    # lowered threshold is an outage of the control.
+    #
+    # --skip-dirs excludes generated and bind-mounted runtime trees, not
+    # source. web-data/ in particular is the AtroCore application installed
+    # at container bootstrap: gitignored, absent from a fresh checkout, and
+    # vendoring its own npm tree, so scanning it here would report upstream's
+    # dependencies as if they were this repository's.
+
+    # Report first, so a failing pipeline still leaves something readable.
+    - trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --ignorefile .trivyignore --skip-dirs web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage --exit-code 0 --format table -o trivy-findings.txt .
+    - cat trivy-findings.txt
+    # SBOM before the gate, for the same reason: it must exist even when the
+    # scan fails. CycloneDX is the format the release process will consume
+    # once images are published and signed.
     - trivy fs --format cyclonedx --skip-dirs web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage -o sbom.cdx.json .
+    # The gate itself, last.
+    - trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --ignorefile .trivyignore --skip-dirs web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage --exit-code 1 .
   artifacts:
     when: always
     expire_in: 30 days
     paths:
-      - trivy-high.txt
+      - trivy-findings.txt
       - sbom.cdx.json
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'

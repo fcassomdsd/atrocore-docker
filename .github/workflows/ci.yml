@@ -332,29 +332,34 @@ jobs:
 
   security-scan:
     # Supply-chain scanning (P3.2). Gate policy chosen from measurement:
-    # CRITICAL is blocking (measured at zero across all six repos, so the gate
-    # is green today and stops regressions); HIGH is reported but not blocking
-    # while 33 known-fixable findings are cleared, because a gate that is red
-    # on arrival gets switched off, and a disabled gate still reads as
-    # protection. --skip-dirs excludes generated/bind-mounted runtime trees.
+    # CRITICAL and HIGH both block, fixable-only. P3.2 shipped with HIGH merely
+    # reported while 33 fixable findings were cleared, because a gate that is
+    # red on arrival gets switched off and a disabled gate still reads as
+    # protection. That backlog is cleared (0/0 across all six repos,
+    # 2026-09-29), so the bar rises. --ignore-unfixed keeps an unfixable new
+    # advisory from blocking anyone; a fixable one that cannot be taken now
+    # goes in .trivyignore with a reason and a date, never by weakening this
+    # job. --skip-dirs excludes generated/bind-mounted runtime trees.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fail on fixable CRITICAL
+      - name: Report CRITICAL and HIGH
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
           scanners: vuln
-          severity: CRITICAL
+          severity: CRITICAL,HIGH
           ignore-unfixed: true
-          skip-dirs: web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage
-          exit-code: '1'
-      - name: Report HIGH (non-blocking)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: fs
-          scanners: vuln
-          severity: HIGH
-          ignore-unfixed: true
+          trivyignores: .trivyignore
           skip-dirs: web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage
           exit-code: '0'
+      - name: Fail on any fixable CRITICAL or HIGH
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          skip-dirs: web-data,db-data,data/alf_data,data/postgres-data,alf-data,dist,dist-portable,venv,.venv,coverage
+          exit-code: '1'

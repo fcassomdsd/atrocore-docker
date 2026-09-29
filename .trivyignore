@@ -1,0 +1,34 @@
+# Trivy exceptions for this repository.
+#
+# The CVE gate blocks on any FIXABLE CRITICAL or HIGH (see the security scan
+# job in .gitlab-ci.yml). This file is the sanctioned way to proceed when one
+# of those genuinely cannot be taken right now -- and it exists because the
+# alternative is real: a blocking gate with no exception path gets weakened
+# the first time it is inconvenient, and a weakened gate still reads as
+# protection while protecting nothing.
+#
+# It is deliberately empty. As of 2026-09-29 there are zero fixable CRITICAL
+# or HIGH findings across all six repositories, so nothing needs excusing.
+#
+# RULES FOR AN ENTRY
+#
+#   1. One CVE per line, with a comment above it giving:
+#        - why the fix cannot be taken now (not "it's noisy")
+#        - what would have to change for it to be taken
+#        - a REVIEW BY date, at most 90 days out
+#   2. Never add a CVE here to unblock a merge you are in the middle of.
+#      Raise it, decide it, then add it.
+#   3. An entry past its review date is a finding in its own right.
+#
+# Note that an advisory with NO fix available never reaches this file: the
+# scan runs with --ignore-unfixed, so it does not block anyone in the first
+# place. Everything here is therefore something that COULD have been fixed
+# and was consciously not.
+#
+# Example of the required shape:
+#
+#   # CVE-2026-00000 in example-lib 1.2.3, fixed in 2.0.0.
+#   # 2.0.0 drops Node 20, which the field app still targets. Taking it means
+#   # moving the Electron runtime first (tracked in P3.6).
+#   # REVIEW BY: 2026-12-15
+#   CVE-2026-00000
