@@ -153,15 +153,34 @@ basebackup() { # basebackup <label> <dir> <service> <user> <outdir>
   # against a 376 KB logical dump -- because a base backup is a physical copy
   # including free space. That is the price of point-in-time recovery; the
   # logical dumps remain the cheap, fast restore path.
-  if ( cd "${dir}" && docker compose exec -T "${svc}" \
-        pg_basebackup -U "${user}" -D - -Ft -Xf ) > "${out}" 2>/dev/null && [ -s "${out}" ]; then
+  local err
+  err="$( ( cd "${dir}" && docker compose exec -T "${svc}" \
+        pg_basebackup -U "${user}" -D - -Ft -Xf ) > "${out}" 2>&1 )"
+  if [ -s "${out}" ]; then
     ok "${label}: $(du -h "${out}" | cut -f1) -> $(basename "${out}")"
   else
-    warn "${label}: base backup failed — PITR will not be possible from this set"
+    # Counted as a skipped dataset, not merely warned about. A failure here
+    # used to leave exit status 0 and the closing line "Backup set complete",
+    # so a set with no PITR base announced itself as whole -- which is how
+    # AtroCore went without one indefinitely (see the role note below). The
+    # logical dump is still present and still restores; what is lost is the
+    # ability to recover to a point in time, and the set must say so.
+    warn "${label}: base backup failed — PITR will NOT be possible from this set"
+    [ -n "${err}" ] && printf '         %s\n' "${err}" | head -3
     rm -f "${out}"
+    SKIPPED=$((SKIPPED + 1))
   fi
 }
-basebackup "AtroCore base"      "${REPO_DIR}" db "$(env_var "${ATRO_ENV}" POSTGRES_PIM_USER)" "${SET_DIR}/atrocore.basebackup.tar"
+# postgres, not POSTGRES_PIM_USER. pg_basebackup opens a replication
+# connection, which needs SUPERUSER or REPLICATION; this image's init scripts
+# create the application role (`usuario`) with neither, while `postgres`
+# remains the superuser. Passing the application role failed every night with
+# "must be superuser or replication role to start walsender" -- and because
+# that failure only warned, every set ever taken was missing
+# atrocore.basebackup.tar and PITR for AtroCore was impossible. Found by the
+# first run of the PITR drill. The other two databases connect as their
+# image's POSTGRES_USER, which is a superuser, so they were unaffected.
+basebackup "AtroCore base"      "${REPO_DIR}" db postgres "${SET_DIR}/atrocore.basebackup.tar"
 basebackup "Alfresco base"      "${WORKSPACE}/compliance_cmis" postgres alfresco              "${SET_DIR}/alfresco.basebackup.tar"
 basebackup "compliance_web base" "${WORKSPACE}/compliance_web" db "$(env_var "${WEB_ENV}" POSTGRES_USER)" "${SET_DIR}/compliance_web.basebackup.tar"
 
@@ -203,6 +222,22 @@ step "3. Manifest"
   echo "# PITR = the newest *.basebackup.tar in this set, plus WAL from the"
   echo "# archive paths above. The archive is a continuous store and is NOT"
   echo "# copied into every set; back it up separately or ship it offsite."
+  # Stated per dataset rather than left to be inferred from the file list. A
+  # missing base backup is the difference between "recoverable to a point in
+  # time" and "recoverable to last night", and reading that off the absence of
+  # a filename is exactly how it went unnoticed.
+  echo "pitr:"
+  for name in atrocore alfresco compliance_web; do
+    if [ -s "${SET_DIR}/${name}.basebackup.tar" ]; then
+      echo "  - name: ${name}"
+      echo "    base: ${name}.basebackup.tar"
+      echo "    recoverable_to_point_in_time: yes"
+    else
+      echo "  - name: ${name}"
+      echo "    base: none"
+      echo "    recoverable_to_point_in_time: no"
+    fi
+  done
   echo "files:"
   for f in "${SET_DIR}"/*; do
     [ "$(basename "$f")" = "MANIFEST" ] && continue

@@ -915,6 +915,88 @@ produces no metric at all and every threshold rule reads that as fine.
 `BACKUP_METRICS_DIR` must name the same directory the observability stack
 mounts for node-exporter, or the metrics are written and never read.
 
+## 7.12 Point-in-time recovery (`scripts/restore-pitr.sh`)
+
+A backup set rewinds to last night. WAL rewinds to five minutes ago — but
+only through a *physical* base backup, which is why `backup-platform.sh`
+stores a `*.basebackup.tar` per database alongside the logical dumps. A
+`pg_dump` cannot be combined with WAL at all.
+
+Recover one database to a moment:
+
+```bash
+./scripts/restore-pitr.sh \
+  --dataset atrocore \
+  --base /srv/backups/20260929T173614Z/atrocore.basebackup.tar \
+  --target-time "2026-09-29 17:30:24+00"
+```
+
+It brings the recovered database up **beside** the live one, on port 55432,
+and writes nothing to any running service. That is deliberate: a
+point-in-time recovery is a hypothesis about when the damage happened, the
+first guess is usually wrong, and restoring over the live cluster makes every
+attempt destructive. Inspect the result, then promote it by dumping from it
+and restoring deliberately.
+
+The WAL archive is mounted **read-only** and archiving is off on the
+recovered instance. After the recovery target the instance is on a diverged
+timeline, and letting it write into the archive would corrupt the input to
+every later recovery.
+
+Three things worth knowing before you need this at 3am:
+
+- **Asking for a time beyond the archive fails loudly**, with
+  `recovery ended before configured recovery target was reached`. The script
+  then prints the latest time you *can* reach, taken from the server's own
+  log. It does not hand you a database recovered to the wrong point.
+- **`--target-time latest`** replays everything available, for the case where
+  you want the last committed transaction rather than a specific moment.
+- **The database alone is not the platform.** The Alfresco content store is
+  not WAL-protected; a database recovered to a time its content store does
+  not match will reference files that are not there. For whole-platform
+  recovery use `restore-platform.sh`. This tool is for rewinding one database
+  past a bad write.
+
+### The drill
+
+`scripts/verify-pitr.sh` proves the chain end to end, and is the reason any
+of the above can be relied on:
+
+```
+base backup -> marker A -> T -> marker B -> WAL switch -> recover to T
+```
+
+It then asserts A is present and **B is absent**. The absence is the whole
+test: a recovery that replays everything also contains A, so finding A proves
+only that the base backup works. Only B's absence shows replay stopped where
+it was told.
+
+It writes one table, `pitr_drill_marker`, into the **live** cluster and drops
+it on every exit path — a drill against a database nobody uses proves nothing
+about this platform's WAL configuration. `pitr:verify` runs it in CI, manual
+or scheduled.
+
+**What the 2026-09-29 drill found on its first run:** AtroCore's base backup
+had never been produced. `backup-platform.sh` passed `POSTGRES_PIM_USER` to
+`pg_basebackup`, and this image's application role (`usuario`) has neither
+SUPERUSER nor REPLICATION, so every attempt failed with *must be superuser or
+replication role to start walsender* — and because that failure only warned,
+the run still printed "Backup set complete". Point-in-time recovery for
+AtroCore was impossible, and nothing said so. Fixed by connecting as
+`postgres`; a failed base backup now counts as a skipped dataset, so the run
+exits non-zero and the backup alerts fire, and the MANIFEST carries a `pitr:`
+block stating per dataset whether the set can recover to a point in time.
+
+**What it proved afterwards** (AtroCore, against a base backup from a real
+stored set): 3 WAL segments replayed from the archive, `recovery stopping
+before commit of transaction 46471, time 2026-09-29 17:37:29.800322+00`,
+marker A present, marker B absent, and the live database untouched.
+
+**Still not measured: RTO on production-sized data.** The AtroCore database
+here is 59 MB and recovers in seconds. That number says nothing about a real
+authority's dataset, and §5.2 of the production plan keeps its RTO figure as
+a target.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:

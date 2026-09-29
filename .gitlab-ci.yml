@@ -393,6 +393,45 @@ restore:verify:
     - when: manual
       allow_failure: true
 
+# Point-in-time recovery. The archive and the base backups existed for days
+# before anything replayed one, and the first attempt found that AtroCore's
+# base backup had NEVER been produced -- pg_basebackup was being given the
+# application role, which has no REPLICATION, and the failure only warned.
+#
+# This job proves the whole chain on a database it brings up itself: base
+# backup, a committed row, a forced WAL switch, then recovery to a timestamp
+# BETWEEN two commits, asserting the later one is absent. The absence is the
+# test; a recovery that replays everything also contains the earlier row.
+#
+# Manual or scheduled, never a merge gate: it starts a database, waits for a
+# segment to be archived, and restores into a second instance.
+pitr:verify:
+  stage: validate
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    PITR_ENV_FILE: ".env.example"
+  before_script: []
+  script:
+    - apk add --no-cache bash coreutils findutils python3
+    - docker compose --env-file .env.example up -d db
+    - |
+      for i in $(seq 1 60); do
+        docker compose --env-file .env.example exec -T db pg_isready -U postgres >/dev/null 2>&1 && break
+        sleep 2
+      done
+    - bash scripts/verify-pitr.sh --dataset atrocore --port 55432
+  after_script:
+    - docker compose --env-file .env.example down -v --remove-orphans || true
+    - docker ps -a --filter name=pitr- -q | xargs -r docker rm -f || true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: manual
+      allow_failure: true
+
 # The backup destination contract. Runs the conformance test against the
 # `local` driver, which is the one that needs no external service -- so this
 # is a merge gate rather than a manual job.

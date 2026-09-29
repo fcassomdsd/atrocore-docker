@@ -6,6 +6,36 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Fixed
+
+- **AtroCore's base backup had never been produced, so point-in-time recovery for it was impossible.** `backup-platform.sh` passed `POSTGRES_PIM_USER` to `pg_basebackup`, but this image's init scripts create the application role (`usuario`) with neither SUPERUSER nor REPLICATION, and `pg_basebackup` opens a replication connection. Every attempt since WAL archiving shipped failed with *must be superuser or replication role to start walsender* — and because that failure only **warned**, the run went on to print `Backup set complete` and exit 0. Every set ever taken was missing `atrocore.basebackup.tar`. The other two databases connect as their image's `POSTGRES_USER`, which is a superuser, so they were unaffected and the gap was invisible in a set that otherwise looked whole.
+
+  Found by the first run of the new PITR drill, on its first step.
+
+  Three changes, because the missing file was the smaller half of the problem:
+
+  - the AtroCore base backup connects as `postgres`;
+  - a base backup that fails while its service is **running** now counts as a skipped dataset, so the script exits non-zero and `with-backup-metrics.sh` records a failure that the existing backup alerts fire on — a warning that scrolls past in a nightly job is not a signal;
+  - the MANIFEST carries a `pitr:` block naming, per dataset, whether that set can recover to a point in time. Reading it off the absence of a filename is exactly how this went unnoticed.
+
+  `verify-manifest-parsing.sh` grew with it: `pitr:` is a **third** `- name:` list in the manifest, the same shape as the `wal_archives:` list whose misparsing made `restore-platform.sh` refuse every set for days. The fixture now carries all three, and asserts no label from either non-file list reaches the file list.
+
+### Added
+
+- **Point-in-time recovery, as a tool and as a drill — P3.4.** The WAL archive and the base backups had existed for days with nothing that could replay one. `scripts/restore-pitr.sh` recovers one database to a chosen moment; `scripts/verify-pitr.sh` proves the chain works and `pitr:verify` runs it in CI.
+
+  **The recovered database comes up beside the live one, never over it.** A point-in-time recovery is a hypothesis about when the damage happened and the first guess is usually wrong; restoring over the live cluster makes every attempt destructive. The instance lands on a scratch port for inspection, and is promoted by hand. The WAL archive is mounted **read-only** and archiving is disabled on the recovered instance — after the target it is on a diverged timeline, and letting it archive would corrupt the input to every later recovery. The image is resolved from `docker compose config` rather than hardcoded, because the three databases are on PostgreSQL 15, 16.5 and 16 and a base backup can only be read by the major version that wrote it.
+
+  **The drill's assertion is an absence.** It writes marker A, takes a target time, writes marker B, forces a WAL switch, recovers to the target, and asserts A present and **B absent**. A recovery that replays everything also contains A, so finding A proves only that the base backup works — which the logical-dump restore already covers. Only B's absence shows replay stopped where it was told. The forced WAL switch is load-bearing too: with `archive_timeout=300` both markers would otherwise sit in an unarchived segment and the drill would pass for the wrong reason, having recovered to a point before either.
+
+  It writes to the **live** cluster (one table, dropped on every exit path) because a drill against a database nobody uses proves nothing about this platform's WAL configuration.
+
+  Two vacuous checks were caught while building it, both the same shape as defects this tier has already seen. `restore-pitr.sh`'s first run reported *recovery complete, server promoted* having replayed **nothing** — a base backup taken with `-Xf` carries enough WAL to reach consistency, so a recovery that fetches no archived segment is indistinguishable from a working one; the segment count is now reported and zero is called out. And the drill's archiver-health precondition was three queries, two of which had no `FROM` clause: psql errored, `2>/dev/null` ate it, both variables came back empty, and the guard could never fire while reporting "last archived never" about a database that was archiving fine.
+
+  **Proven** against the live AtroCore database, using a base backup from a real stored set: 3 WAL segments replayed from the archive, `recovery stopping before commit of transaction 46471, time 2026-09-29 17:37:29.800322+00`, marker A present, marker B absent, live database untouched. 13/13 checks. Mutation-tested: a target past marker B fails the absence check, a missing WAL switch fails the archive wait, and a database that has never archived is refused.
+
+  **Not measured: RTO.** This database is 59 MB and recovers in seconds, which says nothing about a real authority's dataset.
+
 ### Changed
 
 - **The offsite restore is now proven end to end, against the live platform.** Not a drill on throwaway data: a set was taken from the running system, pushed offsite, **pulled back from the offsite copy**, and restored over the live stack.
