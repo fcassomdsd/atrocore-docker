@@ -378,6 +378,35 @@ restore:verify:
     - when: manual
       allow_failure: true
 
+# The backup destination contract. Runs the conformance test against the
+# `local` driver, which is the one that needs no external service -- so this
+# is a merge gate rather than a manual job.
+#
+# It does NOT prove an authority's own destination works. Nothing here can:
+# an Azure tenancy or a tape robot is not reachable from CI, which is the
+# whole reason verify-backup-destination.sh exists as something an adopter
+# runs themselves. What this gate protects is the contract those drivers are
+# written against -- if the dispatcher or the shared set-age arithmetic
+# breaks, every driver breaks with it, silently.
+validate:backup-destination:
+  stage: validate
+  image: alpine:latest
+  before_script: []
+  script:
+    - apk add --no-cache bash coreutils findutils
+    - mkdir -p /tmp/conformance
+    - BACKUP_DESTINATION=local BACKUP_DEST_PATH=/tmp/conformance bash scripts/verify-backup-destination.sh
+    # The MANIFEST parser. A backup manifest has two `- name:` lists and the
+    # original parser could not tell them apart, which made
+    # restore-platform.sh refuse every set taken after WAL archiving was
+    # added. Nothing caught it because no test had ever fed it a manifest
+    # with a wal_archives block.
+    - sh scripts/verify-manifest-parsing.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
 # Does the monitoring notice anything? A Prometheus that is running, a Grafana
 # with a dashboard and alert rules that parse are all easy to mistake for
 # monitoring, and none of them shows that a failure would be NOTICED. Every

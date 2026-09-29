@@ -8,6 +8,80 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **`restore-platform.sh` could not restore any backup set taken after WAL archiving was added.** A MANIFEST contains **two** `- name:` lists — `files:`, which names the files in the set with a sha256 each, and `wal_archives:`, which names archive *directories* that are deliberately not in the set. The verification loop matched `- name:` with a line-oriented `sed`, which cannot tell them apart, so it read the three archive labels as missing files:
+
+  ```
+  FAIL atrocore listed in MANIFEST but missing
+  FAIL alfresco listed in MANIFEST but missing
+  FAIL compliance_web listed in MANIFEST but missing
+  3 file(s) failed verification — refusing to restore a corrupt set
+  ```
+
+  The sets were intact throughout. **The restore path refused them.** Nothing caught it because no test had ever fed the parser a manifest containing a `wal_archives:` block — the restore drill predates that block, and it is scheduled by nothing.
+
+  Found by accident: the new offsite `push` reuses the same verification, so the first real backup pushed through it failed in exactly the same way.
+
+  Both readers now parse only the `files:` section, and `scripts/verify-manifest-parsing.sh` covers it against a manifest in the real shape — including that the two copies of the expression stay identical, and that a manifest with no `wal_archives:` block still parses. Mutation-tested by restoring the original parser.
+
+### Added
+
+- **Three systemd timers, and the means to tell whether they are still running.** Nightly (take a set, push it offsite, prune — in that order, prune last and only after a successful push, so a bad night never leaves fewer backups than it started with), WAL every fifteen minutes, and a weekly read-back verification of the newest offsite set.
+
+  The nightly unit from P3.4 is **extended rather than duplicated** — it already existed and a parallel unit would have been a conflicting second schedule.
+
+  **`scripts/with-backup-metrics.sh`** records each run as a Prometheus metric via node-exporter's textfile collector, because a timer that stops firing and a timer that fails every night both look exactly like a healthy system from outside. Five alerts consume it, and the important one is **`BackupNeverRan`**: it fires on `absent()`, since a timer nobody enabled produces no metric and every threshold rule reads that as fine.
+
+  Two details that cost a debugging cycle each. The metric label is **`backup_job`, not `job`** — `job` is reserved, Prometheus overwrites it with the scrape job name and renames the collision to `exported_job`, so the rules as first written matched nothing and would have **never fired**; found only by querying Prometheus end to end. And a *failed* run carries the previous success timestamp forward rather than dropping the series, because otherwise one failure erases the history and "no data" reads as "no backups have ever run".
+
+  **`scripts/install-backup-timers.sh`** fills in the installation path — systemd has no notion of "the directory this unit came from", and editing six files by hand is how one ends up pointing at the wrong checkout. `--user` installs them as user units for testing without root, commenting out the `docker.service` ordering, which is a system unit the user manager cannot see and which makes a user unit refuse to start.
+
+  Verified by running the units through systemd against a real platform: the nightly took a 700 MB set, pushed it offsite and pruned; the WAL unit shipped segments; a deliberately broken destination produced `exit_code=1` with the previous success preserved; node-exporter published the metrics and Prometheus scraped them; and each `…NeverRan` alert was observed going **pending → inactive** as its job ran for the first time.
+
+  Watching that happen found a further gap. Only the nightly job had an `absent()` rule. With the verification job never once executed, `OffsiteVerificationStale` sat **inactive** — because `time() - <no data>` is not a comparison that can be true, so a staleness rule says nothing until its job has succeeded at least once. "Nobody has ever verified an offsite backup" was therefore silent, which is precisely the condition the `absent()` rules exist for. All three jobs now have one.
+
+### Added
+
+- **`scripts/ship-wal-archive.sh` — WAL shipped offsite, asynchronously.** Backup sets bound the recovery point to the last backup; WAL closes it to five minutes, but only once the segments leave the host.
+
+  **It is deliberately not `archive_command`,** and the script says so where someone would go to change it. `archive_command` runs *inside* PostgreSQL, synchronously, once per 16 MB segment, and PostgreSQL will not recycle a segment until it returns success. A network there makes latency a database problem and a failure a disk problem — the volume fills and the database stops. Archiving stays local and certain; this ships what accumulated, and an unreachable destination just means segments queue.
+
+  It reuses the destination drivers unchanged: a batch is staged with a `MANIFEST` in the same shape a backup set has, then pushed through `backup-offsite.sh`, so MANIFEST-last, pre-push verification and capability handling all apply without a second implementation.
+
+  Three safety properties, each tested rather than asserted:
+
+  - **Shipped is recorded only after the push succeeds.** The other order loses segments permanently — marked done, never retried, then deleted by the next prune. Verified by pointing the destination at an unwritable path: the push fails and the state file stays empty.
+  - **`--prune-local` is off by default** and removes a segment only when it is both confirmed shipped *and* older than the given age. Verified that an *unshipped* 90-day-old segment survives a prune request.
+  - **Segments are read through a container when the invoking user cannot read them.** All three archives here are owned by uid 70, mode 0600. Detected, not assumed.
+
+  Three bugs came out of running this against the real archives. `find -printf` is GNU-only and the container is Alpine, so the first version listed **nothing** against an archive holding 252 segments and reported "nothing new to ship" — the exact silent success the script's own comments warn about, produced by the script itself. The staging copy ran as root and preserved mode 0600, so the batch it built was unreadable by the user that then had to checksum it. And a failing `find` inside a command substitution killed the script under `set -e` *before* the guard meant to catch it could run. The `local` driver had the same `-printf` assumption and is now portable too.
+
+  `WAL_SHIP_BATCH_MAX` (default 512) caps a run — at 16 MB a segment, a few hundred is several gigabytes of staging.
+
+### Added
+
+- **Offsite backups, with the destination as a pluggable driver.** `backup-platform.sh` wrote sets to a local directory, which protects the data but not the host — a fire or a failed array takes the backups with it.
+
+  `scripts/backup-offsite.sh` adds `push`, `pull`, `list`, `prune` and `verify` on top of a five-verb driver contract. Three drivers ship: **`local`** (a second disk or NFS mount), **`rsync-ssh`** (any second host, no cloud account needed), and **`s3`** (AWS and anything S3-compatible).
+
+  **The seam is where it is because the existing boundary was already right.** A backup set is self-describing — dumps, base backups, the content tarball and a `MANIFEST` with a sha256 per file — and `restore-platform.sh` already works from a local directory. So a driver only moves a directory; the ordering rules, the checksum gate and the restore drill are untouched. Verifying an offsite copy is "fetch it back and run the existing drill", not a second implementation of the part that has to be right.
+
+  Four decisions worth knowing:
+
+  - **`MANIFEST` is written last, always.** A set carrying a manifest is treated as complete, so sending it first would let a half-transferred set look restorable. Same rule, same reason, as the release update feed in `compliance_checklist`.
+  - **`push` verifies the local set before sending it.** Shipping an already-corrupt set wastes the transfer and produces an offsite copy that looks fine until the day it is needed.
+  - **Age is computed from the set id, never a file timestamp.** Object stores have no directory mtime, copying rewrites file times, and `rsync -a` preserves them while `cp` does not — three answers to one question. `lib/set-age.sh` is shared so drivers cannot disagree, and an id it cannot parse is never old enough to delete.
+  - **Capabilities are declared.** `fetch=no` (WORM storage, tape, a courier) makes `verify` refuse rather than pretend; `prune=self` (an S3 lifecycle rule) stops the client fighting the bucket policy.
+
+- **`scripts/verify-backup-destination.sh` — the conformance test an adopter runs against their own storage.** This platform ships three drivers and can test three drivers; an authority may back up to a national cloud or a tape robot that nobody here can reach. A driver never exercised against its real backend is a guess, and the first anyone learns of it is a restore. **We verify the contract; they verify their backend** — that is what makes "pluggable" a property rather than a claim.
+
+  It exercises `prune`, so it **refuses to start** if the destination holds sets that are not its own synthetic ones. That guard is the only thing between the test and someone's real backups.
+
+  Verified against all three drivers on real backends: a local filesystem, a real `sshd` with `rsync` over it, and a live S3 API. Two bugs came out of running it rather than reasoning about it — the first version pruned with `prune 30` against whatever destination it was pointed at (which would have deleted real sets, hence the guard), and its cleanup used a set id stamped with the current second, which `prune 0` correctly declines to treat as older than that same second. The second only appeared in a bare Alpine container, where the test runs faster than on a developer's machine.
+
+- **`validate:backup-destination` in CI**, running the conformance test against the `local` driver — a merge gate, since it needs no external service. It does not prove any authority's destination works; it protects the contract every driver is written against.
+
+### Fixed
+
 - **The alerting drill assumed a warm Prometheus, and reported an empty one as a pass.** With the dind host resolved, `observability:verify` reached Prometheus and then failed on a stack that was fine: `ok 0 scrape targets up`, followed by a baseline probe reading `none`. Prometheus scrapes every 30s and knows nothing until its first cycle completes, and in CI the monitoring stack is seconds old — locally it has usually been up for hours, which is why this never showed.
 
   Three impatient reads are now bounded waits: for Prometheus and Alertmanager to start **listening** (a container Docker calls running is not necessarily serving), for the first scrape cycle, and for the baseline probe to report the target as up.

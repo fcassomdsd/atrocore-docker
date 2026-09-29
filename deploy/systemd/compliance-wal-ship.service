@@ -1,0 +1,31 @@
+# Ship archived WAL offsite. Small and frequent.
+#
+# This is what makes the offsite recovery point minutes rather than a day.
+# The nightly set bounds recovery to the last backup; WAL closes the gap.
+#
+# It is deliberately NOT PostgreSQL's archive_command: that runs inside the
+# database, synchronously, once per 16MB segment, so a network there makes
+# latency a database problem and a failure a full-disk problem. Archiving
+# stays local; this ships what accumulated.
+[Unit]
+Description=Ship compliance platform WAL archive offsite
+Documentation=file:///opt/compliance-platform/atrocore-docker/docs/COMPLIANCE_INTEGRATION_RUNBOOK.md
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/compliance-platform/atrocore-docker
+EnvironmentFile=/etc/compliance-platform/backup.env
+ExecStart=/opt/compliance-platform/atrocore-docker/scripts/with-backup-metrics.sh wal-ship /opt/compliance-platform/atrocore-docker/scripts/ship-wal-archive.sh
+StandardOutput=journal
+StandardError=journal
+# Shorter than the timer interval so a hung run cannot pile up behind the
+# next one. The shipper takes its own lock as well, making this belt and
+# braces rather than the only protection.
+TimeoutStartSec=10m
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

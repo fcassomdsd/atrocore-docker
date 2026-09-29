@@ -794,6 +794,98 @@ It stops a container on purpose, waits for the alert to fire, confirms
 Alertmanager received it, restarts the container and waits for the alert to
 clear.
 
+## 7.10 Offsite backups (`backup-destinations/`)
+
+`backup-platform.sh` writes backup sets to a local directory. That protects
+the data but not the host: a fire, a theft or a failed array takes the sets
+with it. `scripts/backup-offsite.sh` is the other half.
+
+    export BACKUP_DESTINATION=rsync-ssh
+    export BACKUP_DEST_SSH=backup@dr.authority.example
+    export BACKUP_DEST_PATH=/srv/oversight-backups
+
+    ./scripts/backup-platform.sh --yes      # take the set
+    ./scripts/backup-offsite.sh push        # copy it offsite
+    ./scripts/backup-offsite.sh verify      # read it back and re-check every sha256
+    ./scripts/backup-offsite.sh prune       # expire old sets at the destination
+
+Three drivers ship — `local` (a second disk or an NFS mount), `rsync-ssh`
+(any second host), and `s3` (AWS, MinIO, Ceph, Wasabi, most national cloud
+offerings). Each authority's infrastructure differs, so the destination is a
+**driver**, not a setting: see `backup-destinations/README.md` for the
+five-verb contract and for writing your own.
+
+**Run the conformance test against your destination before relying on it:**
+
+    BACKUP_DESTINATION=<driver> ./scripts/verify-backup-destination.sh
+
+It pushes a synthetic set, pulls it back, compares every byte, and exercises
+pruning. Nobody here can test your Azure tenancy or your tape robot — the
+contract is verified in CI, the backend is verified by you. Point it at a
+*scratch* path or bucket: it exercises `prune`, and it refuses to start if
+the destination already holds sets that are not its own.
+
+**`verify` is the one to schedule.** An offsite copy nobody has ever read
+back is a hope rather than a backup, and it is the cheapest check that turns
+one into the other.
+
+### WAL, shipped asynchronously
+
+Backup sets bound your recovery point to the last backup. WAL closes the gap
+to five minutes (`archive_timeout=300`) — but only once it is offsite too.
+
+    ./scripts/ship-wal-archive.sh                  # all three archives
+    ./scripts/ship-wal-archive.sh --dry-run        # what would be shipped
+    ./scripts/ship-wal-archive.sh --prune-local 45 # also expire shipped, old segments
+
+**Point it at a different path or prefix from your backup sets.** WAL is small
+and frequent, sets are large and rare, and they want different retention.
+
+> **Do not put the destination in `archive_command`.** It runs *inside*
+> PostgreSQL, synchronously, once per 16 MB segment, and PostgreSQL will not
+> recycle a segment until it returns success. A network there makes latency a
+> database problem — a slow destination throttles WAL recycling and
+> eventually writes — and a failure a disk problem, because unarchived
+> segments accumulate until the volume fills and the database stops. Archive
+> locally, ship separately. If the destination is unreachable the segments
+> queue and the database does not care.
+
+Three properties worth knowing:
+
+- **Segments are recorded as shipped only after the push succeeds.** The
+  other order loses data permanently: a failed transfer would mark them done,
+  never retry, and the next local prune would delete them.
+- **`--prune-local` is off by default.** A segment is removed only when it is
+  both confirmed shipped *and* older than the age given. Pass an age **at
+  least as long as your backup-set retention** — deleting WAL newer than your
+  oldest base backup destroys point-in-time recovery from it, and nothing will
+  tell you until a restore.
+- **Segments are read through a container when they are not readable by the
+  invoking user.** PostgreSQL writes them mode 0600 as its own uid; all three
+  archives here are owned by uid 70. This is detected, not assumed, so an
+  unreadable archive is an error rather than a quiet "nothing to ship".
+
+`WAL_SHIP_BATCH_MAX` (default 512) caps a run. At 16 MB a segment, a backlog
+of a few hundred is several gigabytes of staging — worth bounding on a small
+host.
+
+## 7.11 Scheduling (`deploy/systemd/`)
+
+Three timers turn the backup scripts from things somebody has to remember
+into things that happen: a nightly set pushed offsite and pruned, WAL shipped
+every fifteen minutes, and a weekly read-back verification. Install with
+`scripts/install-backup-timers.sh --system`; full detail in
+`deploy/systemd/README.md`.
+
+Every run records its outcome where Prometheus can see it, because a timer
+that stops firing and a timer that fails nightly both look exactly like a
+healthy system. Five alerts watch those metrics, and the one to understand is
+**`BackupNeverRan`** — it fires on `absent()`, because a timer nobody enabled
+produces no metric at all and every threshold rule reads that as fine.
+
+`BACKUP_METRICS_DIR` must name the same directory the observability stack
+mounts for node-exporter, or the metrics are written and never read.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:
@@ -811,6 +903,13 @@ Use these quick cues:
     an application role does not grant an Alfresco ACL (§7.3).
 - Web/API calls to `localhost:4000` fail with a connection error, not an HTTP status:
   - the backend is up but its port is unpublished; start it with the dev override (§7.1).
+- **A restore refuses a set that looks complete**, reporting the WAL archive
+  names as missing files:
+  - fixed in 2026-09-29. Before that, `restore-platform.sh` parsed both
+    `- name:` lists in the MANIFEST and read the three `wal_archives:` labels
+    as files, so it refused **every set taken after WAL archiving was added**.
+    If you are running an older checkout, that is what you are seeing, and the
+    set itself is fine.
 - **Everything answers, but an operation never returns** — no error, no timeout, no log line:
   - suspect ActiveMQ before anything else. `cd compliance_cmis && docker compose ps activemq`.
     This failure is invisible to every health check in this guide, which is

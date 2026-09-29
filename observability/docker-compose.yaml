@@ -212,8 +212,18 @@ services:
     command:
       - --path.rootfs=/host
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+      # The textfile collector publishes whatever *.prom files it finds. The
+      # backup timers write their outcome there (see
+      # scripts/with-backup-metrics.sh), which is what makes a timer that
+      # quietly stopped firing visible at all -- otherwise it looks exactly
+      # like a healthy system, and the first anyone knows is a restore with
+      # nothing to restore from.
+      - --collector.textfile.directory=/var/lib/node_exporter/textfile
     volumes:
       - /:/host:ro,rslave
+      # Read-only: node-exporter only reads these, and the host jobs write
+      # them. Bind the same path the units use.
+      - ${BACKUP_METRICS_DIR:-/var/lib/node_exporter/textfile}:/var/lib/node_exporter/textfile:ro
     # Host filesystem free space is not a nice-to-have here. With
     # archive_mode=on a failing archive_command makes PostgreSQL retain every
     # WAL segment until archiving succeeds, and the volume fills until the

@@ -1,0 +1,15 @@
+# Every 15 minutes. PostgreSQL's archive_timeout is 300s, so this trails the
+# database's own archiving by at most three segments -- and that lag, not the
+# five minutes achieved locally, is the real offsite recovery point.
+[Unit]
+Description=Ship compliance platform WAL every 15 minutes
+Documentation=file:///opt/compliance-platform/atrocore-docker/deploy/systemd/README.md
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=2m
+Persistent=true
+Unit=compliance-wal-ship.service
+
+[Install]
+WantedBy=timers.target

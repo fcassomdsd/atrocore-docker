@@ -330,3 +330,134 @@ groups:
             over lunch. A run of them is either an attack or a deployment
             that changed the token contract and broke every open session.
           action: "Check whether a deploy just happened before assuming it is an attack."
+
+  - name: platform-backups
+    rules:
+      # A backup that silently stops is indistinguishable from a healthy
+      # system right up until someone needs it. These are the rules that
+      # make the difference, and the `absent()` ones matter most: a timer
+      # nobody enabled produces no metric at all, which every threshold
+      # rule reads as "fine".
+
+      - alert: BackupNeverRan
+        expr: absent(oversight_backup_last_success_timestamp_seconds{backup_job="nightly"})
+        for: 1h
+        labels:
+          severity: critical
+          component: backup
+        annotations:
+          summary: "No nightly backup has ever reported success"
+          description: >-
+            The metric does not exist, which means the nightly timer has
+            never completed on this host -- most likely it was never
+            enabled, or node-exporter cannot read the textfile directory.
+            Every other backup alert is a threshold on this series, so
+            while it is missing none of them can fire: this is the one that
+            catches a backup system that was never switched on.
+          action: >-
+            systemctl list-timers 'compliance-*' and check
+            scripts/install-backup-timers.sh was run. Confirm
+            BACKUP_METRICS_DIR is the directory node-exporter has mounted.
+
+      # The same absent() reasoning for the other two jobs. Caught by running
+      # the whole chain: with the verify job never once executed,
+      # OffsiteVerificationStale sat *inactive*, because `time() - <no data>`
+      # is not a comparison that can be true. The staleness rules only work
+      # once a job has succeeded at least once; until then only absent()
+      # says anything, and without these two, "nobody has ever verified an
+      # offsite backup" was silent.
+      - alert: WalShippingNeverRan
+        expr: absent(oversight_backup_last_success_timestamp_seconds{backup_job="wal-ship"})
+        for: 1h
+        labels:
+          severity: critical
+          component: backup
+        annotations:
+          summary: "WAL has never been shipped offsite on this host"
+          description: >-
+            No metric exists for the WAL shipper, so it has never completed
+            here. The offsite recovery point is whatever the last full set
+            gives -- typically a day -- not the five minutes the database
+            achieves locally.
+          action: "systemctl list-timers 'compliance-*'; systemctl status compliance-wal-ship.service"
+
+      - alert: OffsiteVerificationNeverRan
+        expr: absent(oversight_backup_last_success_timestamp_seconds{backup_job="verify"})
+        for: 1h
+        labels:
+          severity: warning
+          component: backup
+        annotations:
+          summary: "No offsite backup has ever been read back and verified"
+          description: >-
+            Sets may be arriving perfectly well. Nobody has checked. Until a
+            set is fetched and its checksums re-verified, the offsite copy is
+            an assumption, and this is the only alert that says so before the
+            first verification has ever happened.
+          action: "systemctl status compliance-backup-verify.service, or run scripts/backup-offsite.sh verify by hand"
+
+      - alert: BackupStale
+        # 36h, not 24h: the nightly timer carries RandomizedDelaySec and
+        # Persistent=true, so a reboot legitimately shifts a run by hours.
+        # A threshold that fires on normal variance gets muted.
+        expr: time() - oversight_backup_last_success_timestamp_seconds{backup_job="nightly"} > 129600
+        for: 1h
+        labels:
+          severity: critical
+          component: backup
+        annotations:
+          summary: "The nightly backup has not succeeded in over 36 hours"
+          description: >-
+            The timer may be firing and failing, which the journal will show.
+            Whatever the cause, the recovery point is now older than a day
+            and getting worse.
+          action: "journalctl -u compliance-backup.service -n 100 --no-pager"
+
+      - alert: BackupFailing
+        expr: oversight_backup_last_exit_code{backup_job="nightly"} != 0
+        for: 10m
+        labels:
+          severity: warning
+          component: backup
+        annotations:
+          summary: "The last nightly backup run failed"
+          description: >-
+            Distinct from BackupStale, and it fires sooner: a job that fails
+            every night keeps a recent *run* timestamp while the last
+            *success* ages quietly. This catches the first failure rather
+            than the second day of them.
+          action: "journalctl -u compliance-backup.service -n 100 --no-pager"
+
+      - alert: WalShippingStale
+        # WAL is the recovery-point mechanism, so its tolerance is much
+        # tighter than the nightly set's: two hours, against a 15-minute
+        # timer.
+        expr: time() - oversight_backup_last_success_timestamp_seconds{backup_job="wal-ship"} > 7200
+        for: 15m
+        labels:
+          severity: critical
+          component: backup
+        annotations:
+          summary: "WAL has not been shipped offsite in over two hours"
+          description: >-
+            The offsite recovery point is now as old as the last successful
+            shipment, whatever the database achieves locally. Segments also
+            accumulate on disk while this is failing -- the same volume that
+            WALArchivingFailing warns about, reached by a different route.
+          action: "journalctl -u compliance-wal-ship.service -n 100 --no-pager"
+
+      - alert: OffsiteVerificationStale
+        # Weekly timer, ten days of tolerance.
+        expr: time() - oversight_backup_last_success_timestamp_seconds{backup_job="verify"} > 864000
+        for: 1h
+        labels:
+          severity: warning
+          component: backup
+        annotations:
+          summary: "No offsite backup has been read back and verified in ten days"
+          description: >-
+            Pushing a set is not evidence that anything arrived intact. Until
+            a set is fetched and its checksums re-checked, the offsite copy
+            is a hope. This does not mean the backups are bad -- it means
+            nobody knows.
+          action: "journalctl -u compliance-backup-verify.service -n 50 --no-pager; or run scripts/backup-offsite.sh verify by hand"
