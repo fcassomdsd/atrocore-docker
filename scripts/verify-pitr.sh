@@ -221,6 +221,7 @@ step "5. Recover to the target time"
   --dataset "${DATASET}" \
   --base "${BASE}" \
   --target-time "${TARGET_TIME}" \
+  --superuser "${DS_SUPER}" \
   --workdir "${WORKDIR}/recovery" \
   --port "${PORT}" \
   --keep > "${WORKDIR}/restore.log" 2>&1
@@ -232,7 +233,11 @@ CONTAINER="$(docker ps --filter "publish=${PORT}" --format '{{.Names}}' | head -
 [ -n "${CONTAINER}" ] || die "the recovered instance is not running on port ${PORT}"
 
 step "6. Assertions"
-psql_rec() { docker exec "${CONTAINER}" psql -U postgres -d "${DS_DB}" -tAc "$1" 2>/dev/null | tr -d '[:space:]'; }
+# -U "${DS_SUPER}", not postgres: a physical backup carries the source
+# cluster's roles, and only atrocore's superuser is called postgres. Hardcoded,
+# every assertion below read empty through this 2>/dev/null and the drill
+# reported a working recovery as a missing table.
+psql_rec() { docker exec "${CONTAINER}" psql -U "${DS_SUPER}" -d "${DS_DB}" -tAc "$1" 2>/dev/null | tr -d '[:space:]'; }
 
 # The archive must have been used. Without this the drill can pass on a base
 # backup alone and prove nothing about WAL.

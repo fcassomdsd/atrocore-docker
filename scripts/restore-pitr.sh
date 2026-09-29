@@ -15,6 +15,8 @@
 #                  --target-time latest to replay everything available.
 #   --port         host port for the recovered instance (default 55432).
 #   --archive      override the WAL archive directory.
+#   --superuser    role to query the recovered instance with (default: the
+#                  dataset's own bootstrap superuser -- see the table below).
 #   --workdir      where to extract (default: a mktemp dir; needs ~2x the
 #                  base backup's size).
 #   --keep         leave the container running after a successful recovery.
@@ -46,6 +48,19 @@
 # which is the good case. Resolving it from `docker compose config` keeps this
 # correct when an image is bumped.
 #
+# THE REPLAY PARAMETERS COME FROM THE BASE BACKUP, NOT FROM THE IMAGE
+#
+# A recovering server refuses to start when max_connections, max_worker_processes,
+# max_wal_senders, max_prepared_transactions or max_locks_per_transaction is
+# LOWER than the primary's was: those values size shared structures the WAL
+# records depend on. Alfresco's Postgres sets max_connections=300 on the
+# compose `command:` line, which lives nowhere inside PGDATA -- so a base
+# backup started under the stock image (100) aborts with "recovery aborted
+# because of insufficient parameter settings". The primary's values ARE
+# recorded in pg_control, which travels inside the base backup, so this reads
+# them with pg_controldata and passes them back. That works with the source
+# host gone, which a lookup against the live server would not.
+#
 # WHAT A SUCCESSFUL RUN PROVES, AND WHAT IT DOES NOT
 #
 # It proves the base backup and the archived WAL together reconstruct the
@@ -67,6 +82,7 @@ TARGET_TIME=""
 PORT=55432
 ARCHIVE=""
 WORKDIR=""
+SUPERUSER=""
 KEEP=0
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YEL=$'\033[33m'; BLD=$'\033[1m'; RST=$'\033[0m'
@@ -77,7 +93,7 @@ ok()   { printf '    %sok%s   %s\n' "${GRN}" "${RST}" "$*"; }
 warn() { printf '    %swarn%s %s\n' "${YEL}" "${RST}" "$*"; }
 die()  { printf '    %sFAIL%s %s\n' "${RED}" "${RST}" "$*" >&2; exit 1; }
 
-usage() { sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,42p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -87,6 +103,7 @@ while [ $# -gt 0 ]; do
     --port)        PORT="${2:-}"; shift 2 ;;
     --archive)     ARCHIVE="${2:-}"; shift 2 ;;
     --workdir)     WORKDIR="${2:-}"; shift 2 ;;
+    --superuser)   SUPERUSER="${2:-}"; shift 2 ;;
     --keep)        KEEP=1; shift ;;
     -h|--help)     usage 0 ;;
     *)             echo "unknown argument: $1" >&2; usage 1 ;;
@@ -102,18 +119,36 @@ done
 # Kept here rather than derived, because the archive paths are the ones the
 # compose files bind-mount and getting one wrong recovers the wrong database
 # into a plausible-looking result.
+#
+# DS_SUPER is each cluster's *bootstrap* superuser, which a physical backup
+# carries with it -- so the recovered instance answers to that role and to no
+# other. Only atrocore's is `postgres`; Alfresco's is `alfresco` and
+# compliance_web's comes from POSTGRES_USER. This was hardcoded to `postgres`
+# while only atrocore had ever been drilled, and on the other two every psql
+# below returned nothing through its own 2>/dev/null -- so the wait loop could
+# not see the promotion and timed out after 240s on a recovery that had in
+# fact succeeded.
+env_var() { # env_var <file> <name>
+  [ -f "$1" ] || return 0
+  sed -n "s/^[[:space:]]*$2=//p" "$1" | tail -n 1 \
+    | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/" -e 's/[[:space:]]*$//'
+}
 case "${DATASET}" in
   atrocore)
-    DS_DIR="${REPO_DIR}"; DS_SVC="db"
+    DS_DIR="${REPO_DIR}"; DS_SVC="db"; DS_SUPER="postgres"
     DS_ARCHIVE="${REPO_DIR}/wal-archive" ;;
   alfresco)
-    DS_DIR="${WORKSPACE}/compliance_cmis"; DS_SVC="postgres"
+    DS_DIR="${WORKSPACE}/compliance_cmis"; DS_SVC="postgres"; DS_SUPER="alfresco"
     DS_ARCHIVE="${WORKSPACE}/compliance_cmis/data/wal-archive" ;;
   compliance_web)
     DS_DIR="${WORKSPACE}/compliance_web"; DS_SVC="db"
+    DS_SUPER="$(env_var "${PITR_ENV_FILE:-${WORKSPACE}/compliance_web/.env}" POSTGRES_USER)"
     DS_ARCHIVE="${WORKSPACE}/compliance_web/data/wal-archive" ;;
   *) die "unknown dataset: ${DATASET} (expected atrocore | alfresco | compliance_web)" ;;
 esac
+[ -n "${SUPERUSER}" ] && DS_SUPER="${SUPERUSER}"
+[ -n "${DS_SUPER}" ] || die "could not resolve the superuser for ${DATASET} — pass --superuser"
+
 [ -n "${ARCHIVE}" ] && DS_ARCHIVE="${ARCHIVE}"
 
 command -v docker >/dev/null 2>&1 || die "docker is required"
@@ -175,6 +210,36 @@ PGVER="$(docker run --rm -v "${PGDATA_DIR}:/d:ro" alpine:latest \
 [ -n "${PGVER}" ] || die "${BASE} does not look like a base backup — no PG_VERSION after extraction"
 ok "extracted to ${PGDATA_DIR} (PG_VERSION ${PGVER})"
 
+# The primary's shared-memory sizing, recovered from the backup's own
+# pg_control. A recovering server aborts -- it does not warn -- when any of
+# these is lower than it was on the primary, and Alfresco sets max_connections
+# on the compose command line, which no base backup contains. Reading them
+# here keeps the recovery self-contained: it works when the source host is
+# gone, which is the case a PITR tool exists for.
+declare -a REPLAY_ARGS=()
+CONTROL="$(docker run --rm --user 999:999 -v "${PGDATA_DIR}:/d:ro" "${IMAGE}" \
+  pg_controldata -D /d 2>/dev/null)"
+if [ -n "${CONTROL}" ]; then
+  # pg_controldata's labels are not the GUC names: max_prepared_xacts and
+  # max_locks_per_xact are reported abbreviated.
+  for pair in \
+      "max_connections setting:max_connections" \
+      "max_worker_processes setting:max_worker_processes" \
+      "max_wal_senders setting:max_wal_senders" \
+      "max_prepared_xacts setting:max_prepared_transactions" \
+      "max_locks_per_xact setting:max_locks_per_transaction"; do
+    label="${pair%%:*}"; guc="${pair##*:}"
+    value="$(printf '%s\n' "${CONTROL}" | sed -n "s/^${label}:[[:space:]]*//p" | tr -d '[:space:]')"
+    case "${value}" in ''|*[!0-9]*) continue ;; esac
+    REPLAY_ARGS+=("-c" "${guc}=${value}")
+  done
+fi
+if [ "${#REPLAY_ARGS[@]}" -gt 0 ]; then
+  ok "replay parameters from the backup's pg_control: ${REPLAY_ARGS[*]//-c /}"
+else
+  warn "could not read pg_control — starting on the image defaults, which aborts recovery if the primary ran higher settings"
+fi
+
 step "4. Configure recovery"
 # recovery.signal is what puts the server into archive recovery; without it the
 # settings below are read and ignored, and the server starts as an ordinary
@@ -212,7 +277,7 @@ docker run -d --name "${CONTAINER}" \
   -v "${DS_ARCHIVE}:/wal-archive:ro" \
   -e POSTGRES_PASSWORD=pitr-scratch-not-a-credential \
   -p "127.0.0.1:${PORT}:5432" \
-  "${IMAGE}" >/dev/null || die "could not start the recovery container"
+  "${IMAGE}" postgres "${REPLAY_ARGS[@]}" >/dev/null || die "could not start the recovery container"
 ok "container ${CONTAINER} started"
 
 cleanup_on_failure() {
@@ -244,8 +309,8 @@ step "6. Wait for recovery to finish"
 # partway through the replay.
 RECOVERED=0
 for _ in $(seq 1 120); do
-  if docker exec "${CONTAINER}" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1; then
-    IN_RECOVERY="$(docker exec "${CONTAINER}" psql -U postgres -tAc 'select pg_is_in_recovery()' 2>/dev/null | tr -d '[:space:]')"
+  if docker exec "${CONTAINER}" pg_isready -U "${DS_SUPER}" -h 127.0.0.1 >/dev/null 2>&1; then
+    IN_RECOVERY="$(docker exec "${CONTAINER}" psql -U "${DS_SUPER}" -tAc 'select pg_is_in_recovery()' 2>/dev/null | tr -d '[:space:]')"
     if [ "${IN_RECOVERY}" = "f" ]; then RECOVERED=1; break; fi
   fi
   if [ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null)" != "true" ]; then
@@ -279,7 +344,7 @@ else
   warn "NO WAL was replayed from the archive — this recovery used only the WAL bundled in the base backup."
   warn "That is correct when nothing was committed after the backup, and meaningless as evidence that the archive works."
 fi
-LAST_XACT="$(docker exec "${CONTAINER}" psql -U postgres -tAc 'select pg_last_committed_xact()' 2>/dev/null | tr -d '[:space:]')"
+LAST_XACT="$(docker exec "${CONTAINER}" psql -U "${DS_SUPER}" -tAc 'select pg_last_committed_xact()' 2>/dev/null | tr -d '[:space:]')"
 [ -n "${LAST_XACT}" ] && ok "pg_last_committed_xact: ${LAST_XACT}"
 
 step "8. Recovered instance"
@@ -290,7 +355,7 @@ echo "    data dir  ${PGDATA_DIR}"
 echo "    container ${CONTAINER}"
 echo ""
 echo "    Inspect it, for example:"
-echo "      psql -h 127.0.0.1 -p ${PORT} -U postgres -l"
+echo "      psql -h 127.0.0.1 -p ${PORT} -U ${DS_SUPER} -l"
 echo ""
 echo "    This is a SEPARATE instance. Nothing has been written to the live"
 echo "    database. Promote by dumping from here and restoring deliberately."
@@ -303,7 +368,7 @@ else
   docker rm "${CONTAINER}" >/dev/null 2>&1
   ok "container stopped and removed; the recovered data directory is kept at ${PGDATA_DIR}"
   echo "    restart it with:"
-  echo "      docker run -d --name pitr-${DATASET} -v ${PGDATA_DIR}:/var/lib/postgresql/data -p 127.0.0.1:${PORT}:5432 ${IMAGE}"
+  echo "      docker run -d --name pitr-${DATASET} -v ${PGDATA_DIR}:/var/lib/postgresql/data -v ${DS_ARCHIVE}:/wal-archive:ro -p 127.0.0.1:${PORT}:5432 ${IMAGE} postgres ${REPLAY_ARGS[*]}"
   echo "    remove it with:"
   echo "      rm -rf ${WORKDIR}"
 fi

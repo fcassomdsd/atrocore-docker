@@ -405,6 +405,16 @@ restore:verify:
 #
 # Manual or scheduled, never a merge gate: it starts a database, waits for a
 # segment to be archived, and restores into a second instance.
+#
+# COVERAGE LIMIT, stated because it already cost something: this runs the
+# atrocore dataset only, since alfresco and compliance_web live in sibling
+# repos that CI does not check out. AtroCore is also the one database whose
+# PostgreSQL settings are all defaults, so a green run here says nothing
+# about the other two -- drilling them by hand on 2026-09-29 found that
+# Alfresco's recovery aborted outright on max_connections, and that both
+# scripts were querying as a role neither cluster has. Run
+# `scripts/verify-pitr.sh --dataset alfresco` and `--dataset compliance_web`
+# against a full local stack; this job is not a substitute.
 pitr:verify:
   stage: validate
   image: docker:27

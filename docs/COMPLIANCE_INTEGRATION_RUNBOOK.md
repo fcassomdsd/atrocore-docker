@@ -992,6 +992,51 @@ stored set): 3 WAL segments replayed from the archive, `recovery stopping
 before commit of transaction 46471, time 2026-09-29 17:37:29.800322+00`,
 marker A present, marker B absent, and the live database untouched.
 
+**What drilling the other two datasets found (same day).** The AtroCore drill
+passing told us less than it appeared to, because AtroCore is the dataset
+whose PostgreSQL settings are all defaults. Two defects surfaced the moment
+`--dataset alfresco` ran, both of which would have been met for the first
+time during an actual incident:
+
+- **Alfresco's recovery aborted outright**, with `recovery aborted because of
+  insufficient parameter settings — max_connections = 100 is a lower setting
+  than on the primary server, where its value was 300`. A recovering server
+  refuses to start when `max_connections`, `max_worker_processes`,
+  `max_wal_senders`, `max_prepared_transactions` or `max_locks_per_transaction`
+  is below the primary's, because those values size shared structures the WAL
+  records depend on. Alfresco sets `max_connections=300` on its compose
+  `command:` line — which lives nowhere inside `PGDATA`, so no base backup
+  carries it. The primary's values *are* recorded in `pg_control`, which does
+  travel inside the base backup, so `restore-pitr.sh` now reads them with
+  `pg_controldata` and passes them back as `-c` overrides. That works with the
+  source host gone, which a lookup against the live server would not.
+- **Every assertion was querying as the wrong role.** Both scripts used
+  `psql -U postgres`, which is correct only for AtroCore: a physical backup
+  carries the source cluster's roles, and Alfresco's bootstrap superuser is
+  `alfresco`, compliance_web's is `POSTGRES_USER` (`compliance`). Neither
+  cluster has a `postgres` role at all. Through the scripts' own `2>/dev/null`
+  this returned empty rather than erroring, so the wait loop could not see the
+  promotion and timed out after 240s on a recovery that had in fact succeeded.
+  Both scripts now resolve the superuser per dataset; `restore-pitr.sh` takes
+  `--superuser` to override it.
+
+All three datasets now pass 13/13 — AtroCore (PG 15), Alfresco (PG 16.5,
+3 segments replayed, stopping before transaction 1814838) and compliance_web
+(PG 16, 3 segments, stopping before transaction 915) — each with marker A
+present, marker B absent, and the live database untouched.
+
+**The WAL archive is never pruned.** Measured 2026-09-29, ~2.5 days after
+archiving was switched on: `compliance_cmis/data/wal-archive` 5.5 GB / 350
+segments, `atrocore-docker/wal-archive` 1.2 GB / 85, `compliance_web/data/
+wal-archive` 529 MB / 37 — about **3 GB/day and growing**, with no
+`pg_archivecleanup` anywhere in the tree. This is not cosmetic: when the
+volume fills, `archive_command` starts failing, WAL accumulates in `pg_wal`
+instead, and the database eventually stops. Pruning has to be anchored to the
+oldest base backup still retained — the archive already contains the
+`*.backup` label files that mark those boundaries — so it belongs with the
+retention policy in `backup-platform.sh` rather than as a blind age cutoff.
+**Not yet implemented.**
+
 **Still not measured: RTO on production-sized data.** The AtroCore database
 here is 59 MB and recovers in seconds. That number says nothing about a real
 authority's dataset, and §5.2 of the production plan keeps its RTO figure as
