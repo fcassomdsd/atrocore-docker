@@ -256,6 +256,26 @@ if [ "${RETENTION_DAYS}" -gt 0 ]; then
     rm -rf "${old}" && pruned=$((pruned + 1))
   done < <(find "${DEST}" -mindepth 1 -maxdepth 1 -type d -mtime "+${RETENTION_DAYS}" 2>/dev/null)
   ok "pruned ${pruned} set(s) older than ${RETENTION_DAYS} days"
+
+  # WAL retention follows set retention, and runs AFTER the sets are pruned so
+  # the anchor reflects what is actually still kept rather than what was kept
+  # a minute ago.
+  #
+  # Without this the archive grows forever: archive_timeout=300 writes a 16MB
+  # segment at least every five minutes per database, and measured on this
+  # platform that came to ~3 GB/day across the three. The volume filling is
+  # not a tidiness problem -- a full volume makes archive_command fail, which
+  # makes PostgreSQL retain WAL in pg_wal, which stops the database.
+  #
+  # It cuts at the oldest base backup still present under ${DEST}, so it can
+  # never remove a segment one of the retained sets needs. A failure here does
+  # not fail the backup: the only honest reason it can fail is a dataset with
+  # no base backup, and that already failed the run above as a skipped dataset.
+  if [ -x "${REPO_DIR}/scripts/prune-wal-archive.sh" ]; then
+    if ! "${REPO_DIR}/scripts/prune-wal-archive.sh" --dest "${DEST}" --yes --quiet; then
+      warn "WAL pruning did not complete — the archive will keep growing until it does"
+    fi
+  fi
 fi
 
 echo

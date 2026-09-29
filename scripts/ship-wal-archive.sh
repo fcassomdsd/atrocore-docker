@@ -47,14 +47,25 @@
 # Off by default, and deliberately so. Deleting a WAL segment that a base
 # backup still needs destroys point-in-time recovery from that base, and
 # nothing will tell you until a restore. A segment is only ever removed when
-# it has been confirmed shipped AND is older than the given age, and the age
-# you pass must be at least your backup-set retention -- otherwise you will
-# keep base backups you can no longer replay WAL onto.
+# all three hold: it has been confirmed shipped, it is older than the given
+# age, and it is older than the oldest base backup still retained locally.
+#
+# That last condition used to be a sentence in this comment telling the
+# operator to pass an age at least as large as their set retention. Nothing
+# checked it, and an age is the wrong kind of rule anyway -- see
+# wal-anchor.lib.sh. It is now enforced against the actual backups on disk,
+# and a stream with no base backup to anchor to is not pruned at all.
+#
+# For pruning that is not tied to shipping, use prune-wal-archive.sh; it
+# applies the same anchor and is what the nightly backup calls.
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACE="$(cd "${REPO_DIR}/.." && pwd)"
+# shellcheck source=scripts/wal-anchor.lib.sh
+. "${REPO_DIR}/scripts/wal-anchor.lib.sh"
+SET_DIR_ROOT="${BACKUP_DIR:-${WORKSPACE}/backups}"
 STATE_DIR="${WAL_SHIP_STATE_DIR:-${WORKSPACE}/backups/.wal-ship-state}"
 
 ARCHIVE=""; LABEL=""; PRUNE_DAYS=""; DRY_RUN=0
@@ -74,7 +85,7 @@ while [ $# -gt 0 ]; do
     --label)        LABEL="${2:?--label needs a name}"; shift 2 ;;
     --prune-local)  PRUNE_DAYS="${2:?--prune-local needs a number of days}"; shift 2 ;;
     --dry-run)      DRY_RUN=1; shift ;;
-    -h|--help)      sed -n '4,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)      sed -n '4,61p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)              die "unknown argument: $1" ;;
   esac
 done
@@ -244,13 +255,29 @@ for i in "${!ARCHIVES[@]}"; do
   if [ -n "${PRUNE_DAYS}" ] && [ "${DRY_RUN}" -eq 0 ]; then
     pruned=0
     cutoff=$(( $(date -u +%s) - (PRUNE_DAYS * 86400) ))
+    # The hard floor, below which age does not get a vote: the START WAL of
+    # the oldest base backup still on disk. Anything from there on is what a
+    # retained set replays onto.
+    anchor="$(wal_anchor_for "${SET_DIR_ROOT}" "${NAME}" || true)"
+    if [ -z "${anchor}" ]; then
+      warn "no base backup under ${SET_DIR_ROOT} to anchor pruning to — not pruning ${NAME}"
+      continue
+    fi
+    info "prune floor ${anchor} (oldest retained base backup's START WAL)"
     while IFS= read -r f; do
       [ -n "${f}" ] || continue
-      # Shipped is necessary but not sufficient: age is the second condition,
-      # and both must hold. A segment newer than the oldest base backup you
-      # intend to restore from must never be removed, which is why the
-      # documented rule is that PRUNE_DAYS >= your set retention.
+      # Shipped is necessary but not sufficient, and neither is age. All three
+      # conditions are checked here; the anchor is the one that decides
+      # whether a restore still works.
       grep -qxF "${f}" "${STATE}" 2>/dev/null || continue
+      # Compared on the segment part, the last 16 characters, which is what
+      # pg_archivecleanup compares: the leading 8 are the timeline.
+      case "${f}" in
+        *.history) continue ;;
+        [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]*) ;;
+        *) continue ;;
+      esac
+      [[ "${f:8:16}" < "${anchor:8:16}" ]] || continue
       if [ "${READ_VIA_DOCKER}" -eq 1 ]; then
         mtime="$(docker run --rm -v "${ARCH}:/wal:ro" alpine:latest stat -c %Y "/wal/${f}" 2>/dev/null || echo 0)"
       else

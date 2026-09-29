@@ -1025,22 +1025,100 @@ All three datasets now pass 13/13 — AtroCore (PG 15), Alfresco (PG 16.5,
 (PG 16, 3 segments, stopping before transaction 915) — each with marker A
 present, marker B absent, and the live database untouched.
 
-**The WAL archive is never pruned.** Measured 2026-09-29, ~2.5 days after
-archiving was switched on: `compliance_cmis/data/wal-archive` 5.5 GB / 350
-segments, `atrocore-docker/wal-archive` 1.2 GB / 85, `compliance_web/data/
-wal-archive` 529 MB / 37 — about **3 GB/day and growing**, with no
-`pg_archivecleanup` anywhere in the tree. This is not cosmetic: when the
-volume fills, `archive_command` starts failing, WAL accumulates in `pg_wal`
-instead, and the database eventually stops. Pruning has to be anchored to the
-oldest base backup still retained — the archive already contains the
-`*.backup` label files that mark those boundaries — so it belongs with the
-retention policy in `backup-platform.sh` rather than as a blind age cutoff.
-**Not yet implemented.**
+**The WAL archive had no retention**, which the drill turned up by filling the
+disk. Measured 2026-09-29, ~2.5 days after archiving was switched on:
+`compliance_cmis/data/wal-archive` 5.5 GB / 350 segments,
+`atrocore-docker/wal-archive` 1.2 GB / 85, `compliance_web/data/wal-archive`
+529 MB / 37 — about **3 GB/day and growing**, on a host that had reached 99%.
+Fixed the same day; see §7.13.
 
 **Still not measured: RTO on production-sized data.** The AtroCore database
 here is 59 MB and recovers in seconds. That number says nothing about a real
 authority's dataset, and §5.2 of the production plan keeps its RTO figure as
 a target.
+
+## 7.13 WAL retention (`scripts/prune-wal-archive.sh`)
+
+`archive_mode=on` with `archive_timeout=300` buys the five-minute RPO by
+writing a 16 MB segment at least every five minutes, per database, forever.
+Nothing reclaimed them, so the archive that exists to prevent data loss was
+on course to cause an outage: when the volume fills, `archive_command` starts
+failing, PostgreSQL retains WAL in `pg_wal` rather than discarding it, and the
+database stops.
+
+```bash
+./scripts/prune-wal-archive.sh                # dry run, all three datasets
+./scripts/prune-wal-archive.sh --yes          # apply
+```
+
+`backup-platform.sh` calls it at the end of its retention step, so a host on
+the nightly timer needs nothing else. It runs **after** old sets are pruned,
+so the boundary reflects what is still kept.
+
+**The boundary is a base backup, not a date.** "Delete WAL older than N days"
+is the obvious rule and it is wrong in both directions: too small and it
+silently destroys point-in-time recovery from a backup you are still keeping,
+too large and the archive grows without bound. A base backup can only replay
+forward from the segment it started in, and that segment's name is written
+inside the backup itself:
+
+```
+START WAL LOCATION: 2/6C000028 (file 00000001000000020000006C)
+```
+
+So the cut is taken at the START WAL of the **oldest retained** base backup —
+read out of its own `backup_label` by `scripts/wal-anchor.lib.sh`, which
+`ship-wal-archive.sh --prune-local` now shares. WAL retention then follows set
+retention automatically: prune a set and the boundary moves forward, keep a
+set longer and the WAL it needs is kept with it.
+
+**With no base backup it refuses and exits non-zero**, rather than freeing the
+disk. That state is real — a dataset whose base backup failed has no anchor,
+which is exactly where AtroCore was for days — and the answer is to fix the
+backup, not to delete the evidence.
+
+**The anchor is local.** A base backup that exists only at the offsite
+destination is invisible to it, and the WAL that would replay onto it will be
+pruned as unreachable. That is the one way this can destroy recovery from a
+backup you still hold. If you keep older sets offsite, pass `--anchor` with
+that backup's START WAL, or ship the archive with them and prune only what
+`ship-wal-archive.sh` has confirmed shipped.
+
+`ship-wal-archive.sh --prune-local` previously enforced only "shipped, and
+older than N days", with a comment telling the operator to choose N at least
+as large as their set retention. Nothing checked it. It now applies the same
+anchor as a hard floor, and a stream with no base backup is not pruned at all.
+
+### What the first run did
+
+Against this platform on 2026-09-29, with one retained set:
+
+| dataset | removed | kept | freed |
+|---|---|---|---|
+| atrocore | 80 | 12 | ~1.3 GB |
+| alfresco | 371 | 8 | ~5.9 GB |
+| compliance_web | 41 | 8 | ~0.7 GB |
+
+492 segments, and the disk went from **99% to 87%**. A first run is usually
+this dramatic: the WAL written before your oldest base backup cannot be
+replayed by anything you hold, so it is dead weight rather than recovery
+capability. Look at the dry run before believing it.
+
+Then all three PITR drills were re-run **against that set's stored base
+backups**, to prove the pruning had not cut into anything load-bearing: 13/13
+each, 3 segments replayed per dataset, marker A present and marker B absent,
+from archives now holding 9, 9 and 13 segments. `restore-platform.sh` still
+parses the set to exactly its seven files.
+
+`scripts/verify-wal-pruning.sh` (18 checks, `validate:wal-retention`, a merge
+gate) is the conformance test. It runs on synthetic fixtures — empty files
+named like WAL segments, and tars containing nothing but a `backup_label` — so
+it needs no database and no stack. What it checks is the boundary rather than
+the deletion: that the anchor is the oldest retained backup and not the
+newest, that it is ordered by the segment part rather than the timeline
+prefix, that the anchor segment and everything after it survive, that
+`.history` files survive, and that with no base backup nothing is deleted.
+Each was mutation-tested.
 
 ## 8. Failure Isolation Guide
 

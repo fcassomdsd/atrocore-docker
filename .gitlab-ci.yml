@@ -471,6 +471,43 @@ validate:backup-destination:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
+# WAL retention. archive_mode=on with archive_timeout=300 writes a 16MB
+# segment at least every five minutes per database and reclaims nothing:
+# measured on the reference host, ~3 GB/day across the three archives, which
+# had taken the disk to 99% in under three days. A full volume makes
+# archive_command fail, which makes PostgreSQL retain WAL in pg_wal, which
+# stops the database -- so the archive protecting against data loss becomes
+# the cause of an outage.
+#
+# The dangerous half of retention is not deleting, it is deleting one segment
+# too many: a base backup replays forward from the segment it started in, and
+# removing anything from there on destroys recovery from a backup you are
+# still keeping, silently, until someone tries to restore. So this gate is
+# about the boundary, not the deletion -- that the cut is taken at the OLDEST
+# retained base backup, that the anchor segment and everything after it
+# survive, and that with no base backup at all the tool refuses instead of
+# freeing space.
+#
+# Synthetic fixtures only: empty files named like WAL segments and tars
+# containing nothing but a backup_label. No database, no stack, so it is a
+# merge gate. Needs dind for pg_archivecleanup.
+validate:wal-retention:
+  stage: validate
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  before_script: []
+  script:
+    - apk add --no-cache bash coreutils findutils tar
+    - bash scripts/verify-wal-pruning.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
 # Does the monitoring notice anything? A Prometheus that is running, a Grafana
 # with a dashboard and alert rules that parse are all easy to mistake for
 # monitoring, and none of them shows that a failure would be NOTICED. Every
