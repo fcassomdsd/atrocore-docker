@@ -6,6 +6,18 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
+### Changed
+
+- **The offsite restore is now proven end to end, against the live platform.** Not a drill on throwaway data: a set was taken from the running system, pushed offsite, **pulled back from the offsite copy**, and restored over the live stack.
+
+  After it: 155/70/9 tables across the three databases, 6,271 content files, all seven inspection folders, gateway smoke 15/15, error envelope 5/5 — and finding `H-ZZZZA0001-ATS-001` back in its exact workflow state, `Pending Closure Approval`. Business state, not row counts.
+
+  This is the check that the MANIFEST parser defect had been hiding behind: `restore-platform.sh` verified all six files cleanly on the first attempt, which it could not have done before that fix. It also confirmed the safety behaviour — the restore refuses outright while Alfresco is running rather than corrupting a live content store.
+
+  **Not measured: RTO.** The restore completed without incident but was not timed, and a ~681 MB set is not production-sized. §5.2's figure stays a target.
+
+  Documented as a procedure in the runbook (§7.10), including that Solr is deliberately not restored and that `smoke-flows.mjs` is the check which decides whether recovery is complete.
+
 ### Fixed
 
 - **`restore-platform.sh` could not restore any backup set taken after WAL archiving was added.** A MANIFEST contains **two** `- name:` lists — `files:`, which names the files in the set with a sha256 each, and `wal_archives:`, which names archive *directories* that are deliberately not in the set. The verification loop matched `- name:` with a line-oriented `sed`, which cannot tell them apart, so it read the three archive labels as missing files:

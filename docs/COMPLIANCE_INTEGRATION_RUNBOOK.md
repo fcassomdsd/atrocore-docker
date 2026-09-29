@@ -869,6 +869,35 @@ Three properties worth knowing:
 of a few hundred is several gigabytes of staging — worth bounding on a small
 host.
 
+### Restoring from the offsite copy
+
+The sequence, exercised end to end against a live platform on 2026-09-29:
+
+    ./scripts/backup-offsite.sh list                       # pick a set
+    ./scripts/backup-offsite.sh pull <set-id> --into /tmp/recover/<set-id>
+    cd ../compliance_cmis && docker compose stop alfresco  # see below
+    cd ../atrocore-docker
+    ./scripts/restore-platform.sh --yes --from /tmp/recover/<set-id>
+    cd ../compliance_cmis && docker compose start alfresco
+
+**Alfresco must be stopped** before its content store is replaced, and
+`restore-platform.sh` refuses rather than corrupting a live store. The
+databases stay up: they are restored through `docker compose exec`.
+
+`pull` verifies every checksum on arrival and `restore-platform.sh` verifies
+them again before touching anything, so a set that fails either is refused
+rather than half-applied.
+
+**Solr is not restored** — it is derived state. Search-backed reads are
+incomplete until Alfresco reindexes, which is why the script says so and why
+`compliance_flow/scripts/smoke-flows.mjs` is the check that matters before
+declaring recovery complete.
+
+What the 2026-09-29 drill confirmed after restoring: 155/70/9 tables across
+the three databases, 6,271 content files, all seven inspection folders, smoke
+15/15, error envelope 5/5, and finding `H-ZZZZA0001-ATS-001` back in its
+exact workflow state — `Pending Closure Approval`, not merely present.
+
 ## 7.11 Scheduling (`deploy/systemd/`)
 
 Three timers turn the backup scripts from things somebody has to remember
