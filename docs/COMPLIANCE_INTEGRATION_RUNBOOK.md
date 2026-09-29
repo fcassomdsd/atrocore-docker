@@ -1120,6 +1120,85 @@ prefix, that the anchor segment and everything after it survive, that
 `.history` files survive, and that with no base backup nothing is deleted.
 Each was mutation-tested.
 
+## 7.14 Recovery time (`scripts/measure-rto.sh`)
+
+An RTO is the number a DR plan is judged by, and this platform had never
+produced one. The restore drill proved a backup restores a working system; it
+never timed it, and §5.2 carried a figure inherited from a design document.
+
+```bash
+./scripts/measure-rto.sh --from /srv/backups/20260929T213923Z \
+  --project-nodes 250000 --project-content-gb 200
+```
+
+**It stops the clock later than the restore does, on purpose.**
+`restore-platform.sh` finishes when the data is back. `restore-verify-ci.sh`
+then checks the system answers and *tolerates a partially failing smoke
+matrix as "expected while Solr reindexes"*. Both are correct about what they
+do. Neither is an RTO: Solr is derived state and deliberately not backed up,
+so on a blank host it does not exist, and the reads that depend on it are not
+incidental — the checklist endpoint, open findings, and four report Web
+Scripts. A recovery that has restored every byte and cannot answer *which
+findings are open* has not recovered. So this removes Solr's index before
+restoring, which is the state a real recovery starts from, and keeps the
+clock running until the index is rebuilt and the gateway smoke matrix passes.
+
+**Two guards, because a reindex is easy to fake.** The index size is recorded
+before the wipe and the phase is not over until the rebuilt index reaches it —
+"zero transactions remaining" alone is what an index that has not started
+tracking reports, so a loop waiting on that returns in seconds with a
+meaningless number. That catches an index that never fills; it does not catch
+one that was never emptied, so the Solr volume IDs are read before removal and
+asserted gone afterwards, and the low-water mark seen during the rebuild is
+reported and must be below the target. Both were mutation-tested — removing
+the container without its volumes aborts the run before anything is restored.
+
+### The measurement (2026-09-29)
+
+Two runs against the live platform, restoring set `20260929T213923Z`:
+**1m50s** and **1m40s** to a searching, serving system, smoke matrix 15/15
+both times. The second run's breakdown:
+
+| phase | | |
+|---|---|---|
+| teardown | 12.3s | fixed |
+| verify set (690 MB) | 1.8s | size-dependent |
+| content store (790 MB) | 7.6s | size-dependent, 104 MB/s |
+| databases (3 dumps) | 8.5s | size-dependent |
+| Alfresco ready | 40.4s | fixed |
+| search correct again | 23.1s | size-dependent, 1,242 nodes |
+| smoke matrix | 6.8s | fixed |
+| **total** | **1m40s** | |
+
+**At this scale the platform is dominated by fixed cost** — 59.8s of the 100s
+is teardown, JVM startup and the smoke matrix, and does not grow with data.
+That is the useful shape: everything that scales is 41s, and 23s of it is
+indexing.
+
+**Extrapolating, with the caveats stated.** `--project-nodes` and
+`--project-content-gb` scale the size-dependent phases and leave the fixed
+ones alone. For 250,000 nodes and 200 GB of content that gives **about 2.6
+hours, of which ~78 minutes is reindexing**. This is arithmetic on one
+measurement, not a second measurement. It reads **low**, for three reasons
+worth knowing before quoting it:
+
+- Solr starts with Alfresco, so on a dataset this small most of the indexing
+  finishes while the stack is still booting and is charged to the fixed term.
+  The wall-clock rate here is 18.7 ms/node; Solr's own per-node mean, which
+  excludes tracker polling, is 9.9 ms/node. The truth is between them and the
+  gap closes only as indexing outlasts startup.
+- Alfresco indexing is not perfectly linear at scale.
+- A real authority's documents are larger per node than a demo dataset's.
+
+**Every restore is now a data point.** `restore-platform.sh` times its phases
+and prints the breakdown, and appends a machine-readable line when
+`RTO_RECORD` names a file. `restore-verify-ci.sh` sets it, and `restore:verify`
+publishes `rto-measurements.jsonl` as a 90-day artifact, so the figure can be
+trended rather than re-derived whenever someone asks.
+
+**Still not measured on production-sized data**, and no arithmetic substitutes
+for that. What this replaces is a number with no measurement behind it at all.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:

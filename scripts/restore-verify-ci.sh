@@ -160,7 +160,15 @@ ok "content store wiped (0 files)"
 
 # ---------------------------------------------------------------------------
 step "5. Restore"
-"${SCRIPT_DIR}/restore-platform.sh" --from "${SET_DIR}" --yes || die "restore failed"
+# Timed, and the timings kept as a CI artifact. This drill answers "does the
+# backup restore a working system"; it is not an RTO, because it neither
+# destroys Solr's index nor waits for search to be correct -- see step 7's
+# tolerance for a partially failing smoke matrix, and scripts/measure-rto.sh,
+# which does both and measures the whole window. What lands here is the
+# data-restore half of that number, per phase, per run, so it can be trended
+# instead of remeasured from scratch each time someone asks.
+RTO_RECORD="${RTO_RECORD:-${REPO_DIR}/rto-measurements.jsonl}" \
+  "${SCRIPT_DIR}/restore-platform.sh" --from "${SET_DIR}" --yes || die "restore failed"
 ( cd "${WORKSPACE}/compliance_cmis" && docker compose start alfresco >/dev/null 2>&1 )
 ok "Alfresco restarted"
 

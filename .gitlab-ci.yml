@@ -383,6 +383,11 @@ restore:verify:
     - apk add --no-cache python3 curl git nodejs
     - mkdir -p /tmp/restore-drill-offsite
     - ./scripts/restore-verify-ci.sh
+  artifacts:
+    when: always
+    expire_in: 90 days
+    paths:
+      - rto-measurements.jsonl
   after_script:
     - ./scripts/demo-verify-ci.sh --teardown || true
     # The pulled copy and the scratch destination are several hundred MB of
