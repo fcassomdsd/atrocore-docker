@@ -46,7 +46,10 @@
 #
 # Usage: demo-quickstart.sh --yes [--skip-metadata] [--skip-seed] [--skip-import]
 
-set -euo pipefail
+# -E so the ERR trap below is inherited by functions and subshells; without
+# it the diagnosis is missing from exactly the nested places that are hardest
+# to reason about afterwards.
+set -Eeuo pipefail
 
 # This script lives in atrocore-docker/scripts; the platform is the parent directory.
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -110,6 +113,22 @@ fi
 step() { printf '\n=== %s\n' "$1"; }
 ok()   { printf '    ok   %s\n' "$1"; }
 die()  { printf '    FAIL %s\n' "$1" >&2; exit 1; }
+
+# Every `set -e` death says which line killed it, and what it was running.
+#
+# This is not defensive decoration. demo:verify failed 25 times in CI against
+# 5 successes, and every one of those failures looked identical from the log:
+# the script stopped mid-step, printed NOTHING, and the wrapper reported "the
+# demo quickstart failed". A run that dies without naming its own cause costs
+# a full CI cycle per guess, and on a job that takes seven minutes and cannot
+# be reproduced locally, that is the difference between a bug someone fixes
+# and a job someone switches off.
+#
+# The ERR trap fires under the same rules as `set -e`, so it stays quiet for
+# anything in a condition, an `||` fallback, or an `if`. `die` uses `exit`,
+# which is not an error, so deliberate failures are unaffected.
+trap 'rc=$?; printf "\n    FAIL %s line %s exited %s while running: %s\n" \
+        "${BASH_SOURCE[0]##*/}" "${LINENO}" "${rc}" "${BASH_COMMAND}" >&2' ERR
 
 json() { # json <file> <node expression over `j`
   node -e "const j=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log($2)" "$1"
@@ -482,12 +501,21 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
       "http://${DEMO_HOST}:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
       -H 'Content-Type: application/json' \
       -d "{\"inspectionCode\":\"AV-ZZZZ-A-0001\",\"specialtyName\":\"Servicio de tránsito aéreo\",\"followUpFiles\":[\"${FOLLOW_UP_FILE}\"]}")
-    PENDING=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).summary||{}).pendingClosureApprovals||0)}catch(e){console.log(0)}})')
+    # `|| PENDING=0` so a transient failure to run node is a retry rather than
+    # the end of a seven-minute run: this is inside the retry loop precisely
+    # because the value is expected to be wrong at first.
+    PENDING=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).summary||{}).pendingClosureApprovals||0)}catch(e){console.log(0)}})') || PENDING=0
     [ "${PENDING}" = "1" ] && break
     [ "${attempt}" -lt 6 ] && sleep 10
   done
   echo "    ${RESP}" | head -c 260; echo
-  PENDING=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).summary||{}).pendingClosureApprovals||0)}catch(e){console.log(0)}})')
+  # Explicitly, rather than as a bare assignment: a bare `VAR=$(cmd)` that
+  # fails takes `set -e` with it and prints nothing, and this is the last
+  # command before the step's `ok` -- the exact position where the CI failures
+  # stopped.
+  if ! PENDING=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).summary||{}).pendingClosureApprovals||0)}catch(e){console.log(0)}})'); then
+    die "could not read pendingClosureApprovals from the import response — node exited non-zero. The response began: $(printf '%s' "${RESP}" | head -c 200)"
+  fi
   if [[ "${PENDING}" != "1" ]]; then
     # The summary is the whole diagnosis — `processed` alone does not say whether the follow-up was
     # not found, matched more than one node, or failed validation — and "a moved-evidence re-run

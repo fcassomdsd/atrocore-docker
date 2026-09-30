@@ -26,7 +26,8 @@
 #                     also see; a /tmp workspace would be invisible to it)
 #   GITLAB_HOST       git host for the clones (default: gitlab.com)
 #
-set -euo pipefail
+# -E so the ERR trap is inherited by functions and subshells.
+set -Eeuo pipefail
 
 PREPARE_ONLY=0
 TEARDOWN_ONLY=0
@@ -83,6 +84,13 @@ mkdir -p "${WORKSPACE}"
 step() { printf '\n=== %s\n' "$1"; }
 ok()   { printf '    ok   %s\n' "$1"; }
 die()  { printf '    FAIL %s\n' "$1" >&2; exit 1; }
+
+# The same self-reporting trap demo-quickstart.sh carries, and for the same
+# reason: this wrapper's own `set -e` deaths were as silent as the ones it
+# was reporting. Fires under `set -e` rules, so handled failures and the
+# deliberate `die` stay quiet.
+trap 'rc=$?; printf "\n    FAIL %s line %s exited %s while running: %s\n" \
+        "${BASH_SOURCE[0]##*/}" "${LINENO}" "${rc}" "${BASH_COMMAND}" >&2' ERR
 
 # A failing `compose up` says "dependency failed to start: container X is unhealthy" and nothing
 # else, which is not enough to fix anything from a CI log. Dump the project's container states and
