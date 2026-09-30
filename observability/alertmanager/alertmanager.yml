@@ -9,12 +9,29 @@
 # absent. So this file holds literal values and is edited directly. Secrets are
 # the exception and have a real mechanism: `smtp_auth_password_file`, below.
 #
-# Out of the box there is NO delivery configured, and that is a working state,
-# not a broken one. Alertmanager still receives, groups, inhibits and exposes
-# every alert on its API and UI (http://127.0.0.1:9093), which is where
-# scripts/verify-observability.sh looks -- so the alerting drill proves itself
-# without a mail server having to exist. Turn on email by uncommenting the
-# block below and filling it in.
+# THIS FILE IS THE PRODUCTION ONE, AND IT IS DELIBERATELY EMPTY
+# -------------------------------------------------------------
+# No delivery is configured here because the destination is not the
+# platform's to choose. Where alerts go is site infrastructure -- an
+# authority's own relay, their own domain, their own on-call arrangement --
+# and a destination this project picked would be one nobody at that authority
+# is reading. So this file is a template an adopter fills in, and
+# scripts/preflight-secrets.sh --production refuses to pass until they have.
+#
+# It is NOT the default. observability/docker-compose.yaml mounts
+# alertmanager.demo.yml unless ALERTMANAGER_CONFIG says otherwise, because a
+# default that delivers nowhere is how this platform spent its first weeks
+# detecting every failure it was built for and telling nobody. Set
+# ALERTMANAGER_CONFIG=alertmanager.yml once this file is filled in.
+#
+# EMAIL IS NOT THE ONLY OPTION, AND OFTEN NOT THE EASIEST
+# -------------------------------------------------------
+# Both blocks below are equally supported; pick one, or several. A webhook
+# into an existing ticketing system or chat channel is frequently simpler for
+# a smaller authority than getting an SMTP relay provisioned, and it avoids
+# putting a credential in a file at all. Alertmanager also has native
+# slack_configs, msteams_configs, opsgenie_configs and pagerduty_configs --
+# the preflight accepts any of them.
 
 global:
   resolve_timeout: 5m
@@ -43,7 +60,27 @@ receivers:
   - name: platform-default
 
   - name: platform-critical
-    # --- To enable email, uncomment and fill in -----------------------------
+    # --- OPTION A: a webhook ------------------------------------------------
+    #
+    # Usually the least work: no relay to provision, no mailbox to watch, and
+    # no credential in this file if the endpoint is on an internal network or
+    # carries its own token in the URL path. Point it at a ticketing system,
+    # an internal bot, or whatever an operator already has open.
+    #
+    # webhook_configs:
+    #   - url: "https://tickets.internal.example/hooks/platform-alerts"
+    #     send_resolved: true
+    #     max_alerts: 0
+    #
+    # For a URL that must carry a secret, use http_config.authorization with
+    # credentials_file rather than putting a token in this tracked file:
+    #
+    #     http_config:
+    #       authorization:
+    #         type: Bearer
+    #         credentials_file: /run/secrets/alert_webhook_token
+    #
+    # --- OPTION B: email ----------------------------------------------------
     #
     # smtp_auth_password_file, not smtp_auth_password: this file is tracked in
     # git, and the platform's rule since P3.1 is that a credential in a
@@ -61,6 +98,14 @@ receivers:
     #     send_resolved: true
     #     headers:
     #       Subject: "[CRITICAL] {{ .GroupLabels.alertname }} - compliance platform"
+    #
+    # Whichever you choose, keep send_resolved: true. A path that only ever
+    # reports failures leaves an operator unable to tell a fixed incident from
+    # a forgotten one.
+    #
+    # Configure platform-default above as well, or every non-critical alert --
+    # including DiskFillingUp, which is what fills a WAL archive and stops a
+    # database -- is still delivered nowhere."
 
 inhibit_rules:
   # When ActiveMQ or Solr is down, slow probes follow all over the stack.
