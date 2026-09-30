@@ -441,14 +441,39 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
     || die "inspection-import failed: ${RESP}"
   ok "findings and evidence written to the canonical source folder"
 
+  # The canonical import resolves the SOURCE documents it is asked to move
+  # through the search index, and steps 2/2b write those documents seconds
+  # earlier. On a cold instance Solr has not indexed them yet and the import
+  # answers `success: false` with `error: null` and an empty `importedSources`
+  # -- nothing is wrong, it simply cannot see them yet. Step 5 already retries
+  # for the same reason against the same endpoint; steps 3 and 3b did not, and
+  # `demo:verify` failed at 3b in CI with exactly that empty response.
+  #
+  # The call is an upsert, so repeating it is safe.
+  import_canonical() { # import_canonical <inspectionCode> <specialtyName> <label>
+    local code="$1" specialty="$2" label="$3" attempt success
+    for attempt in 1 2 3 4 5 6; do
+      RESP=$(curl -s -m 240 -X POST \
+        "http://${DEMO_HOST}:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
+        -H 'Content-Type: application/json' \
+        -d "{\"inspectionCode\":\"${code}\",\"specialtyName\":\"${specialty}\"}")
+      # `|| success=false` so a transient failure to run node is a retry, not
+      # the end of the run -- the same fallback step 5's loop carries.
+      success=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success===true)}catch(e){console.log(false)}})') || success=false
+      [ "${success}" = "true" ] && break
+      if [ "${attempt}" -lt 6 ]; then
+        printf '    ..   %s not resolvable yet (attempt %s) — waiting for the index\n' "${label}" "${attempt}"
+        sleep 10
+      fi
+    done
+    echo "    ${RESP}" | head -c 200; echo
+    if [ "${success}" != "true" ]; then
+      die "${label} canonical import failed after 6 attempts over ~50s: ${RESP}"
+    fi
+  }
+
   step "3. Import the canonical documents (compliance_cmis, query-param form)"
-  RESP=$(curl -s -m 240 -X POST \
-    "http://${DEMO_HOST}:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
-    -H 'Content-Type: application/json' \
-    -d '{"inspectionCode":"AV-ZZZZ-A-0001","specialtyName":"Servicio de tránsito aéreo"}')
-  echo "    ${RESP}" | head -c 200; echo
-  SUCCESS=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success===true)}catch(e){console.log(false)}})')
-  [[ "${SUCCESS}" == "true" ]] || die "canonical import failed: ${RESP}"
+  import_canonical "AV-ZZZZ-A-0001" "Servicio de tránsito aéreo" "ATS"
   ok "documents moved into the inspection folder"
 
   # The demo dataset seeds two inspections — ATS and MET. Both need a payload, because the
@@ -468,13 +493,7 @@ if [[ "${SKIP_IMPORT}" == "0" ]]; then
   ok "MET checklist and evidence written to the canonical source folder"
 
   step "3b. Import the MET canonical documents (compliance_cmis)"
-  RESP=$(curl -s -m 240 -X POST \
-    "http://${DEMO_HOST}:8080/alfresco/s/api/inspection/import-canonical?alf_ticket=${TICKET}" \
-    -H 'Content-Type: application/json' \
-    -d '{"inspectionCode":"AV-ZZZZ-I-0001","specialtyName":"Meteorología aeronáutica"}')
-  echo "    ${RESP}" | head -c 200; echo
-  SUCCESS=$(printf '%s' "${RESP}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success===true)}catch(e){console.log(false)}})')
-  [[ "${SUCCESS}" == "true" ]] || die "MET canonical import failed: ${RESP}"
+  import_canonical "AV-ZZZZ-I-0001" "Meteorología aeronáutica" "MET"
   ok "MET inspection folder created with its window (AV-ZZZZ-I-0001)"
 
   step "4. Import the follow-up, stamped after the window it reviews (compliance_import)"
