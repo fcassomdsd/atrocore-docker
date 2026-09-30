@@ -14,6 +14,9 @@ docker-compose.override.yaml
 
 # continuously written WAL archive (P3.4)
 wal-archive/
+# Scratch space for the PITR drill when it is given --workdir (CI passes one so
+# the Docker daemon and the job container resolve it to the same files).
+.pitr-work/
 
 # measured recovery times, appended by measure-rto.sh and restore-platform.sh.
 # A local measurement log, not a tracked artifact -- the numbers that matter

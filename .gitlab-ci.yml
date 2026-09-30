@@ -451,10 +451,22 @@ pitr:verify:
         docker compose --env-file .env.example exec -T db pg_isready -U postgres >/dev/null 2>&1 && break
         sleep 2
       done
-    - bash scripts/verify-pitr.sh --dataset atrocore --port 55432
+    # --workdir for the same reason as the chown above, one layer further in.
+    # The drill unpacks the base backup and runs the recovery cluster IN
+    # CONTAINERS, so those paths are resolved by the daemon. Its default
+    # /tmp/pitr-drill-* exists only in this job container: the daemon finds
+    # nothing there, creates an empty DIRECTORY, and mounts that as the base
+    # backup -- tar then says "invalid tar magic", which reads like a corrupt
+    # backup rather than a mount that never arrived. $CI_PROJECT_DIR is the
+    # build directory, which the runner mounts into the dind service too, so
+    # both sides resolve it to the same files.
+    - bash scripts/verify-pitr.sh --dataset atrocore --port 55432 --workdir "$CI_PROJECT_DIR/.pitr-work"
   after_script:
     - docker compose --env-file .env.example down -v --remove-orphans || true
     - docker ps -a --filter name=pitr- -q | xargs -r docker rm -f || true
+    # The recovery cluster's files are written by the postgres uid, so this
+    # job's user cannot remove them; a helper container can.
+    - docker run --rm -v "$CI_PROJECT_DIR:/p" alpine:3 rm -rf /p/.pitr-work || true
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - when: manual
