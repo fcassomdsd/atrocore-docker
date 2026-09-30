@@ -334,8 +334,23 @@ if [ -f "${WORKSPACE}/compliance_flow/scripts/smoke-flows.mjs" ]; then
   # than sourcing the .env: `set -a; . .env` also exports COMPOSE_* and
   # redirects every later docker compose call, which is a bug already fixed
   # once in demo-quickstart.sh.
+  # BASE, for the same reason demo-quickstart.sh passes it: the harness
+  # defaults to http://localhost:1880, which is the machine it runs ON. That is
+  # this host locally and the CI JOB CONTAINER on a runner, where the stack is
+  # behind the dind alias and nothing listens on that port. Without it all 15
+  # probes fail to connect and the drill blamed the restore -- which had
+  # actually succeeded, counts matched and the index had rebuilt.
+  SMOKE_BASE="http://${DEMO_HOST}:1880"
+  # Reached-and-failed and never-reached are different findings, so establish
+  # which one this is BEFORE running the matrix. Same reasoning as the 401
+  # branch below: a check that never ran says nothing about the restore.
+  GATEWAY_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${SMOKE_BASE}/health" || true)"
+  case "${GATEWAY_CODE}" in
+    000|'') die "the gateway at ${SMOKE_BASE} is not answering at all — the smoke matrix cannot run, and this says nothing about the restore" ;;
+  esac
   SMOKE_OUT="$(cd "${WORKSPACE}/compliance_flow" \
-    && API_KEY="$(env_var "${WORKSPACE}/compliance_flow/.env" API_KEY)" \
+    && BASE="${SMOKE_BASE}" \
+       API_KEY="$(env_var "${WORKSPACE}/compliance_flow/.env" API_KEY)" \
        node scripts/smoke-flows.mjs 2>&1)"
   SMOKE_RC=$?
   echo "${SMOKE_OUT}" | tail -3 | sed 's/^/    /'
@@ -349,7 +364,12 @@ if [ -f "${WORKSPACE}/compliance_flow/scripts/smoke-flows.mjs" ]; then
     # that lies about its own failure.
     die "smoke matrix could not authenticate (401) — the check did not run; this says nothing about the restore"
   elif echo "${SMOKE_OUT}" | grep -qE "0 passed"; then
-    die "smoke matrix passed nothing — the restored system is not serving"
+    # Print the per-check lines here too. This branch used to die on the
+    # summary alone, so a run where every probe failed for one shared reason
+    # -- the wrong base URL, as it turned out -- showed nothing that could
+    # tell you so.
+    echo "${SMOKE_OUT}" | tail -20 | sed 's/^/      /'
+    die "smoke matrix passed nothing against ${SMOKE_BASE} — every probe failed, so suspect one shared cause before concluding the restore is bad"
   else
     # This used to be tolerated as "expected while Solr reindexes". It no
     # longer can be: the index was destroyed deliberately in step 4 and step 7

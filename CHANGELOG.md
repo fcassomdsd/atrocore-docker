@@ -106,6 +106,12 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
   A stale comment on step 5 went with it: it claimed the drill "neither destroys Solr's index nor waits for search to be correct", which stopped being true when both were added last week.
 
+- **…and then it ran the smoke matrix against its own localhost.** Third failure of the same drill, third layer down, and the restore was correct every time. With the index check fixed, step 7 reached the gateway smoke matrix and reported `0 passed, 15 failed` — every probe, which is the signature of one shared cause rather than a broken system.
+
+  `smoke-flows.mjs` defaults to `http://localhost:1880`, the machine it runs **on**: this host locally, and the CI **job container** on a runner, where the stack is behind the dind alias and nothing listens on that port. `demo-quickstart.sh` passes `BASE` for exactly this reason and says so in a comment; the restore drill never did. Sixth appearance of the dind host/path distinction, and the second time the fix already existed in a sibling script.
+
+  Two diagnostics went with it, because both misdescribed what had happened. The drill now probes the gateway's `/health` **before** running the matrix and, on no answer at all, says the check could not run rather than blaming the restore — the same distinction the 401 branch already made. And the `0 passed` branch now prints the per-check lines; it used to die on the summary alone, so a run where every probe failed for one shared reason showed nothing that could tell you so. Its message no longer asserts the system "is not serving", which is a conclusion that run had not earned.
+
 - **`local.sh`'s push reported failure having copied every byte correctly.** `[ -f "${SRC}/MANIFEST" ] && cp …` was the **last command in the branch**, so with no plaintext MANIFEST the test was false, the branch returned 1, and `backup-offsite.sh` died with "driver push failed" after a completely successful copy. Latent until encrypted sets — which have no plaintext MANIFEST — made it reachable; found on the first run of the new conformance test.
 
   The MANIFEST-last rule it was implementing is a real correctness property: a set carrying its completeness marker is treated as complete, so the marker must land last even where a copy is unlikely to fail. That rule now generalises to `ENCRYPTED` for encrypted sets, in all three drivers, so a partially pushed encrypted set cannot look finished.
