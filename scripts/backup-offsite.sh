@@ -21,8 +21,10 @@
 #   BACKUP_DIR           where local sets live. Default ../backups, matching
 #                        backup-platform.sh.
 #   BACKUP_RETENTION_DAYS  default 30, matching backup-platform.sh.
-#   BACKUP_AGE_RECIPIENT   an age PUBLIC key (age1...). When set, everything
-#                        that leaves this host is encrypted to it.
+#   BACKUP_AGE_RECIPIENT   one or more age PUBLIC keys (age1...), separated
+#                        by whitespace. When set, everything that leaves this
+#                        host is encrypted to them and ANY ONE of the
+#                        corresponding private keys can decrypt it.
 #   BACKUP_AGE_IDENTITY_FILE  the escrowed PRIVATE key. Needed only to pull
 #                        and decrypt. It must NOT live on this host in normal
 #                        operation, and `push` refuses if it does.
@@ -41,11 +43,31 @@
 # BACKUP_AGE_RECIPIENT set, every file is encrypted to that recipient before
 # a driver ever sees it, so the destination holds ciphertext and nothing else.
 #
-# The host holds only the PUBLIC key. It can therefore encrypt backups and
+# The host holds only the PUBLIC keys. It can therefore encrypt backups and
 # cannot read any of them -- including the ones it made last year. That is
 # the property worth having: whoever takes this machine gets the data that is
-# on it, and not the backup history as well. `push` refuses to run if the
+# on it, and not the backup history as well. `push` refuses to run if a
 # private key is present here, because that silently gives the property away.
+#
+# MORE THAN ONE RECIPIENT, AND WHY YOU WANT TWO
+# ---------------------------------------------
+# age encrypts to any number of recipients and any ONE of their private keys
+# opens the result, at about 100 bytes of overhead each. That is the cheapest
+# answer to the question escrow actually poses -- not "is the key safe" but
+# "is there a second way to get it at 3am".
+#
+# The shape that fits an authority is two keys in different custody classes:
+# an OPERATIONS key in the organisation's vault, used for routine restores
+# and drills, and a BREAK-GLASS key on paper in a safe or split across
+# officers, touched only under a signed procedure. Either opens any set, and
+# either can be rotated without re-encrypting for the other.
+#
+#     BACKUP_AGE_RECIPIENT="age1<operations> age1<break-glass>"
+#
+# Rotation has a tail: a set encrypted to a key stays encrypted to that key
+# forever, so escrow must retain every key still covering a set inside the
+# retention window (30 days by default) or the sets in between become
+# unreadable.
 #
 # Local sets stay in plaintext, deliberately. Decryption needs the escrowed
 # key, and requiring an escrow retrieval for the ordinary same-host restore
@@ -68,6 +90,8 @@ DRIVER_DIR="${REPO_DIR}/backup-destinations"
 BACKUP_DIR="${BACKUP_DIR:-${WORKSPACE}/backups}"
 KEEP_DAYS="${BACKUP_RETENTION_DAYS:-30}"
 AGE_RECIPIENT="${BACKUP_AGE_RECIPIENT:-}"
+declare -a AGE_RECIPIENTS=()
+[ -n "${AGE_RECIPIENT}" ] && read -ra AGE_RECIPIENTS <<< "${AGE_RECIPIENT}"
 AGE_IDENTITY="${BACKUP_AGE_IDENTITY_FILE:-}"
 
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
@@ -141,15 +165,31 @@ enc_enabled() { [ -n "${AGE_RECIPIENT}" ]; }
 enc_preflight() { # shared by every verb that touches ciphertext
   command -v age >/dev/null 2>&1 \
     || die "BACKUP_AGE_RECIPIENT is set but 'age' is not installed — refusing to send plaintext to ${DEST_NAME}"
-  # A private key in the recipient variable would encrypt the backups to a
-  # key that is now sitting in this host's environment or, worse, its
-  # repository. That is the exact failure this design exists to avoid, and it
-  # is an easy paste to make.
-  case "${AGE_RECIPIENT}" in
-    AGE-SECRET-KEY-*) die "BACKUP_AGE_RECIPIENT holds a PRIVATE key. It takes a public key (age1...). Rotate that key: it has been in this host's environment." ;;
-    age1*) ;;
-    *) die "BACKUP_AGE_RECIPIENT does not look like an age public key (expected age1...)" ;;
-  esac
+  [ "${#AGE_RECIPIENTS[@]}" -gt 0 ] || die "BACKUP_AGE_RECIPIENT is set but empty"
+  # EVERY recipient is checked, not just the first. A list is the normal
+  # configuration now, and one bad entry in it must not be carried by the
+  # good ones -- a typo in the second key would otherwise produce sets that
+  # only the first key can open, which is precisely the single point of
+  # failure the second key was added to remove.
+  local r err
+  for r in "${AGE_RECIPIENTS[@]}"; do
+    case "${r}" in
+      # A private key here is already in this host's environment or, worse,
+      # its repository. The exact failure this design exists to avoid, and
+      # worth its own message because the remedy is rotation, not a typo fix.
+      AGE-SECRET-KEY-*) die "BACKUP_AGE_RECIPIENT contains a PRIVATE key. It takes public keys (age1...). Rotate that key: it has been in this host's environment." ;;
+    esac
+    # Validated by asking age, not by matching a prefix. `age1*` accepts
+    # anything beginning age1 -- including age1-this-is-not-a-key -- and a
+    # strict bech32 regex would wrongly reject plugin recipients such as
+    # age1yubikey1..., which are a legitimate escrow choice. Encrypting an
+    # empty payload is the authoritative check, costs nothing, and happens
+    # before any real data is touched.
+    if ! err="$(printf '' | age -r "${r}" -o /dev/null 2>&1)"; then
+      die "BACKUP_AGE_RECIPIENT contains an entry age will not accept as a public key: ${r}
+         ${err}"
+    fi
+  done
 }
 
 # The plaintext side of an encrypted set: enough to prove the bytes arrived
@@ -161,7 +201,11 @@ enc_write_index() { # enc_write_index <dir> <set-id>
     echo "set: ${id}"
     echo "encrypted_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "tool: age"
-    echo "recipient: ${AGE_RECIPIENT}"
+    # Every recipient, so a reader of the offsite copy can tell WHICH keys
+    # open it without holding any of them -- the question that matters when
+    # a key has been rotated and the escrow holds several.
+    echo "recipients: ${#AGE_RECIPIENTS[@]}"
+    for r in "${AGE_RECIPIENTS[@]}"; do echo "  - ${r}"; done
     echo "# sha256 below are of the CIPHERTEXT, so an offsite copy can be"
     echo "# verified without the escrowed private key."
     echo "files:"
@@ -175,18 +219,31 @@ enc_write_index() { # enc_write_index <dir> <set-id>
 }
 
 encrypt_set() { # encrypt_set <src set dir> <dst dir> <set-id>
-  local src="$1" dst="$2" id="$3" f n
+  local src="$1" dst="$2" id="$3" f n r
+  # One -r per recipient. age opens the result to any one of the matching
+  # private keys, at roughly 100 bytes of header each.
+  local -a age_args=()
+  for r in "${AGE_RECIPIENTS[@]}"; do age_args+=(-r "${r}"); done
   mkdir -p "${dst}"
   n=0
   for f in "${src}"/*; do
     [ -f "${f}" ] || continue
-    age -r "${AGE_RECIPIENT}" -o "${dst}/$(basename "${f}").age" "${f}" \
+    age "${age_args[@]}" -o "${dst}/$(basename "${f}").age" "${f}" \
       || die "age failed on $(basename "${f}")"
     n=$((n + 1))
   done
   [ "${n}" -gt 0 ] || die "nothing to encrypt in ${src}"
   enc_write_index "${dst}" "${id}"
-  info "${n} file(s) encrypted to ${AGE_RECIPIENT}"
+  if [ "${#AGE_RECIPIENTS[@]}" -eq 1 ]; then
+    info "${n} file(s) encrypted to ${AGE_RECIPIENTS[0]}"
+    # Said once per push rather than buried in a README: one recipient is one
+    # way to get the data back, and escrow's real question is whether there
+    # is a second at 3am.
+    info "one recipient only — a second key in different custody removes the single point of failure"
+  else
+    info "${n} file(s) encrypted to ${#AGE_RECIPIENTS[@]} recipients (any one key opens them)"
+    for r in "${AGE_RECIPIENTS[@]}"; do info "  ${r}"; done
+  fi
 }
 
 # Verifiable with no key at all -- the point of the plaintext index.
@@ -253,7 +310,7 @@ case "${VERB}" in
       # destination is protected and the host is not, and nobody finds out
       # until the host is the thing that was taken.
       if [ -n "${AGE_IDENTITY}" ] && [ -f "${AGE_IDENTITY}" ]; then
-        die "the escrowed PRIVATE key is present on this host (${AGE_IDENTITY}).
+        die "an escrowed PRIVATE key is present on this host (${AGE_IDENTITY}).
          Public-key backup encryption exists so this machine cannot read its
          own backups; keeping the identity here gives that away. Remove it,
          or unset BACKUP_AGE_IDENTITY_FILE for push."
@@ -262,7 +319,7 @@ case "${VERB}" in
       trap 'rm -rf "${STAGE}"' EXIT INT TERM
       encrypt_set "${SET_DIR}" "${STAGE}" "${SET_ID}"
       "${DRIVER}" push "${STAGE}" "${SET_ID}" || die "driver push failed"
-      ok "pushed ${SET_ID} (encrypted to ${AGE_RECIPIENT})"
+      ok "pushed ${SET_ID} (encrypted to ${#AGE_RECIPIENTS[@]} recipient(s))"
     else
       # Said every time, not once in a README: an unencrypted set on someone
       # else's storage is a copy of the whole platform in the clear.

@@ -1246,6 +1246,36 @@ it. The destination receives `*.age` files and a plaintext `ENCRYPTED` index,
 and nothing else — the `MANIFEST` is encrypted too, because it names every
 file and carries plaintext hashes.
 
+**Configure two recipients, in different custody.** `BACKUP_AGE_RECIPIENT`
+takes a whitespace-separated list, and any one of the matching private keys
+opens a set — about 100 bytes of overhead each. Escrow's real question is not
+whether the key is safe but whether there is a *second* way to get it at 3am:
+
+```
+BACKUP_AGE_RECIPIENT="age1<operations> age1<break-glass>"
+```
+
+An **operations** key in the organisation's vault covers routine restores and
+the quarterly drill. A **break-glass** key on sealed paper in a safe, or split
+across officers with `ssss`, is touched only under a signed procedure. Either
+opens any set, and either can be rotated without re-encrypting for the other.
+A single recipient is a valid configuration and the preflight warns about it
+rather than failing, because one key is a single point of failure in the one
+situation where you cannot afford one.
+
+**Rotation has a tail.** A set stays encrypted to the keys it was made with.
+Escrow must therefore retain every key still covering a set inside the
+retention window — 30 days by default. Rotate on day 1, destroy the old key
+on day 2, and days 2–30 of history become unreadable.
+
+**Recipients are validated by asking `age`, not by matching a prefix.** A
+`age1*` test accepts `age1-this-is-not-a-key`, and a strict bech32 pattern
+would wrongly reject plugin recipients like `age1yubikey1...`, which are a
+legitimate hardware-token escrow choice. Every entry is checked by encrypting
+an empty payload to it before any real data is touched, so a typo in the
+second key fails at configuration time rather than silently producing sets
+only the first key can open.
+
 **Public-key, so the host cannot read its own backups.** This machine holds
 only the recipient key. It can encrypt backups and cannot decrypt any of
 them, including last year's. Whoever takes the server gets the data that is

@@ -22,7 +22,10 @@
 #   - the host refuses to push if the private key is sitting here, because
 #     that silently discards the one property public-key encryption buys;
 #   - a private key pasted into the recipient variable is refused outright,
-#     since by then it is already in this host's environment.
+#     since by then it is already in this host's environment;
+#   - with two recipients in different custody, EITHER key opens the set --
+#     the property that makes escrow survivable, and the one a typo in the
+#     second key would silently remove.
 
 set -uo pipefail
 
@@ -134,7 +137,57 @@ else
     || ok "no .age files left behind"
 fi
 
-step "6. Refusals"
+step "6. Two recipients: either key opens the set"
+# The escrow shape worth recommending -- an operations key in a vault and a
+# break-glass key on paper -- only works if both really do decrypt. A typo in
+# the second would otherwise produce sets that only the first can open, which
+# is the single point of failure the second key exists to remove.
+age-keygen -o "${WORK}/second.key" 2>/dev/null
+RECIPIENT_2="$(age-keygen -y "${WORK}/second.key")"
+BOTH="${RECIPIENT} ${RECIPIENT_2}"
+DEST2="${WORK}/offsite2"; mkdir -p "${DEST2}"
+run2() {
+  BACKUP_DESTINATION=local BACKUP_DEST_PATH="${DEST2}" \
+  BACKUP_DIR="${WORK}/backups" BACKUP_AGE_RECIPIENT="${BOTH}" \
+  BACKUP_AGE_IDENTITY_FILE="${IDENTITY:-}" \
+    bash "${OFFSITE}" "$@" 2>&1
+}
+IDENTITY="" OUT="$(run2 push --set "${SRC}")"; RC=$?
+[ ${RC} -eq 0 ] && ok "push to two recipients succeeded" || no "push failed: ${OUT}"
+printf '%s' "${OUT}" | grep -q '2 recipients' \
+  && ok "  ...and says there are two" || no "push did not report the recipient count"
+grep -q "^recipients: 2$" "${DEST2}/${SET_ID}/${ENC_INDEX:-ENCRYPTED}" 2>/dev/null \
+  && ok "the index records both recipients" || no "the index does not record both recipients"
+
+for which in first:escrow.key second:second.key; do
+  label="${which%%:*}"; keyfile="${which##*:}"
+  rm -rf "${WORK}/r-${label}"
+  IDENTITY="${WORK}/${keyfile}" OUT="$(run2 pull "${SET_ID}" --into "${WORK}/r-${label}")"; RC=$?
+  if [ ${RC} -ne 0 ]; then
+    no "the ${label} key could not open the set: $(printf '%s' "${OUT}" | tail -1)"
+  else
+    GOT="$(cd "${WORK}/r-${label}" && sha256sum ./* | sha256sum | cut -d' ' -f1)"
+    [ "${GOT}" = "${SRC_FINGERPRINT}" ] \
+      && ok "the ${label} key alone reproduces the original" \
+      || no "the ${label} key decrypted to something other than the original"
+  fi
+done
+
+# One bad entry must not be carried by the good one.
+OUT="$(BACKUP_DESTINATION=local BACKUP_DEST_PATH="${DEST2}" BACKUP_DIR="${WORK}/backups" \
+       BACKUP_AGE_RECIPIENT="${RECIPIENT} age1-this-is-not-a-key" \
+       bash "${OFFSITE}" push --set "${SRC}" 2>&1)"; RC=$?
+[ ${RC} -ne 0 ] && ok "a malformed second recipient is refused" \
+                || no "a malformed second recipient was accepted"
+# Asserting only "refused" is not enough: age itself rejects a bad key later
+# in the run, so the test passed even when validation checked only the FIRST
+# recipient. The distinction matters -- our refusal names the offending entry
+# before anything is encrypted or sent, age's does not.
+printf '%s' "${OUT}" | grep -q 'age will not accept as a public key' \
+  && ok "  ...by our own validation, naming it" \
+  || no "the refusal came from age, not from recipient validation — a bad entry past the first is not being checked"
+
+step "7. Refusals"
 rm -rf "${WORK}/nokey"
 IDENTITY="" OUT="$(run pull "${SET_ID}" --into "${WORK}/nokey")"; RC=$?
 [ ${RC} -ne 0 ] && ok "pull without the key fails" || no "pull without the key succeeded"

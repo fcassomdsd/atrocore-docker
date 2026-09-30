@@ -296,14 +296,33 @@ if [ "$PROFILE" = "production" ]; then
   elif [ -z "$BK_RECIP" ]; then
     fail "BACKUP_DESTINATION is '${BK_DEST}' but BACKUP_AGE_RECIPIENT is unset — backup sets would be sent to it in the clear"
   else
-    case "$BK_RECIP" in
-      AGE-SECRET-KEY-*)
-        fail "BACKUP_AGE_RECIPIENT holds a PRIVATE key. It takes a public key (age1...), and that key is now in this host's configuration — rotate it" ;;
-      age1*)
-        pass "BACKUP_AGE_RECIPIENT is an age public key" ;;
-      *)
-        fail "BACKUP_AGE_RECIPIENT does not look like an age public key (expected age1...)" ;;
-    esac
+    # Every entry, because the variable is a whitespace-separated list. A
+    # typo in the second key would otherwise be carried by the first, and
+    # produce sets only one key can open -- removing exactly the redundancy
+    # the second key was configured for.
+    bk_bad=0; bk_n=0
+    for r in $BK_RECIP; do
+      bk_n=$((bk_n + 1))
+      case "$r" in
+        AGE-SECRET-KEY-*)
+          fail "BACKUP_AGE_RECIPIENT contains a PRIVATE key. It takes public keys (age1...), and that key is now in this host's configuration — rotate it"
+          bk_bad=1 ;;
+        age1*) ;;
+        *)
+          fail "BACKUP_AGE_RECIPIENT contains something that is not an age public key (expected age1...): ${r}"
+          bk_bad=1 ;;
+      esac
+    done
+    if [ "$bk_bad" -eq 0 ]; then
+      if [ "$bk_n" -eq 1 ]; then
+        # Not a failure: one key is a real configuration. But escrow's actual
+        # question is whether there is a second way to get the data back
+        # during an incident, and one key answers it with "no".
+        warn "BACKUP_AGE_RECIPIENT has a single recipient — a second key in different custody (vault + sealed paper, say) removes the single point of failure in escrow"
+      else
+        pass "BACKUP_AGE_RECIPIENT has ${bk_n} recipients; any one key opens a set"
+      fi
+    fi
     # The property public-key encryption buys is that this host cannot read
     # its own backups. A private key sitting here hands it back.
     if [ -n "$BK_IDENT" ] && [ -f "$BK_IDENT" ]; then
