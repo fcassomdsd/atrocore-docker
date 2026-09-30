@@ -282,6 +282,36 @@ if [ "$PROFILE" = "production" ]; then
   check_mode compliance_web    AUTH_NODE_ENV      production
   check_mode compliance_import APP_ENV            production
   check_mode compliance_web    AUTH_COOKIE_SECURE true
+
+  bold "Alerts must reach a person"
+  # The demo Alertmanager config delivers to a MailPit container inside the
+  # observability compose project. Shipping it would give a deployment
+  # alerting that looks configured, passes its own drill, and posts every
+  # notification into a test sink on the same host that dies with it. That is
+  # worse than no alerting because it reads as protection -- the same reason
+  # the shared API key is a failure here rather than a warning.
+  #
+  # An unset ALERTMANAGER_CONFIG means the demo file, since that is the
+  # compose default, so "not configured" and "configured wrongly" are the
+  # same answer here.
+  AM_DIR="${WORKSPACE}/atrocore-docker/observability/alertmanager"
+  AM_CONFIG="$(read_env_var "${WORKSPACE}/atrocore-docker/.env" ALERTMANAGER_CONFIG)"
+  AM_CONFIG="${AM_CONFIG:-alertmanager.demo.yml}"
+  if [ "$AM_CONFIG" = "alertmanager.demo.yml" ]; then
+    fail "ALERTMANAGER_CONFIG is '${AM_CONFIG}' — alerts would go to the MailPit test sink, not to anyone. Set ALERTMANAGER_CONFIG=alertmanager.yml and configure a real smarthost in observability/alertmanager/alertmanager.yml"
+  elif [ ! -f "${AM_DIR}/${AM_CONFIG}" ]; then
+    fail "observability/alertmanager/${AM_CONFIG} does not exist — Alertmanager would not start"
+  else
+    pass "ALERTMANAGER_CONFIG=${AM_CONFIG}"
+    if grep -qE '^[[:space:]]*(email|webhook|slack|pagerduty|opsgenie|msteams)_configs:' "${AM_DIR}/${AM_CONFIG}"; then
+      pass "${AM_CONFIG} configures at least one notifier"
+    else
+      fail "${AM_CONFIG} configures no notifier at all — every alert would be recorded and nothing sent, which is the state this platform was in until 2026-09-30"
+    fi
+    if grep -q 'obs-mailpit' "${AM_DIR}/${AM_CONFIG}"; then
+      fail "${AM_CONFIG} still points at the MailPit test sink (obs-mailpit)"
+    fi
+  fi
 fi
 
 # ---------------------------------------------------------------------------

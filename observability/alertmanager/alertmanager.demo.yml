@@ -1,0 +1,97 @@
+# Alertmanager configuration — DEMO DELIVERY (P3.5).
+#
+# Identical routing, grouping and inhibition to alertmanager.yml. The only
+# difference is that both receivers actually send somewhere: a MailPit
+# container in this compose project, which accepts any mail on port 1025 and
+# exposes it over HTTP for inspection and assertion.
+#
+# WHY THIS FILE EXISTS AT ALL
+# ---------------------------
+# Until 2026-09-30 every one of the platform's 22 alert rules routed to a
+# receiver with no notifier. Alertmanager recorded and grouped them and
+# scripts/verify-observability.sh confirmed they arrived -- and nothing was
+# ever sent to a person. The drill proved detection, which is the harder
+# half, and then stopped one step before the half that makes detection
+# useful. An alert nobody receives is a log line.
+#
+# The reason it had stopped there is that delivery could not be TESTED
+# without a mail server, and there wasn't one. MailPit is that mail server:
+# it is a test sink, so no real address is ever written to, and it has an
+# HTTP API, so "was the mail actually sent" becomes an assertion rather than
+# something a human checks by looking at an inbox.
+#
+# THIS IS NOT PRODUCTION DELIVERY, AND preflight-secrets.sh ENFORCES THAT
+# ----------------------------------------------------------------------
+# A production deployment that shipped with this file would have alerting
+# that looks configured, passes its own drill, and delivers to a container on
+# the same host that dies with it. That is worse than no alerting, because it
+# reads as protection. `preflight-secrets.sh --production` fails if this
+# config is the one selected, exactly as it fails on the shared demo API key.
+#
+# Production uses alertmanager.yml, with real values filled in by hand --
+# Alertmanager does not expand environment variables in its configuration, so
+# there is no templating to do it for you. See that file's header.
+
+global:
+  resolve_timeout: 5m
+  # No auth and no TLS: this smarthost is a test sink inside the compose
+  # project, reachable on an internal network only. Both are refused for
+  # production by preflight-secrets.sh.
+  smtp_smarthost: "obs-mailpit:1025"
+  smtp_from: "alerts@compliance-platform.invalid"
+  smtp_require_tls: false
+
+route:
+  receiver: platform-default
+  # Group by alertname and component rather than by instance: when Alfresco's
+  # stack goes down, six probes fail at once and that is one incident, not six.
+  group_by: ["alertname", "component"]
+  group_wait: 30s
+  group_interval: 5m
+  # 4h, not the conventional 1h. On a single host with no on-call rota, an
+  # alert that repeats hourly through a weekend is one that gets filtered into
+  # a folder, and a filtered alert is an absent alert.
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: platform-critical
+      group_wait: 10s
+      repeat_interval: 1h
+
+receivers:
+  - name: platform-default
+    email_configs:
+      # send_resolved, so the drill can assert the recovery notice too. An
+      # alerting path that fires and never says "cleared" trains people to
+      # ignore it.
+      - to: "platform-ops@compliance-platform.invalid"
+        send_resolved: true
+        headers:
+          Subject: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }} — compliance platform'
+
+  - name: platform-critical
+    email_configs:
+      - to: "platform-oncall@compliance-platform.invalid"
+        send_resolved: true
+        headers:
+          Subject: '[CRITICAL {{ .Status | toUpper }}] {{ .GroupLabels.alertname }} — compliance platform'
+
+inhibit_rules:
+  # When ActiveMQ or Solr is down, slow probes follow all over the stack.
+  # Suppress the downstream noise so the cause stays legible: the measured
+  # lesson from FOOTPRINT_AUDIT.md is that these two failures present as
+  # symptoms elsewhere, and the symptom is what gets investigated first.
+  - source_matchers:
+      - alertname =~ "ActiveMQBrokerUnreachable|SolrUnreachable"
+    target_matchers:
+      - alertname = "HealthProbeSlow"
+    equal: []
+
+  # A database that is down cannot report on its own archiver, so its archiver
+  # alerts say nothing that PostgresDown has not already said.
+  - source_matchers:
+      - alertname = "PostgresDown"
+    target_matchers:
+      - alertname =~ "WALArchivingFailing|WALArchiveBacklogGrowing"
+    equal: ["database"]
