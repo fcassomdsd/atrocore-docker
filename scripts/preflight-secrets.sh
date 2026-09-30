@@ -297,7 +297,14 @@ if [ "$PROFILE" = "production" ]; then
   AM_DIR="${WORKSPACE}/atrocore-docker/observability/alertmanager"
   AM_CONFIG="$(read_env_var "${WORKSPACE}/atrocore-docker/.env" ALERTMANAGER_CONFIG)"
   AM_CONFIG="${AM_CONFIG:-alertmanager.demo.yml}"
-  if [ "$AM_CONFIG" = "alertmanager.demo.yml" ]; then
+  if [ ! -d "$AM_DIR" ]; then
+    # No observability stack in this workspace at all. That is a deployment
+    # with no monitoring rather than one with broken monitoring -- visibly
+    # different, and not this script's call to make: the stack is opt-in by
+    # design (it costs ~1 GiB, see FOOTPRINT_AUDIT.md). Warn rather than fail,
+    # and say what is not being checked.
+    warn "no observability/alertmanager in this workspace — alert delivery not checked, and this deployment has no monitoring at all"
+  elif [ "$AM_CONFIG" = "alertmanager.demo.yml" ]; then
     fail "ALERTMANAGER_CONFIG is '${AM_CONFIG}' — alerts would go to the MailPit test sink, not to anyone. Set ALERTMANAGER_CONFIG=alertmanager.yml and configure a real smarthost in observability/alertmanager/alertmanager.yml"
   elif [ ! -f "${AM_DIR}/${AM_CONFIG}" ]; then
     fail "observability/alertmanager/${AM_CONFIG} does not exist — Alertmanager would not start"
