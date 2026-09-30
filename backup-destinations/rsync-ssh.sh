@@ -56,10 +56,12 @@ case "${VERB}" in
     # Two passes so MANIFEST lands last. rsync would otherwise send files in
     # whatever order it likes, and an interrupted transfer that happened to
     # have sent MANIFEST already would leave a partial set looking complete.
-    rsync -a --delete --exclude MANIFEST -e "$(ssh_cmd)" \
+    MARKER=MANIFEST
+    [ -f "${SRC}/MANIFEST" ] || MARKER=ENCRYPTED
+    rsync -a --delete --exclude "${MARKER}" -e "$(ssh_cmd)" \
       "${SRC}/" "${TARGET}:${ROOT}/${ID}/"
-    if [ -f "${SRC}/MANIFEST" ]; then
-      rsync -a -e "$(ssh_cmd)" "${SRC}/MANIFEST" "${TARGET}:${ROOT}/${ID}/MANIFEST"
+    if [ -f "${SRC}/${MARKER}" ]; then
+      rsync -a -e "$(ssh_cmd)" "${SRC}/${MARKER}" "${TARGET}:${ROOT}/${ID}/${MARKER}"
     fi
     ;;
 

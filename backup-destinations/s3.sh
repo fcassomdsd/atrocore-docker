@@ -73,9 +73,11 @@ case "${VERB}" in
     # part way through, and a set whose MANIFEST is present is treated as
     # complete -- so the manifest is the commit point, exactly as the
     # release update feed treats latest.yml.
-    s3 s3 sync "${SRC}/" "$(base)/${ID}/" --exclude MANIFEST --only-show-errors
-    if [ -f "${SRC}/MANIFEST" ]; then
-      s3 s3 cp "${SRC}/MANIFEST" "$(base)/${ID}/MANIFEST" --only-show-errors
+    MARKER=MANIFEST
+    [ -f "${SRC}/MANIFEST" ] || MARKER=ENCRYPTED
+    s3 s3 sync "${SRC}/" "$(base)/${ID}/" --exclude "${MARKER}" --only-show-errors
+    if [ -f "${SRC}/${MARKER}" ]; then
+      s3 s3 cp "${SRC}/${MARKER}" "$(base)/${ID}/${MARKER}" --only-show-errors
     fi
     ;;
 

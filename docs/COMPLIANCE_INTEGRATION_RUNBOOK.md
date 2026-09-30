@@ -1228,6 +1228,74 @@ trended rather than re-derived whenever someone asks.
 **Still not measured on production-sized data**, and no arithmetic substitutes
 for that. What this replaces is a number with no measurement behind it at all.
 
+## 7.15 Offsite backup encryption (`BACKUP_AGE_RECIPIENT`)
+
+An offsite destination is, by definition, storage this platform does not
+control — a cloud tenancy, a courier, a disk in another building. Everything
+`backup-offsite.sh` sends there used to go in the clear: three databases and
+the whole content store, readable by whoever holds the storage.
+
+```bash
+# Generate the keypair somewhere OTHER than the backup host
+age-keygen -o escrow.key          # -> escrow, off-host, never on this machine
+age-keygen -y escrow.key          # -> BACKUP_AGE_RECIPIENT in atrocore-docker/.env
+```
+
+With `BACKUP_AGE_RECIPIENT` set, every file is encrypted before a driver sees
+it. The destination receives `*.age` files and a plaintext `ENCRYPTED` index,
+and nothing else — the `MANIFEST` is encrypted too, because it names every
+file and carries plaintext hashes.
+
+**Public-key, so the host cannot read its own backups.** This machine holds
+only the recipient key. It can encrypt backups and cannot decrypt any of
+them, including last year's. Whoever takes the server gets the data that is
+on it, and not the backup history as well — which is the difference between
+a bad day and a total loss. `push` **refuses to run** if the escrowed private
+key is found on this host, because keeping it here silently gives that
+property away, and `preflight-secrets.sh --production` refuses too.
+
+**Local sets stay in plaintext, deliberately.** Decryption needs the escrowed
+key, and requiring an escrow retrieval for the ordinary same-host restore
+would add an unbounded delay to a recovery measured at 1m40s (§7.14). The
+threat this addresses is the copy held by someone else, and that is what it
+encrypts. If the backup volume itself is a threat in your deployment — a
+stolen disk rather than a hostile destination — that is a different decision
+and this is not it.
+
+**Verification needs no key.** The `ENCRYPTED` index lists the sha256 of
+every *ciphertext* file, so `backup-offsite.sh verify` proves an offsite copy
+is intact without anyone taking the private key out of escrow. Reading the
+contents needs the key; proving the bytes survived does not — which is what
+makes a routine integrity check something that will actually be run.
+
+### Restoring from an encrypted offsite copy
+
+```bash
+# Retrieve the private key from escrow, then:
+BACKUP_AGE_IDENTITY_FILE=/secure/escrow.key \
+  ./scripts/backup-offsite.sh pull 20260930T030000Z --into /srv/restore/20260930T030000Z
+./scripts/restore-platform.sh --from /srv/restore/20260930T030000Z
+```
+
+`pull` verifies the ciphertext index, decrypts, then verifies the set's own
+MANIFEST — two layers, each doing its own job. `restore-platform.sh` then
+sees an ordinary plaintext set and behaves exactly as it always has.
+
+**The key-escrow decision is the authority's, and it is the part that
+actually matters.** An encrypted backup whose key is lost is not a backup.
+Decide where the private key lives, who can retrieve it, and how that is
+tested, before turning this on — and test the retrieval, not just the
+encryption.
+
+`scripts/verify-backup-encryption.sh` (17 checks, in `validate:backup-destination`,
+a merge gate) is the conformance test: synthetic fixtures and the `local`
+driver, so it needs no cloud tenancy and no network. It asserts the
+destination receives ciphertext and nothing else, that verification works
+with no key, that tampering is caught with no key, that a pull with the key
+reproduces the original byte-for-byte, and that all three refusals fire —
+no recipient, private key on the host, and a private key pasted into the
+recipient variable.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:

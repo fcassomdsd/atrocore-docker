@@ -32,13 +32,23 @@ case "${VERB}" in
     need_root
     SRC="${1:?push needs <set-dir>}"; ID="${2:?push needs <set-id>}"
     mkdir -p "${ROOT}/${ID}"
-    # Everything except MANIFEST first, MANIFEST last: a set carrying a
-    # MANIFEST is treated as complete, so it must be the last thing to
+    # Everything except the completeness marker first, the marker last: a
+    # set carrying it is treated as complete, so it must be the last thing to
     # appear even on a destination where a copy is unlikely to fail.
     # "Unlikely" is how a full disk gets discovered during a restore.
-    find "${SRC}" -maxdepth 1 -type f ! -name MANIFEST -print0 \
+    #
+    # An ENCRYPTED set has no plaintext MANIFEST -- its index is the marker.
+    # Written as an `if` rather than `[ -f x ] && cp`, because that form was
+    # the LAST command in this branch: with no MANIFEST present the test was
+    # false, the branch returned 1, and the driver reported "push failed"
+    # having copied every byte correctly.
+    MARKER=MANIFEST
+    [ -f "${SRC}/MANIFEST" ] || MARKER=ENCRYPTED
+    find "${SRC}" -maxdepth 1 -type f ! -name "${MARKER}" -print0 \
       | xargs -0 -I{} cp -f {} "${ROOT}/${ID}/"
-    [ -f "${SRC}/MANIFEST" ] && cp -f "${SRC}/MANIFEST" "${ROOT}/${ID}/MANIFEST"
+    if [ -f "${SRC}/${MARKER}" ]; then
+      cp -f "${SRC}/${MARKER}" "${ROOT}/${ID}/${MARKER}"
+    fi
     ;;
 
   pull)

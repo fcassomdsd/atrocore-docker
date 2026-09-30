@@ -86,6 +86,19 @@ EOF
   # production-ready: the platform ships no destination, and the default
   # config delivers to a test sink.
   make_alertmanager_config "$ws" both
+  # Backups leave this host, and they leave encrypted. A production
+  # workspace without both of those is not production-ready.
+  set_backup_encryption "$ws" "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsxxxxxx" ""
+}
+
+# set_backup_encryption <workspace> <recipient> <identity path, or empty>
+set_backup_encryption() {
+  local ws="$1" recipient="$2" identity="$3" f="$1/atrocore-docker/.env"
+  sed -i '/^BACKUP_DESTINATION=/d;/^BACKUP_AGE_RECIPIENT=/d;/^BACKUP_AGE_IDENTITY_FILE=/d' "$f"
+  echo "BACKUP_DESTINATION=local" >> "$f"
+  [ -n "$recipient" ] && echo "BACKUP_AGE_RECIPIENT=$recipient" >> "$f"
+  [ -n "$identity" ]  && echo "BACKUP_AGE_IDENTITY_FILE=$identity" >> "$f"
+  return 0
 }
 
 # make_alertmanager_config <workspace> <both|critical-only|none>
@@ -166,6 +179,35 @@ make_production_workspace "$PROD"
 OUT=$(run "$PROD" --profile production); RC=$?
 check "a fully configured production workspace passes" 0 "$RC"
 check_output "  ...and says so" "Production profile OK" "$OUT"
+
+# --- Backups that leave the host must be encrypted --------------------------
+# An offsite destination is storage this platform does not control. Sending a
+# set there in the clear ships every database and the whole content store to
+# a third party, leaves no trace at the time, and cannot be undone.
+
+BKPLAIN="$WORK_DIR/bk-plain"
+make_production_workspace "$BKPLAIN"
+set_backup_encryption "$BKPLAIN" "" ""
+OUT=$(run "$BKPLAIN" --profile production); RC=$?
+check "an offsite destination with no recipient fails" 1 "$RC"
+check_output "  ...saying sets would go in the clear" "in the clear" "$OUT"
+
+BKSECRET="$WORK_DIR/bk-secret"
+make_production_workspace "$BKSECRET"
+set_backup_encryption "$BKSECRET" "AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQSXXXXXX" ""
+OUT=$(run "$BKSECRET" --profile production); RC=$?
+check "a PRIVATE key as the recipient fails" 1 "$RC"
+check_output "  ...telling the operator to rotate it" "rotate it" "$OUT"
+
+# The property public-key encryption buys is that this host cannot read its
+# own backups. A private key sitting here hands it straight back.
+BKIDENT="$WORK_DIR/bk-ident"
+make_production_workspace "$BKIDENT"
+mkdir -p "$BKIDENT/keys"; printf 'AGE-SECRET-KEY-PRETEND\n' > "$BKIDENT/keys/escrow.key"
+set_backup_encryption "$BKIDENT" "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsxxxxxx" "$BKIDENT/keys/escrow.key"
+OUT=$(run "$BKIDENT" --profile production); RC=$?
+check "the escrowed private key present on the host fails" 1 "$RC"
+check_output "  ...explaining the property it gives away" "can decrypt its own backups" "$OUT"
 
 # --- Alerts must reach a person ---------------------------------------------
 # The platform ships no destination on purpose -- a relay is the adopting
