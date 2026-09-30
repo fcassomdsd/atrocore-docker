@@ -90,6 +90,14 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **The PITR drill got as far as "invalid tar magic" in CI, which reads as a corrupt backup and is not one.** `pitr:verify` ran for the first time ever this week. The first run failed because the WAL archive was not writable by the database; fixing that let the drill get further, and it then failed at the extraction with `tar: invalid tar magic` — against a base backup this host had just written and measured at 46M.
+
+  The backup is fine. **`docker run -v ${BASE}:/base.tar` resolves `${BASE}` on the DAEMON's filesystem**, and the drill's default workdir is `/tmp/pitr-drill-*`, which exists only in the job container. Docker does not fail on a source path it cannot find — it creates an empty **directory** there and mounts that. tar is handed a directory, and says the thing that sounds like a damaged archive. This is the fifth appearance of one root cause: under docker-in-docker, a path the job container can see is not a path the daemon can see. `/builds` is shared with the dind service, which is why the WAL archive mount in the same drill worked.
+
+  Two changes, because the workaround and the diagnosis are different jobs. `verify-pitr.sh` takes **`--workdir DIR`**, and `pitr:verify` points it at `$CI_PROJECT_DIR`, so both sides resolve the same files; the default stays `/tmp`, which is correct on a workstation. And `restore-pitr.sh` now **compares the size the host sees against the size a container sees** before extracting, so a mount that never arrived says exactly that instead of blaming the archive. The guard was mutation-tested against all three shapes: the mount reaching a real file, the daemon seeing a directory (the dind symptom, reproduced locally by mounting one), and the daemon seeing a truncated file.
+
+  The drill itself is unchanged and still passes end to end locally on both paths — 13 checks each, default workdir and explicit, with marker B correctly absent from the recovery and still present in the live database.
+
 - **`local.sh`'s push reported failure having copied every byte correctly.** `[ -f "${SRC}/MANIFEST" ] && cp …` was the **last command in the branch**, so with no plaintext MANIFEST the test was false, the branch returned 1, and `backup-offsite.sh` died with "driver push failed" after a completely successful copy. Latent until encrypted sets — which have no plaintext MANIFEST — made it reachable; found on the first run of the new conformance test.
 
   The MANIFEST-last rule it was implementing is a real correctness property: a set carrying its completeness marker is treated as complete, so the marker must land last even where a copy is unlikely to fail. That rule now generalises to `ENCRYPTED` for encrypted sets, in all three drivers, so a partially pushed encrypted set cannot look finished.

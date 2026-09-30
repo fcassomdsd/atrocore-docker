@@ -193,6 +193,28 @@ if [ -e "${PGDATA_DIR}" ]; then
 fi
 mkdir -p "${PGDATA_DIR}"
 
+# Before extracting: does the container actually see the file this host sees?
+#
+# `-v ${BASE}:/base.tar` resolves ${BASE} on the DAEMON's filesystem. Under
+# docker-in-docker that is a different filesystem, and when the path is absent
+# there Docker does not fail -- it creates an empty DIRECTORY and mounts that.
+# tar is then handed a directory and says "invalid tar magic", which reads as a
+# corrupt backup and sends you looking at pg_basebackup. It cost a CI cycle to
+# find; comparing the two sizes costs a container.
+HOST_BYTES="$(wc -c < "${BASE}" | tr -d ' ')"
+SEEN_BYTES="$(docker run --rm -v "${BASE}:/base.tar:ro" alpine:latest \
+  sh -c '[ -f /base.tar ] && wc -c < /base.tar | tr -d " " || echo not-a-file' 2>/dev/null \
+  || echo mount-failed)"
+if [ "${SEEN_BYTES}" != "${HOST_BYTES}" ]; then
+  die "the container does not see the base backup this host sees.
+         ${BASE}
+         this host: ${HOST_BYTES} byte(s)
+         container: ${SEEN_BYTES}
+       The bind mount is not reaching the file you meant. Under
+       docker-in-docker the daemon resolves that path on its own filesystem —
+       pass --workdir (verify-pitr.sh) or --base a path both sides share."
+fi
+
 # Extracted inside a container, then chowned to the image's postgres uid (999).
 # Unpacking as the invoking user leaves uid 1000 files that the server cannot
 # read, and PostgreSQL additionally refuses to start on a data directory whose

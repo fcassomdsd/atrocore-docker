@@ -2,7 +2,8 @@
 #
 # verify-pitr.sh — the point-in-time recovery drill.
 #
-#   ./scripts/verify-pitr.sh [--dataset atrocore] [--base FILE] [--port 55432] [--keep]
+#   ./scripts/verify-pitr.sh [--dataset atrocore] [--base FILE] [--port 55432]
+#                            [--workdir DIR] [--keep]
 #
 #   --dataset  atrocore | alfresco | compliance_web (default: atrocore, the
 #              smallest of the three).
@@ -11,6 +12,11 @@
 #              that the sets you keep are usable -- so a real drill should
 #              point this at last night's set.
 #   --port     host port for the recovery instance (default 55432).
+#   --workdir  where to unpack the base backup and the recovery cluster
+#              (default: a fresh directory under /tmp). Under
+#              docker-in-docker this MUST be a path the Docker daemon shares
+#              with this container, because the extraction and the recovery
+#              server are containers -- see the note above the default below.
 #   --keep     leave the recovered instance running.
 #
 # WHAT IT DOES, AND WHY IN THIS ORDER
@@ -48,6 +54,7 @@ WORKSPACE="$(cd "${REPO_DIR}/.." && pwd)"
 
 DATASET="atrocore"
 BASE=""
+WORKDIR_OPT=""
 PORT=55432
 KEEP=0
 
@@ -67,6 +74,7 @@ while [ $# -gt 0 ]; do
     --dataset) DATASET="${2:-}"; shift 2 ;;
     --base)    BASE="${2:-}"; shift 2 ;;
     --port)    PORT="${2:-}"; shift 2 ;;
+    --workdir) WORKDIR_OPT="${2:-}"; shift 2 ;;
     --keep)    KEEP=1; shift ;;
     -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -110,7 +118,24 @@ esac
 
 psql_live() { ( cd "${DS_DIR}" && "${COMPOSE[@]}" exec -T "${DS_SVC}" psql -U "${DS_SUPER}" -d "${DS_DB}" -tAc "$1" ) 2>/dev/null | tr -d '\r'; }
 
-WORKDIR="$(mktemp -d -t pitr-drill-XXXXXX)"
+# Where the drill unpacks the base backup and the recovery cluster.
+#
+# Default /tmp is right on a workstation and WRONG under docker-in-docker: the
+# extraction and the recovery server both run as containers, so the daemon
+# resolves these paths on ITS filesystem, not this one's. A /tmp path that
+# exists only here makes Docker silently create an empty DIRECTORY on the
+# daemon side and mount that instead -- the base backup arrives as a directory
+# and tar reports "invalid tar magic", which reads like a corrupt backup.
+#
+# Hence --workdir: under dind, point it somewhere both sides genuinely share
+# (in GitLab CI that is the build directory, which the runner mounts into the
+# dind service too). restore-pitr.sh asserts the mount arrived regardless.
+if [ -n "${WORKDIR_OPT}" ]; then
+  mkdir -p "${WORKDIR_OPT}" || die "cannot create --workdir ${WORKDIR_OPT}"
+  WORKDIR="$(cd "${WORKDIR_OPT}" && pwd)"
+else
+  WORKDIR="$(mktemp -d -t pitr-drill-XXXXXX)"
+fi
 CLEANED=0
 cleanup() {
   [ "${CLEANED}" -eq 1 ] && return
@@ -129,7 +154,10 @@ cleanup() {
   fi
   if [ "${KEEP}" -eq 0 ] && [ -d "${WORKDIR}" ]; then
     docker run --rm -v "${WORKDIR}:/w" alpine:latest sh -c 'rm -rf /w/*' >/dev/null 2>&1
-    rmdir "${WORKDIR}" 2>/dev/null
+    # An explicit --workdir may be a directory the caller owns and reuses, so a
+    # refusal to remove it is not an error -- and this runs inside an EXIT trap,
+    # where a non-zero last command would replace the real exit status.
+    rmdir "${WORKDIR}" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT INT TERM
