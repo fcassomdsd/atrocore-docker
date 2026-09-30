@@ -283,6 +283,55 @@ if [ "$PROFILE" = "production" ]; then
   check_mode compliance_import APP_ENV            production
   check_mode compliance_web    AUTH_COOKIE_SECURE true
 
+  bold "Backups that leave the host must be encrypted"
+  # An offsite destination is by definition storage this platform does not
+  # control. Sending a set there in the clear ships every database and the
+  # whole content store to a third party -- and unlike most misconfigurations
+  # this one leaves no trace at the time and cannot be undone afterwards.
+  BK_DEST="$(read_env_var "${WORKSPACE}/atrocore-docker/.env" BACKUP_DESTINATION)"
+  BK_RECIP="$(read_env_var "${WORKSPACE}/atrocore-docker/.env" BACKUP_AGE_RECIPIENT)"
+  BK_IDENT="$(read_env_var "${WORKSPACE}/atrocore-docker/.env" BACKUP_AGE_IDENTITY_FILE)"
+  if [ -z "$BK_DEST" ]; then
+    warn "no BACKUP_DESTINATION configured — nothing leaves this host, and there is no offsite copy either"
+  elif [ -z "$BK_RECIP" ]; then
+    fail "BACKUP_DESTINATION is '${BK_DEST}' but BACKUP_AGE_RECIPIENT is unset — backup sets would be sent to it in the clear"
+  else
+    # Every entry, because the variable is a whitespace-separated list. A
+    # typo in the second key would otherwise be carried by the first, and
+    # produce sets only one key can open -- removing exactly the redundancy
+    # the second key was configured for.
+    bk_bad=0; bk_n=0
+    for r in $BK_RECIP; do
+      bk_n=$((bk_n + 1))
+      case "$r" in
+        AGE-SECRET-KEY-*)
+          fail "BACKUP_AGE_RECIPIENT contains a PRIVATE key. It takes public keys (age1...), and that key is now in this host's configuration — rotate it"
+          bk_bad=1 ;;
+        age1*) ;;
+        *)
+          fail "BACKUP_AGE_RECIPIENT contains something that is not an age public key (expected age1...): ${r}"
+          bk_bad=1 ;;
+      esac
+    done
+    if [ "$bk_bad" -eq 0 ]; then
+      if [ "$bk_n" -eq 1 ]; then
+        # Not a failure: one key is a real configuration. But escrow's actual
+        # question is whether there is a second way to get the data back
+        # during an incident, and one key answers it with "no".
+        warn "BACKUP_AGE_RECIPIENT has a single recipient — a second key in different custody (vault + sealed paper, say) removes the single point of failure in escrow"
+      else
+        pass "BACKUP_AGE_RECIPIENT has ${bk_n} recipients; any one key opens a set"
+      fi
+    fi
+    # The property public-key encryption buys is that this host cannot read
+    # its own backups. A private key sitting here hands it back.
+    if [ -n "$BK_IDENT" ] && [ -f "$BK_IDENT" ]; then
+      fail "the escrowed private key is present on this host (${BK_IDENT}) — a host that can decrypt its own backups is not protected by encrypting them"
+    else
+      pass "no escrowed private key on this host"
+    fi
+  fi
+
   bold "Alerts must reach a person"
   # The demo Alertmanager config delivers to a MailPit container inside the
   # observability compose project. Shipping it would give a deployment
