@@ -265,6 +265,17 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **`demo:verify` failed 25 times without ever saying why.** Against 5 successes, last green 2026-09-27. Every failure looked identical in the log: the quickstart reached step 5, processed the follow-up **successfully** (`pendingClosureApprovals: 1`), then stopped mid-step printing nothing, and the wrapper reported *the demo quickstart failed*.
+
+  That silence is the defect fixed here, and it is not cosmetic. A seven-minute job that cannot be reproduced locally and dies without naming its own cause costs a full CI cycle per guess — which is how a drill stops being read and then stops being run.
+
+  `demo-quickstart.sh` and `demo-verify-ci.sh` now carry an `ERR` trap that prints the file, line, exit code and the command that failed, with `set -E` so it is inherited by functions and subshells. It fires under `set -e` rules, so handled failures, conditions and the deliberate `die` stay quiet — verified against all four cases.
+
+  Two specific silent deaths closed at the same spot the CI failures stopped: the retry loop's `PENDING=$(… | node …)` now falls back to `0`, so a transient failure to run node is a *retry* rather than the end of the run, and the final parse is an explicit `if !` with a diagnosis quoting the response, rather than a bare assignment whose failure takes `set -e` with it and prints nothing.
+
+  **The underlying cause is not yet identified**, and this does not claim to fix it. It reproduces only in CI — a local run of the same script passes (exit 0, 31 `ok` lines, verified before and after this change). One hypothesis, SIGPIPE through `head -c 260` under `pipefail`, was tested and **disproved**; a second, a subprocess lost under memory pressure, fits the evidence but is unconfirmed. The next failure will name its own line, which is what was missing.
+
+
 - **The weekly drill schedule fired four jobs, two of which had never once executed.** The schedule existed; nothing had ever run through it. Playing it deliberately rather than waiting for its first unattended 03:00 found three defects, all of them in CI-only paths that a local run cannot reach.
 
   - **`pitr:verify` (never run before, 15 manual, 0 executions).** Failed in 48s with *this database has never archived a WAL segment*. The guard was right; the cause was that under docker-in-docker `./wal-archive` resolves on the **daemon's** filesystem, where it does not exist, so Docker creates it root-owned 0755 — and `postgres:15-alpine` runs as uid 70, so every `archive_command` failed. The job now creates and chowns it through a helper container, to the same absolute path compose will use. Mechanism reproduced locally: root-owned → `cp: can't create '/wal/seg': Permission denied`; after `chown 70:70` → succeeds.
