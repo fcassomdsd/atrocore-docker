@@ -185,6 +185,17 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Changed
 
+- **The restore drill now destroys the search index too, which turns its last check from a tolerance into an assertion.** `restore-verify-ci.sh` dropped every schema and wiped the content store, but left Solr's index alone — so the restored system had working search for reasons the backup had nothing to do with, and the final step had nowhere to put an assertion. It could only *tolerate a partially failing smoke matrix as "expected while Solr reindexes"*, because with a live index there was no way to distinguish one still catching up from one that never would.
+
+  Solr is derived state and is deliberately not backed up, so after a real disaster it does not exist. The drill now destroys it in step 4 alongside the databases and the content store, waits in step 7 for Alfresco to rebuild it to the size recorded **before** the destroy, and then requires the smoke matrix to **pass**. Search lag is no longer an available explanation for a failing probe, so anything still failing is the restored system failing.
+
+  Two guards come with it, both lifted from `measure-rto.sh`: the Solr volume IDs are read before removal and asserted gone after, and the low-water mark seen during the rebuild must be below the target — otherwise an index the destroy failed to remove satisfies the target on the first poll and the drill reports a rebuild that never happened. The index size is also read only once Solr has stopped moving, since a count taken while the demo's own imports are still being indexed is a target that was never the real size of anything.
+
+  New `scripts/solr-index.lib.sh` holds these, shared with `measure-rto.sh` rather than copied: both need the same definition of "search is back", and two copies of a rule is how they stop agreeing.
+
+  Verified end to end against the live platform (`--assume-populated`): index destroyed with 3 volumes confirmed gone, three schemas to zero tables, content store to zero files, restored, **index rebuilt to 1,242 nodes with a low-water mark of 0**, 155/70/9 tables and 6,317 content files back, gateway smoke matrix **passed**. The destruction guard was re-mutation-tested after the refactor and still aborts before anything is restored.
+
+
 - **Every restore is now timed.** `restore-platform.sh` reports a per-phase breakdown and appends a machine-readable line when `RTO_RECORD` names a file; `restore-verify-ci.sh` sets it and `restore:verify` publishes `rto-measurements.jsonl` as a 90-day artifact, so the figure is a trend rather than something re-derived whenever it is asked for. Timing uses `EPOCHREALTIME` rather than `date +%N`, because busybox `date` on the CI Alpine image would have silently rounded phases measured in tens of milliseconds to whole seconds.
 
 

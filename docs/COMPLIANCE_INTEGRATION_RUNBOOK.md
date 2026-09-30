@@ -1155,9 +1155,16 @@ never timed it, and §5.2 carried a figure inherited from a design document.
 
 **It stops the clock later than the restore does, on purpose.**
 `restore-platform.sh` finishes when the data is back. `restore-verify-ci.sh`
-then checks the system answers and *tolerates a partially failing smoke
-matrix as "expected while Solr reindexes"*. Both are correct about what they
-do. Neither is an RTO: Solr is derived state and deliberately not backed up,
+then checks the system answers — and until 2026-09-30 it *tolerated a
+partially failing smoke matrix as "expected while Solr reindexes"*, because
+it left the existing index in place and so could not tell an index still
+catching up from one that never would. It now destroys the index alongside
+the databases and the content store, waits for the rebuild, and requires the
+smoke matrix to pass; the two scripts share
+`scripts/solr-index.lib.sh` so they cannot drift on what "search is back"
+means. What still separates them is only the clock: the drill proves a
+recovery works, this measures how long it takes. Neither on its own was an
+RTO: Solr is derived state and deliberately not backed up,
 so on a blank host it does not exist, and the reads that depend on it are not
 incidental — the checklist endpoint, open findings, and four report Web
 Scripts. A recovery that has restored every byte and cannot answer *which

@@ -125,20 +125,13 @@ env_var() {
     | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/" -e 's/[[:space:]]*$//'
 }
 
-SOLR_SECRET="$(env_var "${CMIS_DIR}/.env" SOLR_SECRET)"
-[ -n "${SOLR_SECRET}" ] || SOLR_SECRET="secret"
-
-solr_summary() { # solr_summary <field>
-  curl -s -m 15 -H "X-Alfresco-Search-Secret: ${SOLR_SECRET}" \
-    "http://localhost:8083/solr/admin/cores?action=SUMMARY&wt=json" 2>/dev/null \
-  | python3 -c "
-import json,sys
-try: d=json.load(sys.stdin)['Summary']['alfresco']
-except Exception: sys.exit(1)
-v=d.get('''$1''')
-print('' if v is None else v)
-" 2>/dev/null
-}
+# The index handling is shared with restore-verify-ci.sh rather than copied:
+# both need the same definition of "search is back", and two copies of a rule
+# is how they stop agreeing.
+# shellcheck source=scripts/solr-index.lib.sh
+. "${SCRIPT_DIR}/solr-index.lib.sh"
+SOLR_SECRET="$(solr_secret "${CMIS_DIR}")"
+solr_summary() { solr_field "${SOLR_SECRET}" "$1"; }
 
 declare -a PHASE_LOG=()
 PHASE_NAME=""; PHASE_T0=0
@@ -190,15 +183,9 @@ step "1. Enter the disaster state"
 # lives in volumes, not in the bind-mounted data/ tree.
 phase teardown
 ( cd "${CMIS_DIR}" && docker compose stop alfresco >/dev/null 2>&1 ) || die "could not stop Alfresco"
-SOLR_VOLS="$(docker inspect compliance_cmis-solr6-1 --format '{{range .Mounts}}{{.Name}} {{end}}' 2>/dev/null)"
-[ -n "${SOLR_VOLS}" ] || die "could not read Solr's volumes — refusing to measure a reindex without proving the index was destroyed"
-( cd "${CMIS_DIR}" && docker compose rm -sfv solr6 >/dev/null 2>&1 ) || die "could not remove Solr"
-survivors=0
-for v in ${SOLR_VOLS}; do
-  docker volume inspect "${v}" >/dev/null 2>&1 && { warn "volume ${v} survived the removal"; survivors=$((survivors + 1)); }
-done
-[ "${survivors}" -eq 0 ] || die "${survivors} Solr volume(s) still exist — the index was not destroyed, so any reindex measured here is fiction"
-ok "Alfresco stopped; Solr container and all $(printf '%s' "${SOLR_VOLS}" | wc -w) index volume(s) confirmed gone"
+SOLR_VOLS="$(solr_destroy_index "${CMIS_DIR}")" \
+  || die "the Solr index was not destroyed — any reindex measured after this is fiction"
+ok "Alfresco stopped; Solr container and all ${SOLR_VOLS} index volume(s) confirmed gone"
 
 step "2. Restore the data"
 phase ""
@@ -244,29 +231,10 @@ step "4. Wait for search to be correct again"
 # takes tens of seconds, so a 5s cadence put up to 10s of quantisation error
 # on the one phase the projection is most sensitive to.
 phase search_ready
-CAUGHT=0
-INDEX_MIN=-1
-for i in $(seq 1 900); do
-  n="$(solr_summary 'Alfresco Nodes in Index')"
-  rem="$(solr_summary 'Approx transactions remaining')"
-  case "${n}" in ''|*[!0-9]*) n=-1 ;; esac
-  # The low-water mark, reported at the end: an index that started full is a
-  # measurement of nothing, and this is what shows it started near empty.
-  if [ "${n}" -ge 0 ] && { [ "${INDEX_MIN}" -lt 0 ] || [ "${n}" -lt "${INDEX_MIN}" ]; }; then
-    INDEX_MIN="${n}"
-  fi
-  if [ "${n}" -ge "${INDEX_NODES_BEFORE}" ] && [ "${rem}" = "0" ]; then
-    CAUGHT=$((CAUGHT + 1))
-    # Twice in a row: the tracker reports 0 remaining between batches too.
-    [ "${CAUGHT}" -ge 2 ] && break
-  else
-    CAUGHT=0
-  fi
-  [ $(( i % 15 )) -eq 0 ] && info "indexed ${n}/${INDEX_NODES_BEFORE} nodes, ${rem:-?} transactions remaining"
-  sleep 2
-done
-[ "${CAUGHT}" -ge 2 ] || die "Solr did not reach ${INDEX_NODES_BEFORE} indexed nodes within 30m"
-INDEX_NODES_AFTER="$(solr_summary 'Alfresco Nodes in Index')"
+solr_wait_indexed "${SOLR_SECRET}" "${INDEX_NODES_BEFORE}" 1800 15 \
+  || die "Solr did not reach ${INDEX_NODES_BEFORE} indexed nodes within 30m"
+INDEX_MIN="${SOLR_LOW_WATER}"
+INDEX_NODES_AFTER="$(solr_index_nodes "${SOLR_SECRET}")"
 ok "index rebuilt to ${INDEX_NODES_AFTER} nodes (was ${INDEX_NODES_BEFORE}, low-water mark ${INDEX_MIN})"
 if [ "${INDEX_MIN}" -ge "${INDEX_NODES_BEFORE}" ]; then
   die "the index never dropped below its original size — nothing was rebuilt and this number means nothing"
