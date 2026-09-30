@@ -74,10 +74,17 @@ die()  { printf '    FAIL %s\n' "$1" >&2; exit 1; }
 
 env_var() { [ -f "$1" ] && sed -n "s/^[[:space:]]*$2=//p" "$1" | tail -n1 | tr -d '"'"'"' \t'; }
 
-ATRO_USER="$(env_var "${REPO_DIR}/.env" POSTGRES_PIM_USER)"
-ATRO_DB="$(env_var "${REPO_DIR}/.env" POSTGRES_PIM_DB)"
-WEB_USER="$(env_var "${WORKSPACE}/compliance_web/.env" POSTGRES_USER)"
-WEB_DB="$(env_var "${WORKSPACE}/compliance_web/.env" POSTGRES_DB)"
+# Read from a file that must exist by now, and say which one if it does not.
+# `env_var` answers empty for a missing file and this script runs without
+# `set -e`, so an unresolved credential used to travel all the way to
+# `psql -U "" -d ""`, whose failure then looked like an empty database.
+require_env_var() { # require_env_var <file> <key> <what it is for>
+  local value
+  [ -f "$1" ] || die "$1 does not exist, so $3 cannot be resolved"
+  value="$(env_var "$1" "$2")"
+  [ -n "${value}" ] || die "$2 is not set in $1, so $3 cannot be resolved"
+  printf '%s' "${value}"
+}
 
 psql_at() { # psql_at <dir> <service> <user> <db> <sql>
   ( cd "$1" && docker compose exec -T "$2" psql -U "$3" -d "$4" -tAc "$5" ) 2>/dev/null | tr -d '[:space:]'
@@ -92,6 +99,23 @@ if [ "${ASSUME_POPULATED}" -eq 0 ]; then
 else
   step "1. Populate — skipped (--assume-populated)"
 fi
+
+# ---------------------------------------------------------------------------
+# Resolved HERE, not at the top of the script, and that ordering is the bug this
+# fixes. On a fresh runner `${WORKSPACE}/compliance_web` does not exist yet --
+# step 1 is what clones the sibling repositories and writes their .env files --
+# so reading the credentials before step 1 read a path that was not there. The
+# atrocore pair happened to work, because this project's own .env is written by
+# the pipeline's before_script, which is why only the compliance_web count came
+# back empty and the failure looked like a database problem.
+#
+# `|| exit 1` on every one of them: `die` inside `$( )` exits the SUBSHELL, so
+# without it the diagnosis would print and the script would carry on with the
+# empty value it was diagnosing -- the same silence, one layer down.
+ATRO_USER="$(require_env_var "${REPO_DIR}/.env" POSTGRES_PIM_USER "the AtroCore database user")" || exit 1
+ATRO_DB="$(require_env_var "${REPO_DIR}/.env" POSTGRES_PIM_DB "the AtroCore database name")" || exit 1
+WEB_USER="$(require_env_var "${WORKSPACE}/compliance_web/.env" POSTGRES_USER "the compliance_web database user")" || exit 1
+WEB_DB="$(require_env_var "${WORKSPACE}/compliance_web/.env" POSTGRES_DB "the compliance_web database name")" || exit 1
 
 # ---------------------------------------------------------------------------
 step "2. Record the before state"
@@ -221,17 +245,43 @@ ok "content store wiped (0 files)"
 
 # ---------------------------------------------------------------------------
 step "5. Restore"
-# Timed, and the timings kept as a CI artifact. This drill answers "does the
-# backup restore a working system"; it is not an RTO, because it neither
-# destroys Solr's index nor waits for search to be correct -- see step 7's
-# tolerance for a partially failing smoke matrix, and scripts/measure-rto.sh,
-# which does both and measures the whole window. What lands here is the
-# data-restore half of that number, per phase, per run, so it can be trended
-# instead of remeasured from scratch each time someone asks.
+# Timed, and the timings kept as a CI artifact. What lands here is the
+# DATA-RESTORE half of a recovery time, per phase, per run, so it can be
+# trended instead of remeasured from scratch each time someone asks. It is
+# still not an RTO: this drill does destroy the index (step 4) and does wait
+# for search to be correct (step 7), but the number recorded below covers the
+# restore alone. scripts/measure-rto.sh measures the whole window.
 RTO_RECORD="${RTO_RECORD:-${REPO_DIR}/rto-measurements.jsonl}" \
   "${SCRIPT_DIR}/restore-platform.sh" --from "${SET_DIR}" --yes || die "restore failed"
 ( cd "${WORKSPACE}/compliance_cmis" && docker compose up -d alfresco solr6 >/dev/null 2>&1 )
 ok "Alfresco and a blank Solr started"
+
+# Read the index ONCE, here, while it cannot possibly have rebuilt yet.
+#
+# Step 7 used to infer "the index really was destroyed" from the low-water mark
+# of its rebuild poll. That is an observation, not an assertion: it only holds
+# when polling starts before the rebuild finishes. In CI it does not. Step 6's
+# queries and step 7's wait for Alfresco readiness (~100s) gave a 299-file
+# dataset time to reindex completely, so the first poll read 859 against a
+# pre-backup 856 and the drill failed a restore that was entirely correct.
+# Locally the dataset is twenty times larger and polling always caught it
+# mid-rebuild, which is why this only ever appeared on a runner.
+#
+# A reading taken one second after `compose up` cannot be a rebuild. If Solr is
+# not answering yet -- the usual case -- that is not evidence of a stale index
+# either, and step 4's assertion that the index VOLUMES are gone is what
+# actually proves the destroy took. So this fails only on positive evidence.
+FIRST_INDEX="$(solr_index_nodes "${SOLR_SECRET_VALUE}" 2>/dev/null || true)"
+case "${FIRST_INDEX}" in
+  ''|*[!0-9]*)
+    FIRST_INDEX=""
+    info_blank="not answering yet (expected — the volumes were confirmed gone in step 4)" ;;
+  *)
+    [ "${FIRST_INDEX}" -lt "${BEFORE_INDEX}" ] \
+      || die "the freshly started Solr already holds ${FIRST_INDEX} nodes against a pre-backup ${BEFORE_INDEX} — the step 4 destroy did not take, so rebuilding here would prove nothing"
+    info_blank="${FIRST_INDEX} node(s), against ${BEFORE_INDEX} before the backup" ;;
+esac
+ok "blank Solr: ${info_blank}"
 
 # ---------------------------------------------------------------------------
 step "6. Prove it came back"
@@ -271,20 +321,36 @@ ok "Alfresco ready (${i} attempt(s))"
 solr_wait_indexed "${SOLR_SECRET_VALUE}" "${BEFORE_INDEX}" 1800 30 \
   || die "Solr did not rebuild to ${BEFORE_INDEX} nodes within 30m — search-backed reads would still be wrong"
 AFTER_INDEX="$(solr_index_nodes "${SOLR_SECRET_VALUE}")"
-# The low-water mark proves the index was genuinely rebuilt rather than never
-# emptied: without it, an index the destroy failed to remove satisfies the
-# target on the first poll and this reports a rebuild that never happened.
-[ "${SOLR_LOW_WATER}" -lt "${BEFORE_INDEX}" ] \
-  || die "the index never dropped below its original size (${SOLR_LOW_WATER}) — it was not rebuilt, so search proves nothing here"
-ok "search index rebuilt: ${AFTER_INDEX} nodes (was ${BEFORE_INDEX}, low-water ${SOLR_LOW_WATER})"
+# The low-water mark is reported, not asserted on. Whether this poll ever sees
+# the index below its target depends on whether the rebuild outran the poll,
+# which is a property of dataset size and runner speed rather than of the
+# restore. The claim it used to make -- that the index really was emptied --
+# is now made where it is deterministic: step 4 asserts the index volumes are
+# gone, and step 5 reads the freshly started Solr before it can have rebuilt.
+ok "search index rebuilt: ${AFTER_INDEX} nodes (was ${BEFORE_INDEX}, low-water ${SOLR_LOW_WATER}${FIRST_INDEX:+, blank at restart ${FIRST_INDEX}})"
 
 if [ -f "${WORKSPACE}/compliance_flow/scripts/smoke-flows.mjs" ]; then
   # The harness reads API_KEY from the environment. Pass it explicitly rather
   # than sourcing the .env: `set -a; . .env` also exports COMPOSE_* and
   # redirects every later docker compose call, which is a bug already fixed
   # once in demo-quickstart.sh.
+  # BASE, for the same reason demo-quickstart.sh passes it: the harness
+  # defaults to http://localhost:1880, which is the machine it runs ON. That is
+  # this host locally and the CI JOB CONTAINER on a runner, where the stack is
+  # behind the dind alias and nothing listens on that port. Without it all 15
+  # probes fail to connect and the drill blamed the restore -- which had
+  # actually succeeded, counts matched and the index had rebuilt.
+  SMOKE_BASE="http://${DEMO_HOST}:1880"
+  # Reached-and-failed and never-reached are different findings, so establish
+  # which one this is BEFORE running the matrix. Same reasoning as the 401
+  # branch below: a check that never ran says nothing about the restore.
+  GATEWAY_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${SMOKE_BASE}/health" || true)"
+  case "${GATEWAY_CODE}" in
+    000|'') die "the gateway at ${SMOKE_BASE} is not answering at all — the smoke matrix cannot run, and this says nothing about the restore" ;;
+  esac
   SMOKE_OUT="$(cd "${WORKSPACE}/compliance_flow" \
-    && API_KEY="$(env_var "${WORKSPACE}/compliance_flow/.env" API_KEY)" \
+    && BASE="${SMOKE_BASE}" \
+       API_KEY="$(env_var "${WORKSPACE}/compliance_flow/.env" API_KEY)" \
        node scripts/smoke-flows.mjs 2>&1)"
   SMOKE_RC=$?
   echo "${SMOKE_OUT}" | tail -3 | sed 's/^/    /'
@@ -298,7 +364,12 @@ if [ -f "${WORKSPACE}/compliance_flow/scripts/smoke-flows.mjs" ]; then
     # that lies about its own failure.
     die "smoke matrix could not authenticate (401) — the check did not run; this says nothing about the restore"
   elif echo "${SMOKE_OUT}" | grep -qE "0 passed"; then
-    die "smoke matrix passed nothing — the restored system is not serving"
+    # Print the per-check lines here too. This branch used to die on the
+    # summary alone, so a run where every probe failed for one shared reason
+    # -- the wrong base URL, as it turned out -- showed nothing that could
+    # tell you so.
+    echo "${SMOKE_OUT}" | tail -20 | sed 's/^/      /'
+    die "smoke matrix passed nothing against ${SMOKE_BASE} — every probe failed, so suspect one shared cause before concluding the restore is bad"
   else
     # This used to be tolerated as "expected while Solr reindexes". It no
     # longer can be: the index was destroyed deliberately in step 4 and step 7
