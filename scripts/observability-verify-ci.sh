@@ -130,8 +130,15 @@ ok "all observability containers running"
 # ---------------------------------------------------------------------------
 step "4. The drill"
 # ---------------------------------------------------------------------------
+# MAILPIT_URL alongside the other two, and for the same reason: on a runner
+# the published ports live on the dind daemon, not on this container's
+# loopback. Without it the drill could not reach the sink it had just
+# started, reported "delivery NOT asserted" and downgraded itself to
+# PASS (detection only) -- correct behaviour, and a silently narrower drill
+# than the one CI is supposed to be running.
 PROM_URL="http://${OBS_HOST}:9090" \
 ALERTMANAGER_URL="http://${OBS_HOST}:9093" \
+MAILPIT_URL="http://${OBS_HOST}:8025" \
   bash "${SCRIPT_DIR}/verify-observability.sh" \
   || die "the monitoring stack did not detect a stopped container"
 

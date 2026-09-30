@@ -432,6 +432,19 @@ pitr:verify:
   before_script: []
   script:
     - apk add --no-cache bash coreutils findutils python3
+    # The WAL archive directory has to be writable by the database BEFORE it
+    # starts, and under dind it is not. `./wal-archive` resolves on the
+    # DAEMON's filesystem, where it does not exist, so Docker creates it
+    # root-owned 0755 -- and postgres:15-alpine runs as uid 70, so every
+    # archive_command fails. The drill then correctly refuses with "this
+    # database has never archived a WAL segment", which is the right answer
+    # to the wrong question: the archive was never writable.
+    #
+    # Chowned through a helper container because the job cannot touch a
+    # daemon-side path directly, and to the same absolute path compose will
+    # use, so both resolve to the same directory.
+    - mkdir -p wal-archive
+    - docker run --rm -v "$CI_PROJECT_DIR/wal-archive:/w" alpine:3 chown -R 70:70 /w
     - docker compose --env-file .env.example up -d db
     - |
       for i in $(seq 1 60); do

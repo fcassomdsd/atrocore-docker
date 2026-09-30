@@ -45,7 +45,22 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE="${DEMO_WORKSPACE:-$(cd "${REPO_DIR}/.." && pwd)}"
-DEMO_HOST="${DEMO_HOST:-localhost}"
+# Under docker-in-docker the daemon publishing these ports is a different
+# host from the one running this script -- the `docker` service alias, not
+# localhost. observability-verify-ci.sh documents having hit exactly this and
+# fixed it for itself; this script kept the `${DEMO_HOST:-localhost}` half,
+# and because it had NEVER ONCE RUN in CI nothing surfaced it. Its first
+# scheduled run failed on it: Solr unreachable at localhost:8083, reported as
+# "indexed -1/1 nodes" for ten minutes and then a timeout.
+#
+# GitHub's runner is the other case and must stay localhost: it runs Docker
+# natively, so published ports really are on loopback, and its workflow sets
+# DEMO_HOST explicitly.
+if [ -n "${CI:-}" ] && [ -z "${DEMO_HOST:-}" ]; then
+  DEMO_HOST=docker
+else
+  DEMO_HOST="${DEMO_HOST:-localhost}"
+fi
 ASSUME_POPULATED=0
 [ "${1:-}" = "--assume-populated" ] && ASSUME_POPULATED=1
 
@@ -93,6 +108,15 @@ echo "    atrocore tables=${BEFORE_ATRO}  alfresco tables=${BEFORE_ALF}  web tab
 echo "    content files=${BEFORE_CONTENT}  demo inspection rows=${BEFORE_FINDING}"
 [ "${BEFORE_ATRO:-0}" -gt 0 ] || die "nothing to back up — AtroCore database is empty"
 [ "${BEFORE_CONTENT:-0}" -gt 0 ] || die "nothing to back up — content store is empty"
+# The other two were unguarded, and step 6 compares before against after: an
+# unreadable count is empty on both sides and "matches pre-backup" passes
+# having compared nothing to nothing. Seen for real -- the first scheduled
+# run printed `web tables=` with no number and would have asserted its way
+# past it. A count that cannot be read is not a count.
+case "${BEFORE_ALF}" in ''|*[!0-9]*) die "could not read the Alfresco table count ('${BEFORE_ALF}') — step 6 would compare it against an equally empty value and pass" ;; esac
+[ "${BEFORE_ALF}" -gt 0 ] || die "nothing to back up — Alfresco database is empty"
+case "${BEFORE_WEB}" in ''|*[!0-9]*) die "could not read the compliance_web table count ('${BEFORE_WEB}') — step 6 would compare it against an equally empty value and pass" ;; esac
+[ "${BEFORE_WEB}" -gt 0 ] || die "nothing to back up — compliance_web database is empty"
 
 # The index size becomes the target the rebuilt index must reach in step 7,
 # so it is read only once Solr has stopped moving -- a count taken while the
