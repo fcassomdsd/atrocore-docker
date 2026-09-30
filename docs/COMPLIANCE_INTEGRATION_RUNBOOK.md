@@ -915,6 +915,312 @@ produces no metric at all and every threshold rule reads that as fine.
 `BACKUP_METRICS_DIR` must name the same directory the observability stack
 mounts for node-exporter, or the metrics are written and never read.
 
+## 7.12 Point-in-time recovery (`scripts/restore-pitr.sh`)
+
+A backup set rewinds to last night. WAL rewinds to five minutes ago — but
+only through a *physical* base backup, which is why `backup-platform.sh`
+stores a `*.basebackup.tar` per database alongside the logical dumps. A
+`pg_dump` cannot be combined with WAL at all.
+
+Recover one database to a moment:
+
+```bash
+./scripts/restore-pitr.sh \
+  --dataset atrocore \
+  --base /srv/backups/20260929T173614Z/atrocore.basebackup.tar \
+  --target-time "2026-09-29 17:30:24+00"
+```
+
+It brings the recovered database up **beside** the live one, on port 55432,
+and writes nothing to any running service. That is deliberate: a
+point-in-time recovery is a hypothesis about when the damage happened, the
+first guess is usually wrong, and restoring over the live cluster makes every
+attempt destructive. Inspect the result, then promote it by dumping from it
+and restoring deliberately.
+
+The WAL archive is mounted **read-only** and archiving is off on the
+recovered instance. After the recovery target the instance is on a diverged
+timeline, and letting it write into the archive would corrupt the input to
+every later recovery.
+
+Three things worth knowing before you need this at 3am:
+
+- **Asking for a time beyond the archive fails loudly**, with
+  `recovery ended before configured recovery target was reached`. The script
+  then prints the latest time you *can* reach, taken from the server's own
+  log. It does not hand you a database recovered to the wrong point.
+- **`--target-time latest`** replays everything available, for the case where
+  you want the last committed transaction rather than a specific moment.
+- **The database alone is not the platform.** The Alfresco content store is
+  not WAL-protected; a database recovered to a time its content store does
+  not match will reference files that are not there. For whole-platform
+  recovery use `restore-platform.sh`. This tool is for rewinding one database
+  past a bad write.
+
+### The drill
+
+`scripts/verify-pitr.sh` proves the chain end to end, and is the reason any
+of the above can be relied on:
+
+```
+base backup -> marker A -> T -> marker B -> WAL switch -> recover to T
+```
+
+It then asserts A is present and **B is absent**. The absence is the whole
+test: a recovery that replays everything also contains A, so finding A proves
+only that the base backup works. Only B's absence shows replay stopped where
+it was told.
+
+It writes one table, `pitr_drill_marker`, into the **live** cluster and drops
+it on every exit path — a drill against a database nobody uses proves nothing
+about this platform's WAL configuration. `pitr:verify` runs it in CI, manual
+or scheduled.
+
+**What the 2026-09-29 drill found on its first run:** AtroCore's base backup
+had never been produced. `backup-platform.sh` passed `POSTGRES_PIM_USER` to
+`pg_basebackup`, and this image's application role (`usuario`) has neither
+SUPERUSER nor REPLICATION, so every attempt failed with *must be superuser or
+replication role to start walsender* — and because that failure only warned,
+the run still printed "Backup set complete". Point-in-time recovery for
+AtroCore was impossible, and nothing said so. Fixed by connecting as
+`postgres`; a failed base backup now counts as a skipped dataset, so the run
+exits non-zero and the backup alerts fire, and the MANIFEST carries a `pitr:`
+block stating per dataset whether the set can recover to a point in time.
+
+**What it proved afterwards** (AtroCore, against a base backup from a real
+stored set): 3 WAL segments replayed from the archive, `recovery stopping
+before commit of transaction 46471, time 2026-09-29 17:37:29.800322+00`,
+marker A present, marker B absent, and the live database untouched.
+
+**What drilling the other two datasets found (same day).** The AtroCore drill
+passing told us less than it appeared to, because AtroCore is the dataset
+whose PostgreSQL settings are all defaults. Two defects surfaced the moment
+`--dataset alfresco` ran, both of which would have been met for the first
+time during an actual incident:
+
+- **Alfresco's recovery aborted outright**, with `recovery aborted because of
+  insufficient parameter settings — max_connections = 100 is a lower setting
+  than on the primary server, where its value was 300`. A recovering server
+  refuses to start when `max_connections`, `max_worker_processes`,
+  `max_wal_senders`, `max_prepared_transactions` or `max_locks_per_transaction`
+  is below the primary's, because those values size shared structures the WAL
+  records depend on. Alfresco sets `max_connections=300` on its compose
+  `command:` line — which lives nowhere inside `PGDATA`, so no base backup
+  carries it. The primary's values *are* recorded in `pg_control`, which does
+  travel inside the base backup, so `restore-pitr.sh` now reads them with
+  `pg_controldata` and passes them back as `-c` overrides. That works with the
+  source host gone, which a lookup against the live server would not.
+- **Every assertion was querying as the wrong role.** Both scripts used
+  `psql -U postgres`, which is correct only for AtroCore: a physical backup
+  carries the source cluster's roles, and Alfresco's bootstrap superuser is
+  `alfresco`, compliance_web's is `POSTGRES_USER` (`compliance`). Neither
+  cluster has a `postgres` role at all. Through the scripts' own `2>/dev/null`
+  this returned empty rather than erroring, so the wait loop could not see the
+  promotion and timed out after 240s on a recovery that had in fact succeeded.
+  Both scripts now resolve the superuser per dataset; `restore-pitr.sh` takes
+  `--superuser` to override it.
+
+All three datasets now pass 13/13 — AtroCore (PG 15), Alfresco (PG 16.5,
+3 segments replayed, stopping before transaction 1814838) and compliance_web
+(PG 16, 3 segments, stopping before transaction 915) — each with marker A
+present, marker B absent, and the live database untouched.
+
+**The WAL archive had no retention**, which the drill turned up by filling the
+disk. Measured 2026-09-29, ~2.5 days after archiving was switched on:
+`compliance_cmis/data/wal-archive` 5.5 GB / 350 segments,
+`atrocore-docker/wal-archive` 1.2 GB / 85, `compliance_web/data/wal-archive`
+529 MB / 37 — about **3 GB/day and growing**, on a host that had reached 99%.
+Fixed the same day; see §7.13.
+
+**Still not measured: RTO on production-sized data.** The AtroCore database
+here is 59 MB and recovers in seconds. That number says nothing about a real
+authority's dataset, and §5.2 of the production plan keeps its RTO figure as
+a target.
+
+## 7.13 WAL retention (`scripts/prune-wal-archive.sh`)
+
+`archive_mode=on` with `archive_timeout=300` buys the five-minute RPO by
+writing a 16 MB segment at least every five minutes, per database, forever.
+Nothing reclaimed them, so the archive that exists to prevent data loss was
+on course to cause an outage: when the volume fills, `archive_command` starts
+failing, PostgreSQL retains WAL in `pg_wal` rather than discarding it, and the
+database stops.
+
+```bash
+./scripts/prune-wal-archive.sh                # dry run, all three datasets
+./scripts/prune-wal-archive.sh --yes          # apply
+```
+
+`backup-platform.sh` calls it at the end of its retention step, so a host on
+the nightly timer needs nothing else. It runs **after** old sets are pruned,
+so the boundary reflects what is still kept.
+
+**The boundary is a base backup, not a date.** "Delete WAL older than N days"
+is the obvious rule and it is wrong in both directions: too small and it
+silently destroys point-in-time recovery from a backup you are still keeping,
+too large and the archive grows without bound. A base backup can only replay
+forward from the segment it started in, and that segment's name is written
+inside the backup itself:
+
+```
+START WAL LOCATION: 2/6C000028 (file 00000001000000020000006C)
+```
+
+So the cut is taken at the START WAL of the **oldest retained** base backup —
+read out of its own `backup_label` by `scripts/wal-anchor.lib.sh`, which
+`ship-wal-archive.sh --prune-local` now shares. WAL retention then follows set
+retention automatically: prune a set and the boundary moves forward, keep a
+set longer and the WAL it needs is kept with it.
+
+**With no base backup it refuses and exits non-zero**, rather than freeing the
+disk. That state is real — a dataset whose base backup failed has no anchor,
+which is exactly where AtroCore was for days — and the answer is to fix the
+backup, not to delete the evidence.
+
+**The anchor is local.** A base backup that exists only at the offsite
+destination is invisible to it, and the WAL that would replay onto it will be
+pruned as unreachable. That is the one way this can destroy recovery from a
+backup you still hold. If you keep older sets offsite, pass `--anchor` with
+that backup's START WAL, or ship the archive with them and prune only what
+`ship-wal-archive.sh` has confirmed shipped.
+
+`ship-wal-archive.sh --prune-local` previously enforced only "shipped, and
+older than N days", with a comment telling the operator to choose N at least
+as large as their set retention. Nothing checked it. It now applies the same
+anchor as a hard floor, and a stream with no base backup is not pruned at all.
+
+### What the first run did
+
+Against this platform on 2026-09-29, with one retained set:
+
+| dataset | removed | kept | freed |
+|---|---|---|---|
+| atrocore | 80 | 12 | ~1.3 GB |
+| alfresco | 371 | 8 | ~5.9 GB |
+| compliance_web | 41 | 8 | ~0.7 GB |
+
+492 segments, and the disk went from **99% to 87%**. A first run is usually
+this dramatic: the WAL written before your oldest base backup cannot be
+replayed by anything you hold, so it is dead weight rather than recovery
+capability. Look at the dry run before believing it.
+
+Then all three PITR drills were re-run **against that set's stored base
+backups**, to prove the pruning had not cut into anything load-bearing: 13/13
+each, 3 segments replayed per dataset, marker A present and marker B absent,
+from archives now holding 9, 9 and 13 segments. `restore-platform.sh` still
+parses the set to exactly its seven files.
+
+**It refuses when the mount cannot see the archive.** `pg_archivecleanup`
+normally runs in a container, because a real archive belongs to the database's
+uid at mode 0700 and the invoking user cannot read it — which makes the tool
+depend on a bind mount resolving to the directory you meant. Where the Docker
+daemon is not on the caller's filesystem (docker-in-docker, a remote daemon, a
+path that does not exist on the daemon's side) it silently does not: Docker
+creates an empty directory, `pg_archivecleanup` finds nothing, and the run
+reports *would remove 0 of 0 segments* and exits 0. An archive growing without
+bound while something reports success every night is precisely what this tool
+exists to prevent, so when the archive is readable from here the count seen
+through the mount is compared with the count seen directly and a disagreement
+is fatal. When it is not readable — the normal case on a real host — there is
+nothing to compare and the container's view is trusted. `--local`
+(`WAL_PRUNE_LOCAL=1`) skips the container entirely for hosts that have
+`pg_archivecleanup` installed and an archive the caller can read.
+
+This was found by this repository's own CI. The conformance test's fixtures
+live on the job container; the job used dind; the mount reached the daemon;
+three checks failed with nothing pruned.
+
+`scripts/verify-wal-pruning.sh` (18 checks, `validate:wal-retention`, a merge
+gate) is the conformance test. It runs on synthetic fixtures — empty files
+named like WAL segments, and tars containing nothing but a `backup_label` — so
+it needs no database and no stack. It takes `pg_archivecleanup` from PATH when
+one is installed and from a container otherwise, so CI exercises the direct
+path and a developer without the binary exercises the container path. What it checks is the boundary rather than
+the deletion: that the anchor is the oldest retained backup and not the
+newest, that it is ordered by the segment part rather than the timeline
+prefix, that the anchor segment and everything after it survive, that
+`.history` files survive, and that with no base backup nothing is deleted.
+Each was mutation-tested.
+
+## 7.14 Recovery time (`scripts/measure-rto.sh`)
+
+An RTO is the number a DR plan is judged by, and this platform had never
+produced one. The restore drill proved a backup restores a working system; it
+never timed it, and §5.2 carried a figure inherited from a design document.
+
+```bash
+./scripts/measure-rto.sh --from /srv/backups/20260929T213923Z \
+  --project-nodes 250000 --project-content-gb 200
+```
+
+**It stops the clock later than the restore does, on purpose.**
+`restore-platform.sh` finishes when the data is back. `restore-verify-ci.sh`
+then checks the system answers and *tolerates a partially failing smoke
+matrix as "expected while Solr reindexes"*. Both are correct about what they
+do. Neither is an RTO: Solr is derived state and deliberately not backed up,
+so on a blank host it does not exist, and the reads that depend on it are not
+incidental — the checklist endpoint, open findings, and four report Web
+Scripts. A recovery that has restored every byte and cannot answer *which
+findings are open* has not recovered. So this removes Solr's index before
+restoring, which is the state a real recovery starts from, and keeps the
+clock running until the index is rebuilt and the gateway smoke matrix passes.
+
+**Two guards, because a reindex is easy to fake.** The index size is recorded
+before the wipe and the phase is not over until the rebuilt index reaches it —
+"zero transactions remaining" alone is what an index that has not started
+tracking reports, so a loop waiting on that returns in seconds with a
+meaningless number. That catches an index that never fills; it does not catch
+one that was never emptied, so the Solr volume IDs are read before removal and
+asserted gone afterwards, and the low-water mark seen during the rebuild is
+reported and must be below the target. Both were mutation-tested — removing
+the container without its volumes aborts the run before anything is restored.
+
+### The measurement (2026-09-29)
+
+Two runs against the live platform, restoring set `20260929T213923Z`:
+**1m50s** and **1m40s** to a searching, serving system, smoke matrix 15/15
+both times. The second run's breakdown:
+
+| phase | | |
+|---|---|---|
+| teardown | 12.3s | fixed |
+| verify set (690 MB) | 1.8s | size-dependent |
+| content store (790 MB) | 7.6s | size-dependent, 104 MB/s |
+| databases (3 dumps) | 8.5s | size-dependent |
+| Alfresco ready | 40.4s | fixed |
+| search correct again | 23.1s | size-dependent, 1,242 nodes |
+| smoke matrix | 6.8s | fixed |
+| **total** | **1m40s** | |
+
+**At this scale the platform is dominated by fixed cost** — 59.8s of the 100s
+is teardown, JVM startup and the smoke matrix, and does not grow with data.
+That is the useful shape: everything that scales is 41s, and 23s of it is
+indexing.
+
+**Extrapolating, with the caveats stated.** `--project-nodes` and
+`--project-content-gb` scale the size-dependent phases and leave the fixed
+ones alone. For 250,000 nodes and 200 GB of content that gives **about 2.6
+hours, of which ~78 minutes is reindexing**. This is arithmetic on one
+measurement, not a second measurement. It reads **low**, for three reasons
+worth knowing before quoting it:
+
+- Solr starts with Alfresco, so on a dataset this small most of the indexing
+  finishes while the stack is still booting and is charged to the fixed term.
+  The wall-clock rate here is 18.7 ms/node; Solr's own per-node mean, which
+  excludes tracker polling, is 9.9 ms/node. The truth is between them and the
+  gap closes only as indexing outlasts startup.
+- Alfresco indexing is not perfectly linear at scale.
+- A real authority's documents are larger per node than a demo dataset's.
+
+**Every restore is now a data point.** `restore-platform.sh` times its phases
+and prints the breakdown, and appends a machine-readable line when
+`RTO_RECORD` names a file. `restore-verify-ci.sh` sets it, and `restore:verify`
+publishes `rto-measurements.jsonl` as a 90-day artifact, so the figure can be
+trended rather than re-derived whenever someone asks.
+
+**Still not measured on production-sized data**, and no arithmetic substitutes
+for that. What this replaces is a number with no measurement behind it at all.
+
 ## 8. Failure Isolation Guide
 
 Use these quick cues:

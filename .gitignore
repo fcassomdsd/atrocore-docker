@@ -14,3 +14,9 @@ docker-compose.override.yaml
 
 # continuously written WAL archive (P3.4)
 wal-archive/
+
+# measured recovery times, appended by measure-rto.sh and restore-platform.sh.
+# A local measurement log, not a tracked artifact -- the numbers that matter
+# are quoted in the runbook and the production plan, with the date they were
+# taken.
+rto-measurements.jsonl

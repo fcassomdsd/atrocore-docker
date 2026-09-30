@@ -35,7 +35,10 @@ ok() { PASSED=$((PASSED+1)); printf '  ok   %s\n' "$1"; }
 no() { FAILED=$((FAILED+1)); printf '\033[31m  FAIL %s\033[0m\n' "$1" >&2; }
 
 # A manifest in the shape backup-platform.sh actually writes, including the
-# wal_archives block that caused the bug.
+# wal_archives block that caused the bug -- and the pitr block, which is a
+# THIRD `- name:` list added later. Every new top-level list is another chance
+# for the same defect, so the fixture has to grow with the real manifest or it
+# stops testing the thing that broke.
 cat > "$WORK/MANIFEST" <<'EOF'
 # compliance-platform backup set
 created_utc: 20260929T130352Z
@@ -52,6 +55,16 @@ wal_archives:
     segments: 23
 # PITR = the newest *.basebackup.tar in this set, plus WAL from the
 # archive paths above.
+pitr:
+  - name: atrocore
+    base: none
+    recoverable_to_point_in_time: no
+  - name: alfresco
+    base: alfresco.basebackup.tar
+    recoverable_to_point_in_time: yes
+  - name: compliance_web
+    base: compliance_web.basebackup.tar
+    recoverable_to_point_in_time: yes
 files:
   - name: alf_data.tar.gz
     bytes: 491164568
@@ -79,13 +92,25 @@ expected:
 $EXPECTED"
 fi
 
+# The labels are identical in the wal_archives and pitr blocks, so this covers
+# both: neither list may contribute a name to the file list.
 for label in atrocore alfresco compliance_web; do
   if printf '%s\n' "$ACTUAL" | grep -qx "$label"; then
-    no "a wal_archives label leaked into the file list: $label"
+    no "a wal_archives/pitr label leaked into the file list: $label"
   else
-    ok "wal_archives label excluded: $label"
+    ok "wal_archives and pitr label excluded: $label"
   fi
 done
+
+printf '\nThe pitr block is readable on its own\n'
+# Not parser-critical, but it is the answer to "can this set recover to a point
+# in time?", and a set that cannot must be able to say so.
+PITR_NO="$(awk '/^pitr:/ {inp=1; next} /^[^ #]/ {inp=0} inp && /^  - name: / {sub(/^  - name: /, ""); n=$0} inp && /recoverable_to_point_in_time: no/ {print n}' "$WORK/MANIFEST")"
+if [ "$PITR_NO" = "atrocore" ]; then
+  ok "the dataset with no base backup is named: atrocore"
+else
+  no "expected atrocore to be reported as not PITR-recoverable, got: ${PITR_NO:-<nothing>}"
+fi
 
 printf '\nThe old parser is gone from every script that reads a MANIFEST\n'
 # The exact expression that caused the bug. Its reappearance anywhere is the

@@ -6,46 +6,37 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ## [Unreleased]
 
-### Changed
-
-- **The offsite restore is now proven end to end, against the live platform.** Not a drill on throwaway data: a set was taken from the running system, pushed offsite, **pulled back from the offsite copy**, and restored over the live stack.
-
-  After it: 155/70/9 tables across the three databases, 6,271 content files, all seven inspection folders, gateway smoke 15/15, error envelope 5/5 — and finding `H-ZZZZA0001-ATS-001` back in its exact workflow state, `Pending Closure Approval`. Business state, not row counts.
-
-  This is the check that the MANIFEST parser defect had been hiding behind: `restore-platform.sh` verified all six files cleanly on the first attempt, which it could not have done before that fix. It also confirmed the safety behaviour — the restore refuses outright while Alfresco is running rather than corrupting a live content store.
-
-  **Not measured: RTO.** The restore completed without incident but was not timed, and a ~681 MB set is not production-sized. §5.2's figure stays a target.
-
-  Documented as a procedure in the runbook (§7.10), including that Solr is deliberately not restored and that `smoke-flows.mjs` is the check which decides whether recovery is complete.
-
-- **The restore drill now restores from the offsite copy, not the local set.** After the backup step it pushes the set to a destination, pulls it back into a different directory, **deletes the local copy**, and restores only from what came back.
-
-  Deleting the local set is what makes it honest. Left in place, a restore could read the wrong directory and nobody would learn that the offsite copy had never been exercised — which is the same shape as the defect this drill exists to catch.
-
-  Without a set-and-forget guard this would only ever have been a claim: `restore-platform.sh` was unable to restore anything for days precisely because nothing ran the drill. `restore:verify` now sets `BACKUP_DESTINATION=local` against a scratch directory on the runner, so it exercises the push/pull/restore-from-pulled path on every run. It does not prove *remoteness* — no CI runner can — but the path is the part that rots.
-
-  The offsite leg is skipped silently when `BACKUP_DESTINATION` is unset, so the drill behaves exactly as before for anyone running it by hand without a destination.
-
-  The pulled copy is written outside `BACKUP_DIR`, because anything inside it is subject to retention pruning and to "the newest directory here is the set" discovery — a restore source another tool may delete or mistake for a backup is not a restore source.
-
-### Fixed
-
-- **`restore-platform.sh` could not restore any backup set taken after WAL archiving was added.** A MANIFEST contains **two** `- name:` lists — `files:`, which names the files in the set with a sha256 each, and `wal_archives:`, which names archive *directories* that are deliberately not in the set. The verification loop matched `- name:` with a line-oriented `sed`, which cannot tell them apart, so it read the three archive labels as missing files:
-
-  ```
-  FAIL atrocore listed in MANIFEST but missing
-  FAIL alfresco listed in MANIFEST but missing
-  FAIL compliance_web listed in MANIFEST but missing
-  3 file(s) failed verification — refusing to restore a corrupt set
-  ```
-
-  The sets were intact throughout. **The restore path refused them.** Nothing caught it because no test had ever fed the parser a manifest containing a `wal_archives:` block — the restore drill predates that block, and it is scheduled by nothing.
-
-  Found by accident: the new offsite `push` reuses the same verification, so the first real backup pushed through it failed in exactly the same way.
-
-  Both readers now parse only the `files:` section, and `scripts/verify-manifest-parsing.sh` covers it against a manifest in the real shape — including that the two copies of the expression stay identical, and that a manifest with no `wal_archives:` block still parses. Mutation-tested by restoring the original parser.
-
 ### Added
+
+- **The RTO is measured — `scripts/measure-rto.sh`.** §5.2 of the production plan had carried a recovery-time figure inherited from a design document that assumed a warm standby this platform does not have. The restore drill proved a backup restores a working system; it never timed one.
+
+  **The clock stops later than the restore does, and that is the point.** `restore-platform.sh` finishes when the data is back. `restore-verify-ci.sh` then checks the system answers and *tolerates a partially failing smoke matrix as "expected while Solr reindexes"*. Neither is wrong about what it does, and neither is an RTO. Solr is derived state and deliberately not backed up, so on a blank host it does not exist — and the reads that depend on it are the checklist endpoint, open findings, and four report Web Scripts. A recovery that has restored every byte and cannot answer *which findings are open* has not recovered. So the tool removes Solr's index before restoring and keeps the clock running until the index is rebuilt and the gateway smoke matrix passes.
+
+  **Measured 2026-09-29, two runs: 1m50s and 1m40s**, smoke matrix 15/15 both times, restoring a 690 MB set (1,242 indexed nodes, 10,574 `alf_node` rows, 6,317 content files / 790 MB). Breakdown of the second: teardown 12.3s, verify 1.8s, content store 7.6s (104 MB/s), databases 8.5s, Alfresco ready 40.4s, **search correct again 23.1s**, smoke 6.8s. **59.8s of the 100s is fixed cost** — teardown, JVM startup, smoke — and does not grow with data.
+
+  Afterwards: 155/70/9 tables, 6,317 content files, and `H-ZZZZA0001-ATS-001` findable **by search** in its exact state, `Pending Closure Approval` — which proves the rebuilt index, not just the database.
+
+  **Two guards, because a reindex is trivial to fake.** The index size is recorded before the wipe and the phase is not over until the rebuilt index reaches it — "zero transactions remaining" alone is what an index that has not begun tracking reports, so a loop waiting on that returns in seconds with a fast, meaningless number. That catches an index that never fills. It does *not* catch one that was never emptied, so the Solr volume IDs are read before removal and asserted gone after, and the low-water mark observed during the rebuild must be below the target. Both mutation-tested: removing the container without its volumes aborts the run before anything is restored, and the first clean run recorded a low-water mark of 0.
+
+  Two flaws in the first version were found and fixed rather than reported around. `alfresco_ready` and `search_ready` were being measured as if sequential when Solr indexes *during* Alfresco's boot, so the breakdown charged indexing to the fixed term; they are now two marks on one clock, and the tool prints both the wall-clock rate (18.7 ms/node) and Solr's own per-node mean (9.9 ms/node) because they disagree and the disagreement is the honest part. And the reindex poll ran at 5s, putting up to 10s of quantisation error on the one phase the projection is most sensitive to; it now polls at 2s.
+
+  `--project-nodes` / `--project-content-gb` scale the size-dependent phases and leave the fixed ones alone: 250,000 nodes and 200 GB gives **about 2.6 hours, ~78 minutes of it reindexing**. The output labels this arithmetic on one measurement rather than a second measurement, and says it reads low — indexing that currently hides inside a boot will not once it outlasts startup.
+
+
+- **Point-in-time recovery, as a tool and as a drill — P3.4.** The WAL archive and the base backups had existed for days with nothing that could replay one. `scripts/restore-pitr.sh` recovers one database to a chosen moment; `scripts/verify-pitr.sh` proves the chain works and `pitr:verify` runs it in CI.
+
+  **The recovered database comes up beside the live one, never over it.** A point-in-time recovery is a hypothesis about when the damage happened and the first guess is usually wrong; restoring over the live cluster makes every attempt destructive. The instance lands on a scratch port for inspection, and is promoted by hand. The WAL archive is mounted **read-only** and archiving is disabled on the recovered instance — after the target it is on a diverged timeline, and letting it archive would corrupt the input to every later recovery. The image is resolved from `docker compose config` rather than hardcoded, because the three databases are on PostgreSQL 15, 16.5 and 16 and a base backup can only be read by the major version that wrote it.
+
+  **The drill's assertion is an absence.** It writes marker A, takes a target time, writes marker B, forces a WAL switch, recovers to the target, and asserts A present and **B absent**. A recovery that replays everything also contains A, so finding A proves only that the base backup works — which the logical-dump restore already covers. Only B's absence shows replay stopped where it was told. The forced WAL switch is load-bearing too: with `archive_timeout=300` both markers would otherwise sit in an unarchived segment and the drill would pass for the wrong reason, having recovered to a point before either.
+
+  It writes to the **live** cluster (one table, dropped on every exit path) because a drill against a database nobody uses proves nothing about this platform's WAL configuration.
+
+  Two vacuous checks were caught while building it, both the same shape as defects this tier has already seen. `restore-pitr.sh`'s first run reported *recovery complete, server promoted* having replayed **nothing** — a base backup taken with `-Xf` carries enough WAL to reach consistency, so a recovery that fetches no archived segment is indistinguishable from a working one; the segment count is now reported and zero is called out. And the drill's archiver-health precondition was three queries, two of which had no `FROM` clause: psql errored, `2>/dev/null` ate it, both variables came back empty, and the guard could never fire while reporting "last archived never" about a database that was archiving fine.
+
+  **Proven** against the live AtroCore database, using a base backup from a real stored set: 3 WAL segments replayed from the archive, `recovery stopping before commit of transaction 46471, time 2026-09-29 17:37:29.800322+00`, marker A present, marker B absent, live database untouched. 13/13 checks. Mutation-tested: a target past marker B fails the absence check, a missing WAL switch fails the archive wait, and a database that has never archived is refused.
+
+  **Not measured: RTO.** This database is 59 MB and recovers in seconds, which says nothing about a real authority's dataset.
+
 
 - **Three systemd timers, and the means to tell whether they are still running.** Nightly (take a set, push it offsite, prune — in that order, prune last and only after a successful push, so a bad night never leaves fewer backups than it started with), WAL every fifteen minutes, and a weekly read-back verification of the newest offsite set.
 
@@ -61,7 +52,6 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
   Watching that happen found a further gap. Only the nightly job had an `absent()` rule. With the verification job never once executed, `OffsiteVerificationStale` sat **inactive** — because `time() - <no data>` is not a comparison that can be true, so a staleness rule says nothing until its job has succeeded at least once. "Nobody has ever verified an offsite backup" was therefore silent, which is precisely the condition the `absent()` rules exist for. All three jobs now have one.
 
-### Added
 
 - **`scripts/ship-wal-archive.sh` — WAL shipped offsite, asynchronously.** Backup sets bound the recovery point to the last backup; WAL closes it to five minutes, but only once the segments leave the host.
 
@@ -79,7 +69,6 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
   `WAL_SHIP_BATCH_MAX` (default 512) caps a run — at 16 MB a segment, a few hundred is several gigabytes of staging.
 
-### Added
 
 - **Offsite backups, with the destination as a pluggable driver.** `backup-platform.sh` wrote sets to a local directory, which protects the data but not the host — a fire or a failed array takes the backups with it.
 
@@ -102,45 +91,6 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 - **`validate:backup-destination` in CI**, running the conformance test against the `local` driver — a merge gate, since it needs no external service. It does not prove any authority's destination works; it protects the contract every driver is written against.
 
-### Fixed
-
-- **The alerting drill assumed a warm Prometheus, and reported an empty one as a pass.** With the dind host resolved, `observability:verify` reached Prometheus and then failed on a stack that was fine: `ok 0 scrape targets up`, followed by a baseline probe reading `none`. Prometheus scrapes every 30s and knows nothing until its first cycle completes, and in CI the monitoring stack is seconds old — locally it has usually been up for hours, which is why this never showed.
-
-  Three impatient reads are now bounded waits: for Prometheus and Alertmanager to start **listening** (a container Docker calls running is not necessarily serving), for the first scrape cycle, and for the baseline probe to report the target as up.
-
-  The worse half was `ok "${UP_COUNT} scrape targets up"` printing `ok 0 scrape targets up`. **A check that passes while measuring nothing is exactly the false coverage this drill exists to prevent**, and it is worse here than anywhere, because this is the check that vouches for everything else. Zero targets is now a hard failure with a message pointing at the likely cause — the six external networks.
-
-  The "targets not up" list also moved to after the stack settles. Taken straight after the first scrape it named most of the platform, because a target Prometheus has not reached yet and one that is genuinely down look identical that early.
-
-### Fixed
-
-- **`observability:verify` looked for Prometheus on the wrong host under docker-in-docker.** The whole platform built, the demo ran green and all eleven monitoring containers started — and then the drill failed with "Prometheus is not answering at `http://localhost:9090`". Under dind the daemon publishing those ports is the `docker` service alias, not the job container's loopback.
-
-  `demo-verify-ci.sh` has exactly this logic for `DEMO_HOST`; this wrapper had only the `${DEMO_HOST:-localhost}` half of it, which reads a variable the other script sets in its **own** process and never exports — so it always resolved to `localhost`. GitHub's runner is the opposite case and must stay `localhost` (Docker runs natively there, so published ports really are on loopback), which is why the `docker` default applies only when neither variable is set. All four combinations are covered.
-
-- **The drill claimed to restore a container it had never stopped.** The exit trap printed `restoring <container>` on any early exit, including a preflight failure where nothing had been touched — which reads as though the drill broke something before giving up. It now restores only after the stop actually happened.
-
-### Fixed
-
-- **`demo:verify` now dumps the services' logs when the demo step fails, before the teardown destroys them.** Added after a CI failure that could not be diagnosed at all: the MET canonical import answered `{"success": false, "error": null}` and the job ended. The webscript behind it reports a caught exception as `runtimeError.message`, which is `undefined` for a Java exception surfaced into Rhino — so the HTTP response said nothing and Alfresco's own log line said `undefined`. The only remaining copy of the cause was in the container's log, and `after_script` had already torn the stack down by the time anyone looked.
-
-  Alfresco gets 400 lines and goes first, because that is where the webscripts run and therefore where an unexplained import failure is explained; Solr, ActiveMQ, the import service, Node-RED and AtroCore get short tails, enough to see a service that died without burying the Alfresco output. Container states are printed too, since a service that exited explains a failure that otherwise reads as an application bug.
-
-  A failure whose evidence is destroyed by the cleanup costs a full CI cycle per guess.
-
-### Fixed
-
-- **The demo quickstart unset `DOCKER_HOST`, breaking every run under docker-in-docker.** Introduced by P3.2's "stop `compliance_flow/.env` reconfiguring every compose call" fix, which unconditionally unset a list of `COMPOSE_*` and `DOCKER_*` variables after sourcing that file. Under dind the runner sets `DOCKER_HOST=tcp://docker:2375`, because the daemon is a separate service with no shared socket — so from that line onward every docker call fell back to `unix:///var/run/docker.sock`, which does not exist there. Step 0b died with `Cannot connect to the Docker daemon` on a stack that was up and had just passed all five health probes.
-
-  It hid for a day because every run in between was **local**, where `DOCKER_HOST` is unset to begin with and unsetting it again changes nothing. The first run of `demo:verify` in GitLab CI after the change failed on it, and took `observability:verify` with it — the latter builds the platform through the same script.
-
-  The intent was never "clear these variables", it was "do not let this `.env` reconfigure docker". It now **snapshots the caller's values before sourcing and restores them after**, which says exactly that: whatever the caller set survives, and anything the `.env` introduced is dropped. Verified in all three shapes — a caller value the `.env` tries to override survives, a value present only in the `.env` is dropped, and a caller's own `COMPOSE_PROJECT_NAME` is kept.
-
-  A reachability check now runs immediately after the restore, so this class of failure fails on one line naming the cause rather than several steps later inside a script that runs a throwaway container.
-
-- **Probe labels printed a malformed address for URLs with no explicit port.** The label used the text after the last colon, which is the port only when there is one; `http://localhost/health` rendered as `://localhost/health`. It now prints the whole URL — this is the line someone reads when a probe fails.
-
-### Added
 
 - **An observability stack — Prometheus, Alertmanager, Grafana, Loki — under `observability/`, with a drill that proves it alerts. P3.5.**
 
@@ -162,7 +112,6 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 - **`scripts/verify-observability.sh`, and `observability:verify` in both CI pipelines.** The drill stops a container on purpose, waits for the alert to reach `firing`, confirms Alertmanager received it, restarts the container and waits for the alert to clear — failing if any step does not happen. It refuses to start unless the probe is already passing, so a "firing" alert afterwards cannot be one that was already there, and it restores the container on any exit including a failure partway. A Prometheus that is running, a Grafana with a dashboard and rules that parse are all easy to mistake for monitoring, and none of them shows that a failure would be *noticed*. Manual/scheduled like `demo:verify` and `restore:verify`.
 
-### Added
 
 - **`GET /health` on AtroCore, and healthchecks on both services — P3.5.** Neither service declared a `healthcheck`, so `docker compose ps` could only ever say `running`; the README said so outright.
 
@@ -176,19 +125,11 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
   Verified both ways against the built image: installed → `200`, an empty `web-data` → `503` with the hint, `/` and `/api/v1/App/user` unchanged at `200`/`401`, container reaching `healthy`.
 
-### Changed
-
-- **The demo quickstart now probes real health endpoints — P3.5.** The Node-RED probe has had three forms and the reasons it moved are the point. `/specialties` was the original: it proxies to AtroCore, so it answered `400` until the metadata step had run — it was reporting on AtroCore, not on the gateway. The editor root replaced it, which tests the gateway but only that Node-RED's HTTP server is up: a `flows.json` that fails to load leaves the editor serving while every REST endpoint `404`s, so it passed on a gateway that could not answer a single call. `compliance_flow`'s new `/health` is served *by a flow*, so a `200` proves the flows loaded.
-
-  AtroCore now gets two probes after bootstrap rather than one, because they fail for different reasons: `/health` says whether the application was installed at all, and `/api/v1/App/user` says whether the installed application routes and has auth on.
-
-### Added
 
 - **A CI check that WAL archiving actually works, not just that it is configured — P3.4.** The failure mode this closes is silent: a broken `archive_command` does not stop PostgreSQL. It keeps serving, `failed_count` climbs, and WAL accumulates until the volume fills — at which point the cause is hours old. Every existing job that boots this database would have passed throughout. `scripts/verify-wal-archiving.sh` forces a segment switch and asserts it was archived, so a broken archiver fails at merge time instead of at 3am on a full disk. Byte-identical across the repos that enable archiving, the same convention as `release-tag.sh`.
 
   Two details it had to get right, both found by testing rather than reasoning. It counts segments **inside the container**, because under docker-in-docker the CLI and daemon have separate filesystems and a host-side count would read zero regardless of what archiving did. And it asserts archiving is healthy **now** — never failed, or succeeded since it last failed — rather than `failed_count = 0`: those counters are cumulative and survive restarts, so one transient blip would make a zero-check fail forever, and a check that cries wolf gets muted.
 
-### Added
 
 - **WAL archiving and physical base backups, for point-in-time recovery — P3.4.** `archive_mode=on` with `archive_timeout=300`, so the exposure window is five minutes rather than the nightly backup interval. PITR was proven end to end on a throwaway instance before being wired in: recovery to a chosen timestamp kept the rows committed before it and discarded those after.
 
@@ -200,7 +141,6 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 **Operational hazard:** with `archive_mode=on` a failing `archive_command` makes PostgreSQL retain every WAL segment until archiving succeeds, filling the volume until the database stops. Silent until sudden. `pg_stat_archiver.failed_count` is named as an alert in P3.5.
 
-### Added
 
 - **Platform-wide backup and restore — P3.4.** Exactly one of four datasets was covered before this: `backup-db.sh` dumps the AtroCore database, and nothing touched Alfresco's database, `compliance_web`'s database, or the Alfresco content store. A database backup without its matching content store does not restore a working system. `scripts/backup-platform.sh` covers all four, with a `MANIFEST` carrying a SHA-256 per file and a retention sweep; `scripts/restore-platform.sh` restores a set and **verifies every checksum before touching anything**, because restoring half a corrupt set is worse than not starting.
 
@@ -210,22 +150,6 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 - **`deploy/systemd/compliance-backup.{service,timer}`** — the schedule as a tracked artifact rather than something typed on a host, so it is reviewable and survives a rebuild. `Persistent=true` so a backup missed while the host was off runs at next boot instead of being silently skipped.
 
-### Changed
-
-- **`BIND_IP` controls which host interface published ports listen on — P3.3.** Every published port in this repo now binds through `${BIND_IP:-0.0.0.0}`. The default preserves current behaviour exactly: the demo quickstart and `demo-verify-ci.sh` reach services over the network, and under dind `DEMO_HOST` is `docker` rather than localhost, so a hardcoded loopback bind would break the whole-stack guard. A production deployment sets `BIND_IP=127.0.0.1`, leaving `compliance_web`'s TLS edge on 443 as the only externally published port. See "An ideal production configuration.md" §2.3.
-
-### Fixed
-
-- **`demo-quickstart.sh` no longer lets `compliance_flow/.env` reconfigure every `docker compose` call it makes.** The script sources that file under `set -a` to pick up the Alfresco/AtroCore credentials and the gateway key, which exports *everything* in it — including any variable that configures compose itself. A `COMPOSE_PROJECT_NAME` set there was therefore applied to every subsequent compose invocation **for every project**, so `docker compose exec atro-web …` resolved against the wrong project and failed with `service "atro-web" is not running` — several steps after the cause and with nothing pointing back to it. Found exactly that way, while namespacing an isolated verification workspace. The script now unsets `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE`, `COMPOSE_PROFILES`, `COMPOSE_ENV_FILES`, `COMPOSE_PATH_SEPARATOR`, `DOCKER_HOST` and `DOCKER_CONTEXT` after sourcing: it needs that file's credentials, not its compose configuration.
-
-### Security
-
-- **Container hardening — P3.2.** No service in this platform previously declared a resource limit, a non-root user, a read-only root filesystem, dropped capabilities or `no-new-privileges`. What each service can take differs, and the differences are recorded as comments in the compose files rather than silently skipped:
-
-  - **Full hardening** (read-only rootfs, non-root user, `cap_drop: ALL`, `no-new-privileges`, CPU/memory limits) where the service writes nothing to its own filesystem. Verified by booting each one, not just by rendering the config.
-  - **Partial, with the reason stated in-file**, where a control is structurally inapplicable rather than merely postponed: Postgres chowns its data directory and drops privileges at startup, so `cap_drop: ALL` and a read-only rootfs break it; Node-RED must write `flows.json` into a bind mount, which is its deployment model; AtroCore installs itself into a bind mount at first run and Apache binds `:80` as root; the Alfresco JVM services write caches, logs and indexes inside their own filesystems.
-
-### Added
 
 - **Images are pinned by digest as well as tag — P3.2 (supply chain).** A tag is a mutable pointer: upstream can re-push it at any time, so a tag-only pin does not describe a reproducible build and two builds a week apart could differ with nothing in git changing. Every external image reference now uses `name:tag@sha256:...`, keeping the tag beside the digest so the version stays readable.
 
@@ -235,7 +159,6 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
   `--ignore-unfixed` keeps the gate actionable: a CVE with no available fix is information, not a task. `--skip-dirs` excludes generated and bind-mounted runtime trees — `web-data/` in particular is the AtroCore application installed at container bootstrap, gitignored and absent from a fresh checkout, which vendors its own npm tree; scanning it reports upstream's dependencies as if they were ours. It is not clean (upstream vendors a CRITICAL prototype-pollution advisory in `swiper`), but that belongs in an upstream report and in image scanning, not a gate on tracked source.
 
-### Added
 
 - **`scripts/preflight-secrets.sh` — a profile-aware credential gate, and the exit criterion for P3.1 (production secrets).** The platform ships working demo credentials on purpose: a shared gateway API key, an Alfresco database password of `alfresco`, a Solr shared secret of `secret`, and two demo identities. That is what makes a clean clone demonstrable in one pass, and it is also the single most likely way this platform gets compromised, because every one of those values is in git and the demo path and the real path are otherwise the same commands. This script is the seam between the two. `--profile demo` (the default) reports the published values and **exits 0**, so the demo and `demo:verify` are never blocked by it. `--profile production` treats every published value as a failure, and additionally catches the structural mistakes that leave a deployment insecure without looking wrong: the three gateway keys (`API_KEY`/`NODE_RED_API_KEY`/`IMPORT_API_KEY`) not matching, so the gateway rejects its own callers; a key short enough to guess; a service left in development mode, which is what arms that service's own startup secret guard; insecure session cookies; and a re-added tracked `.env`, which is the regression guard for the P0 history purge. It reads `.env` files only — no Docker, no running stack, no network — so it works in CI, in a deploy pipeline, or on a laptop. Also available as `make preflight-secrets` / `make preflight-secrets-production`, referenced from the quickstart's closing warning and runbook §10.
 
@@ -243,7 +166,6 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 - **`validate:preflight-secrets` CI job** (GitLab and the GitHub mirror), running `scripts/preflight-secrets.test.sh` — 19 checks against throwaway workspaces, needing no stack. Most of them assert that a genuinely production-ready workspace **passes**, not only that the demo one is refused: a gate that can only fail gets bypassed. `demo-verify-ci.sh` now also runs both profiles against the real assembled workspace, asserting that demo passes and that production refuses it — so neither half can silently stop working.
 
-### Added
 
 - **`InspectionCadence.planningLeadDays`: how far ahead of a due date a site visit should be raised.** The auto-scheduling job in `compliance_web` treated a cadence as due only once `nextDueDate <= today`, and then created a site visit dated *that same day* — so an activity due in 30 days was not touched for 30 days, and one due yesterday produced a visit that was already late with no planning time at all. There was no lead-time concept anywhere in the platform.
 
@@ -262,6 +184,38 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 - **Authority data packs: the same starter records as editable CSV, loaded through AtroCore's own import module (`data-packs/`, `scripts/import-data-pack.py`, `make import-data-packs [PACK=...]`).** The seed above requires `psql`; the person who enters a civil aviation authority's locations, providers, contacts, inspectors and regulations usually does not have it. Each pack is a CSV template (`Location.csv`, `ServiceProvider.csv`, `Person.csv`, `Inspector.csv`, `Reglamento.csv`, `Normativa.csv`, `LocationService.csv`, …) plus its column mapping in `data-packs/packs.json`, and a stdlib-only runner that does what would otherwise be clicked through in the import UI: ensure the `ImportFeed` (keyed on `code`, `fileDataAction=create_update`), ensure one `ImportConfiguratorItem` per mapped column (pruning columns the pack no longer maps, which would otherwise keep writing their default), convert the CSV rows to JSON, run `POST /ImportFeed/action/easyCatalog` — no file upload — and poll the resulting `ImportJob`, printing one line per failed row and exiting non-zero. Rows are matched on `ID` and upserted, so editing a value and re-running updates it and re-importing unchanged data writes nothing. Ten packs, eleven rows, imported in dependency order by `--all`. `scripts/validate-data-packs.py` (container-free, wired into both `validate:seed` jobs) checks the mapping against `metadata/entityDefs/`, the CSV headers, the `starter-` namespacing and that each pack's ids are exactly the ids the SQL seed writes for that entity; the `fresh-install` CI jobs now apply the starter seed and then import every pack, so a pack whose links or required fields do not fit the metadata fails there. `data-packs/README.md` documents the mapping and how to add a column or a pack.
 
 ### Changed
+
+- **Every restore is now timed.** `restore-platform.sh` reports a per-phase breakdown and appends a machine-readable line when `RTO_RECORD` names a file; `restore-verify-ci.sh` sets it and `restore:verify` publishes `rto-measurements.jsonl` as a 90-day artifact, so the figure is a trend rather than something re-derived whenever it is asked for. Timing uses `EPOCHREALTIME` rather than `date +%N`, because busybox `date` on the CI Alpine image would have silently rounded phases measured in tens of milliseconds to whole seconds.
+
+
+- **The offsite restore is now proven end to end, against the live platform.** Not a drill on throwaway data: a set was taken from the running system, pushed offsite, **pulled back from the offsite copy**, and restored over the live stack.
+
+  After it: 155/70/9 tables across the three databases, 6,271 content files, all seven inspection folders, gateway smoke 15/15, error envelope 5/5 — and finding `H-ZZZZA0001-ATS-001` back in its exact workflow state, `Pending Closure Approval`. Business state, not row counts.
+
+  This is the check that the MANIFEST parser defect had been hiding behind: `restore-platform.sh` verified all six files cleanly on the first attempt, which it could not have done before that fix. It also confirmed the safety behaviour — the restore refuses outright while Alfresco is running rather than corrupting a live content store.
+
+  **Not measured: RTO.** The restore completed without incident but was not timed, and a ~681 MB set is not production-sized. §5.2's figure stays a target.
+
+  Documented as a procedure in the runbook (§7.10), including that Solr is deliberately not restored and that `smoke-flows.mjs` is the check which decides whether recovery is complete.
+
+- **The restore drill now restores from the offsite copy, not the local set.** After the backup step it pushes the set to a destination, pulls it back into a different directory, **deletes the local copy**, and restores only from what came back.
+
+  Deleting the local set is what makes it honest. Left in place, a restore could read the wrong directory and nobody would learn that the offsite copy had never been exercised — which is the same shape as the defect this drill exists to catch.
+
+  Without a set-and-forget guard this would only ever have been a claim: `restore-platform.sh` was unable to restore anything for days precisely because nothing ran the drill. `restore:verify` now sets `BACKUP_DESTINATION=local` against a scratch directory on the runner, so it exercises the push/pull/restore-from-pulled path on every run. It does not prove *remoteness* — no CI runner can — but the path is the part that rots.
+
+  The offsite leg is skipped silently when `BACKUP_DESTINATION` is unset, so the drill behaves exactly as before for anyone running it by hand without a destination.
+
+  The pulled copy is written outside `BACKUP_DIR`, because anything inside it is subject to retention pruning and to "the newest directory here is the set" discovery — a restore source another tool may delete or mistake for a backup is not a restore source.
+
+
+- **The demo quickstart now probes real health endpoints — P3.5.** The Node-RED probe has had three forms and the reasons it moved are the point. `/specialties` was the original: it proxies to AtroCore, so it answered `400` until the metadata step had run — it was reporting on AtroCore, not on the gateway. The editor root replaced it, which tests the gateway but only that Node-RED's HTTP server is up: a `flows.json` that fails to load leaves the editor serving while every REST endpoint `404`s, so it passed on a gateway that could not answer a single call. `compliance_flow`'s new `/health` is served *by a flow*, so a `200` proves the flows loaded.
+
+  AtroCore now gets two probes after bootstrap rather than one, because they fail for different reasons: `/health` says whether the application was installed at all, and `/api/v1/App/user` says whether the installed application routes and has auth on.
+
+
+- **`BIND_IP` controls which host interface published ports listen on — P3.3.** Every published port in this repo now binds through `${BIND_IP:-0.0.0.0}`. The default preserves current behaviour exactly: the demo quickstart and `demo-verify-ci.sh` reach services over the network, and under dind `DEMO_HOST` is `docker` rather than localhost, so a hardcoded loopback bind would break the whole-stack guard. A production deployment sets `BIND_IP=127.0.0.1`, leaving `compliance_web`'s TLS edge on 443 as the only externally published port. See "An ideal production configuration.md" §2.3.
+
 
 - **The vanilla install now seeds three specialties, not sixteen.** A specialty taxonomy is the adopting authority's own — an administration may run a single *AGA* instead of APR/AVIS/FAU/PAV/SSEI, or no NAV/COM/SUR/ECNS/DPR split at all — so shipping the reference deployment's sixteen put its classification into every new install and invited adopters to keep it. `sql/seed-nomenclatura-catalog.sql` now inserts only `ATS`, `NAV` and `MET` (the codes the demo and starter datasets reference, so both seeds still work unchanged); the reference sixteen are opt-in via `./scripts/seed-nomenclatura.sh --yes --full-specialties` (`make db-seed-nomenclatura YES=1 FULL_SPECIALTIES=1`). `validate-seeds.py` guards the split (the default is exactly those three, default + opt-in is sixteen, no row sits outside the two blocks, and neither committed dataset may reference an opt-in specialty), both fresh-install CI jobs assert 3 instead of 16, and the README, `metadata/README.md`, `COUNTRY_ADAPTATION_GUIDE.md` and `CLAUDE.md` now say the taxonomy is the adopter's. Verified live: default run seeds 3 with every demo/starter specialty link resolving, `--full-specialties` seeds 16, and switching back returns to 3.
 - **Data-pack relationship columns resolve by human key where the related entity has one, and `importBy` is now validated against that entity's real fields.** `Normativa.csv` names its regulation by `codigo` (`RegulationCode`, `RAD-XXXX`) instead of `starter-reglamento-01`, and `LocationService.csv` names its location by `icaoCode` (`LocationICAO`, `XXXX`) instead of `starter-loc-01`, so an adopter filling in a spreadsheet does not have to look opaque ids up. `validate-data-packs.py` previously checked `importBy` against a fixed `{id, code, name}` allowlist, which both rejected legitimate keys like `codigo` and accepted names that do not exist on the target; it now resolves the column's link to the related entity and requires the named attribute to exist there, be storable, and have a type the import module can match by (mirroring `Import\FieldConverters\Link::ALLOWED_TYPES`).
@@ -282,12 +236,107 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **The WAL archive had no retention, so the mechanism protecting against data loss was on course to cause an outage.** `archive_mode=on` with `archive_timeout=300` writes a 16 MB segment at least every five minutes per database and nothing reclaimed them. Measured 2026-09-29, ~2.5 days after archiving shipped: 5.5 GB / 350 segments for Alfresco, 1.2 GB / 85 for AtroCore, 529 MB / 37 for compliance_web — **~3 GB/day**, on a disk at 99%. When the volume fills, `archive_command` fails, PostgreSQL retains WAL in `pg_wal` rather than discarding it, and the database stops.
+
+  New `scripts/prune-wal-archive.sh`, called from `backup-platform.sh`'s retention step after old sets are pruned. **The boundary is a base backup, not a date.** "Delete WAL older than N days" is wrong in both directions — too small and it silently destroys point-in-time recovery from a backup still being kept, too large and the archive grows without bound. A base backup replays forward only from the segment it started in, and that segment is named inside the backup's own `backup_label`, so the cut is taken at the START WAL of the **oldest retained** base backup. WAL retention then follows set retention automatically. `pg_archivecleanup` does the comparison.
+
+  With no base backup to anchor to it deletes nothing and exits non-zero. That state is real — a dataset whose base backup failed has no anchor, which is exactly where AtroCore was — and the answer is to fix the backup, not to free the disk. The one hazard it cannot see is a base backup held **only offsite**; `--anchor` covers that, and the header says so.
+
+  `ship-wal-archive.sh --prune-local` enforced "shipped, and older than N days", with a comment instructing the operator to choose N at least as large as their set retention. Nothing checked it. Both paths now share `scripts/wal-anchor.lib.sh` and apply the same anchor as a hard floor; a stream with no base backup is not pruned at all.
+
+  First run on this platform, with one retained set: 80 / 371 / 41 segments removed, 12 / 8 / 8 kept, **492 in total and the disk from 99% to 87%**. All three PITR drills were then re-run against that set's stored base backups — 13/13 each, 3 segments replayed, marker A present and marker B absent — so the pruning cut nothing load-bearing.
+
+  **The tool refuses when its bind mount cannot see the archive.** `pg_archivecleanup` runs in a container because a real archive belongs to the database's uid at mode 0700 — which makes the tool depend on a mount resolving to the directory the caller meant. Under docker-in-docker it does not: Docker creates an empty directory, nothing is found, and the run reports *would remove 0 of 0 segments* and exits 0. An archive growing without bound while something reports success nightly is the exact failure this tool exists to prevent, so when the archive is readable the count through the mount is compared with the count seen directly and a disagreement is fatal. Found by this repository's own CI, where the conformance test's fixtures lived on the job container and the mount reached the dind daemon — 15 passed, 3 failed, nothing pruned. `--local` / `WAL_PRUNE_LOCAL=1` skips the container where the caller can read the archive.
+
+  `scripts/verify-wal-pruning.sh` (18 checks, `validate:wal-retention`, a merge gate) is the conformance test, on synthetic fixtures so it needs no database or stack. It takes `pg_archivecleanup` from PATH when installed and from a container otherwise, so CI exercises the direct path and a developer without the binary exercises the container path. The job no longer uses dind, which is a correctness requirement rather than a saving. It tests the boundary rather than the deletion: the anchor is the oldest retained backup and not the newest, ordered by the segment part rather than the timeline prefix; the anchor segment and everything after it survive; `.history` survives; and with no base backup nothing is deleted. Five mutations, each caught — including one whose first run silently failed to apply, so the guard was re-tested rather than credited.
+
+- **Point-in-time recovery was impossible for Alfresco, and every assertion on two of the three datasets was querying as a role that does not exist.** Both found by drilling `alfresco` and `compliance_web` for the first time; the AtroCore drill had been green throughout, because AtroCore is the one dataset whose PostgreSQL settings are all defaults.
+
+  - **Alfresco's recovery aborted on startup**: `recovery aborted because of insufficient parameter settings — max_connections = 100 is a lower setting than on the primary server, where its value was 300`. A recovering server refuses to start when `max_connections`, `max_worker_processes`, `max_wal_senders`, `max_prepared_transactions` or `max_locks_per_transaction` is below the primary's, because those values size shared structures the WAL records depend on. Alfresco sets `max_connections=300` on its compose `command:` line, which lives nowhere inside `PGDATA`, so no base backup carries it — and the recovery started on the stock image's 100. The primary's values *are* recorded in `pg_control`, which does travel inside the base backup, so `restore-pitr.sh` now reads them with `pg_controldata` on the extracted data directory and passes them back as `-c` overrides. Reading them from the backup rather than from the live server is the point: the tool has to work with the source host gone.
+
+  - **`psql -U postgres` is correct only for AtroCore.** A base backup is a physical copy, so the recovered instance answers to the *source* cluster's roles: Alfresco's bootstrap superuser is `alfresco` and compliance_web's is `POSTGRES_USER` (`compliance`); neither cluster has a `postgres` role at all. Hardcoded in four places across both scripts and wrapped in their own `2>/dev/null`, this returned empty instead of erroring — so `restore-pitr.sh`'s wait loop could not observe the promotion and timed out after 240s on a recovery that had succeeded, and every assertion in `verify-pitr.sh` would have read empty and reported a working recovery as a missing table. Both scripts now resolve the superuser per dataset, and `restore-pitr.sh` takes `--superuser` to override it.
+
+  All three datasets now pass 13/13: AtroCore (PG 15), Alfresco (PG 16.5, 3 segments replayed, stopping before transaction 1814838) and compliance_web (PG 16, 3 segments, stopping before transaction 915), each with marker A present, marker B absent and the live database untouched.
+
+- **AtroCore's base backup had never been produced, so point-in-time recovery for it was impossible.** `backup-platform.sh` passed `POSTGRES_PIM_USER` to `pg_basebackup`, but this image's init scripts create the application role (`usuario`) with neither SUPERUSER nor REPLICATION, and `pg_basebackup` opens a replication connection. Every attempt since WAL archiving shipped failed with *must be superuser or replication role to start walsender* — and because that failure only **warned**, the run went on to print `Backup set complete` and exit 0. Every set ever taken was missing `atrocore.basebackup.tar`. The other two databases connect as their image's `POSTGRES_USER`, which is a superuser, so they were unaffected and the gap was invisible in a set that otherwise looked whole.
+
+  Found by the first run of the new PITR drill, on its first step.
+
+  Three changes, because the missing file was the smaller half of the problem:
+
+  - the AtroCore base backup connects as `postgres`;
+  - a base backup that fails while its service is **running** now counts as a skipped dataset, so the script exits non-zero and `with-backup-metrics.sh` records a failure that the existing backup alerts fire on — a warning that scrolls past in a nightly job is not a signal;
+  - the MANIFEST carries a `pitr:` block naming, per dataset, whether that set can recover to a point in time. Reading it off the absence of a filename is exactly how this went unnoticed.
+
+  `verify-manifest-parsing.sh` grew with it: `pitr:` is a **third** `- name:` list in the manifest, the same shape as the `wal_archives:` list whose misparsing made `restore-platform.sh` refuse every set for days. The fixture now carries all three, and asserts no label from either non-file list reaches the file list.
+
+
+- **`restore-platform.sh` could not restore any backup set taken after WAL archiving was added.** A MANIFEST contains **two** `- name:` lists — `files:`, which names the files in the set with a sha256 each, and `wal_archives:`, which names archive *directories* that are deliberately not in the set. The verification loop matched `- name:` with a line-oriented `sed`, which cannot tell them apart, so it read the three archive labels as missing files:
+
+  ```
+  FAIL atrocore listed in MANIFEST but missing
+  FAIL alfresco listed in MANIFEST but missing
+  FAIL compliance_web listed in MANIFEST but missing
+  3 file(s) failed verification — refusing to restore a corrupt set
+  ```
+
+  The sets were intact throughout. **The restore path refused them.** Nothing caught it because no test had ever fed the parser a manifest containing a `wal_archives:` block — the restore drill predates that block, and it is scheduled by nothing.
+
+  Found by accident: the new offsite `push` reuses the same verification, so the first real backup pushed through it failed in exactly the same way.
+
+  Both readers now parse only the `files:` section, and `scripts/verify-manifest-parsing.sh` covers it against a manifest in the real shape — including that the two copies of the expression stay identical, and that a manifest with no `wal_archives:` block still parses. Mutation-tested by restoring the original parser.
+
+
+- **The alerting drill assumed a warm Prometheus, and reported an empty one as a pass.** With the dind host resolved, `observability:verify` reached Prometheus and then failed on a stack that was fine: `ok 0 scrape targets up`, followed by a baseline probe reading `none`. Prometheus scrapes every 30s and knows nothing until its first cycle completes, and in CI the monitoring stack is seconds old — locally it has usually been up for hours, which is why this never showed.
+
+  Three impatient reads are now bounded waits: for Prometheus and Alertmanager to start **listening** (a container Docker calls running is not necessarily serving), for the first scrape cycle, and for the baseline probe to report the target as up.
+
+  The worse half was `ok "${UP_COUNT} scrape targets up"` printing `ok 0 scrape targets up`. **A check that passes while measuring nothing is exactly the false coverage this drill exists to prevent**, and it is worse here than anywhere, because this is the check that vouches for everything else. Zero targets is now a hard failure with a message pointing at the likely cause — the six external networks.
+
+  The "targets not up" list also moved to after the stack settles. Taken straight after the first scrape it named most of the platform, because a target Prometheus has not reached yet and one that is genuinely down look identical that early.
+
+
+- **`observability:verify` looked for Prometheus on the wrong host under docker-in-docker.** The whole platform built, the demo ran green and all eleven monitoring containers started — and then the drill failed with "Prometheus is not answering at `http://localhost:9090`". Under dind the daemon publishing those ports is the `docker` service alias, not the job container's loopback.
+
+  `demo-verify-ci.sh` has exactly this logic for `DEMO_HOST`; this wrapper had only the `${DEMO_HOST:-localhost}` half of it, which reads a variable the other script sets in its **own** process and never exports — so it always resolved to `localhost`. GitHub's runner is the opposite case and must stay `localhost` (Docker runs natively there, so published ports really are on loopback), which is why the `docker` default applies only when neither variable is set. All four combinations are covered.
+
+- **The drill claimed to restore a container it had never stopped.** The exit trap printed `restoring <container>` on any early exit, including a preflight failure where nothing had been touched — which reads as though the drill broke something before giving up. It now restores only after the stop actually happened.
+
+
+- **`demo:verify` now dumps the services' logs when the demo step fails, before the teardown destroys them.** Added after a CI failure that could not be diagnosed at all: the MET canonical import answered `{"success": false, "error": null}` and the job ended. The webscript behind it reports a caught exception as `runtimeError.message`, which is `undefined` for a Java exception surfaced into Rhino — so the HTTP response said nothing and Alfresco's own log line said `undefined`. The only remaining copy of the cause was in the container's log, and `after_script` had already torn the stack down by the time anyone looked.
+
+  Alfresco gets 400 lines and goes first, because that is where the webscripts run and therefore where an unexplained import failure is explained; Solr, ActiveMQ, the import service, Node-RED and AtroCore get short tails, enough to see a service that died without burying the Alfresco output. Container states are printed too, since a service that exited explains a failure that otherwise reads as an application bug.
+
+  A failure whose evidence is destroyed by the cleanup costs a full CI cycle per guess.
+
+
+- **The demo quickstart unset `DOCKER_HOST`, breaking every run under docker-in-docker.** Introduced by P3.2's "stop `compliance_flow/.env` reconfiguring every compose call" fix, which unconditionally unset a list of `COMPOSE_*` and `DOCKER_*` variables after sourcing that file. Under dind the runner sets `DOCKER_HOST=tcp://docker:2375`, because the daemon is a separate service with no shared socket — so from that line onward every docker call fell back to `unix:///var/run/docker.sock`, which does not exist there. Step 0b died with `Cannot connect to the Docker daemon` on a stack that was up and had just passed all five health probes.
+
+  It hid for a day because every run in between was **local**, where `DOCKER_HOST` is unset to begin with and unsetting it again changes nothing. The first run of `demo:verify` in GitLab CI after the change failed on it, and took `observability:verify` with it — the latter builds the platform through the same script.
+
+  The intent was never "clear these variables", it was "do not let this `.env` reconfigure docker". It now **snapshots the caller's values before sourcing and restores them after**, which says exactly that: whatever the caller set survives, and anything the `.env` introduced is dropped. Verified in all three shapes — a caller value the `.env` tries to override survives, a value present only in the `.env` is dropped, and a caller's own `COMPOSE_PROJECT_NAME` is kept.
+
+  A reachability check now runs immediately after the restore, so this class of failure fails on one line naming the cause rather than several steps later inside a script that runs a throwaway container.
+
+- **Probe labels printed a malformed address for URLs with no explicit port.** The label used the text after the last colon, which is the port only when there is one; `http://localhost/health` rendered as `://localhost/health`. It now prints the whole URL — this is the line someone reads when a probe fails.
+
+
+- **`demo-quickstart.sh` no longer lets `compliance_flow/.env` reconfigure every `docker compose` call it makes.** The script sources that file under `set -a` to pick up the Alfresco/AtroCore credentials and the gateway key, which exports *everything* in it — including any variable that configures compose itself. A `COMPOSE_PROJECT_NAME` set there was therefore applied to every subsequent compose invocation **for every project**, so `docker compose exec atro-web …` resolved against the wrong project and failed with `service "atro-web" is not running` — several steps after the cause and with nothing pointing back to it. Found exactly that way, while namespacing an isolated verification workspace. The script now unsets `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE`, `COMPOSE_PROFILES`, `COMPOSE_ENV_FILES`, `COMPOSE_PATH_SEPARATOR`, `DOCKER_HOST` and `DOCKER_CONTEXT` after sourcing: it needs that file's credentials, not its compose configuration.
+
+
 - **The intermittent `validate:fresh-install` failure was a race on the import module's own root folder, and is fixed.** Fresh-install runs failed intermittently — three of seventeen, at different SHAs — with one or two packs reporting `job Failed · no log rows` (`service-provider`, `inspector`, `location`, `service-area` at different times) while the rest skipped, and the same SHA always passed on retry. The runner printed only the job's state, so the cause stayed invisible; AtroCore records it on `ImportJob.message`, copied from the failing queue job by the module's `JobEntity` listener, and printing that named the defect exactly — `SQLSTATE[23505] … duplicate key value violates unique constraint "uniq_eca209cd77153098eb3b4e33"`, which is the `folder(code, deleted)` index. `ImportFeed::createImportFileFolder()` (vendored module code) looks the shared `import_feeds` root folder up and inserts it when it is missing: a SELECT-then-INSERT with no lock and no retry. On an instance that has never imported anything the daemon starts several of our jobs in the same tick — all still `Pending` — each one inserts the folder, and the losers die before their first row. That is why the failure logs **zero** rows, unlike a row-level error, which always logs one. Reproduced on demand by soft-deleting that folder, pausing the job daemon so the ten jobs pile up and resuming: the old runner hit the duplicate key, the new one did not. `import-data-pack.py` now imports **one pack at a time** (submit, wait, next), so only ever one job is creating the folder, and each pack's output prints as it finishes. The runner still prints a failed job's `message` and still re-submits a job that ends `Failed` with no log rows — now a backstop for a different importer running against the same instance rather than the fix — and both CI fresh-install jobs dump the last 80 lines of the AtroCore log when the import step fails. The import module's shared `data/import-cache` directory, whose `createTmpFile()` does a non-atomic `!is_dir() && mkdir()`, was the first suspect and is **not** involved: blocking that path left imports succeeding.
 - **The USOAP evidence-expectation catalog was never loaded by a default install — and could not have been.** `scripts/seed-usoap-evidence-expectations.sh` / `sql/seed-usoap-evidence-expectations.sql` (48 rows, one per Protocol Question whose ICAO guidance asks for a sample across a whole population of artifacts) existed and was documented, but nothing ran it: not the README checklist, not `demo-quickstart.sh`, not the fresh-install CI jobs. Wiring it in turned up why it had stayed out: its safety-net block re-created the `usoap_artifact_category` enum with `ON CONFLICT (id) DO NOTHING` on the option-link table, while `seed-usoap-vocabularies.sql` had since become the canonical home for that enum and creates the same relations under different `vocab-link-*` ids — so the conflict was on the `(deleted, extensible_enum_id, extensible_enum_option_id)` unique index and the whole seed aborted with `duplicate key value violates unique constraint`. The link insert now uses `ON CONFLICT DO NOTHING`, so the seed is idempotent whether or not the vocabularies seed has run, and it is now wired into the README checklist, `demo-quickstart.sh`, both `fresh-install` CI jobs (between the ICAO seed and the nomenclatura catalog — the order it needs, since it resolves every row to its parent PQ by `code`), `make db-seed-usoap-evidence YES=1` and runbook §7.2. It is ICAO-derived and CAA-independent: the ten artifact categories map to Alfresco node types in `compliance_cmis`'s `webscripts/usoap/generate-ce-evidence-report.post.js` (`POPULATION_CATEGORY_TYPES`), which is what resolves the report's "Type-2" sampled-population PQs. `validate-seeds.py` now guards all of it — 48 unique rows, every `pq_code` present in the ICAO seed, the artifact-category options identical to the vocabularies seed's, and its `DELETE` scoped to `usoap_evidence_expectation` — and both CI jobs assert 48 rows and 0 unresolved parents. Verified on a throwaway copy of the real schema: 48 rows with 0 NULL parents after the ICAO seed, unchanged on a re-run, and still safe standalone (the safety net creates the enum, the rows land with a NOTICE that they could not resolve their PQ).
 - **`scripts/import-data-pack.py` reported a large import's outcome from a capped page, so it could pass a failing import.** `summarise()` fetched `ImportJobLog` with `maxSize=200` and derived both the per-type counts and the error list from that page. The collection endpoint returns rows in arbitrary order, so a large pack under-reported (importing 3,393 regulation articles printed `create=200`) and — the real defect — a row error beyond the sampled page was never seen, so `collect_pack()` returned success and `--all` exited 0 over a failing import. Counts now come from each filtered collection's `total` (one query per log type plus one for the job), and error messages are fetched with their own `type=error` filter whose total is reported even when more than a page exists. A CSV with no data rows is skipped with a message instead of submitting an empty payload that only creates a job with no log rows. Found while rehearsing the reference dataset import: a 250-row file whose 240th row was invalid reported `skip=200` and exited **0** before the change, and `create=249, error=1` with a non-zero exit after it.
 - **`scripts/validate-metadata.py` no longer requires a `links` key on every entity definition.** The link cleanup removed the key entirely from five definitions, which AtroCore treats as "no links"; the validator now requires `fields` and validates `links` only when present.
 - **`make metadata-drift` no longer compares the non-runtime `data/layouts` tree.** It compared `metadata/layouts/` against `web-data/<domain>/data/layouts/`, which AtroCore never reads — so it could only ever confirm that the last `install-metadata.sh` copy ran, and an administrator's layout edit (which lands in the `layout` database table) was invisible to it either way. The check now covers entityDefs/clientDefs/scopes and prints an explicit note that layouts are DB-backed and reconciled by `scripts/install-layouts.sh`.
 - **`scripts/install-layouts.sh` sent the wrong auth header for the Layout route.** It used `Authorization: Bearer`, which that route rejects with HTTP 400 `None of security schemas did match` — its OpenAPI security scheme is an apiKey header named `Authorization-Token` (AtroCore's entity routes, which Node-RED uses, accept Bearer; this one does not). Fixed, and **verified live against the running instance**: `make install-layouts YES=1` materialised all 123 layouts into the `default` profile (`Inspector/layout/list` now returns `name, organizationID, specialty`, `Person/layout/detail` returns its 8 fields), with the 7-group platform menu intact.
+
+### Security
+
+- **Container hardening — P3.2.** No service in this platform previously declared a resource limit, a non-root user, a read-only root filesystem, dropped capabilities or `no-new-privileges`. What each service can take differs, and the differences are recorded as comments in the compose files rather than silently skipped:
+
+  - **Full hardening** (read-only rootfs, non-root user, `cap_drop: ALL`, `no-new-privileges`, CPU/memory limits) where the service writes nothing to its own filesystem. Verified by booting each one, not just by rendering the config.
+  - **Partial, with the reason stated in-file**, where a control is structurally inapplicable rather than merely postponed: Postgres chowns its data directory and drops privileges at startup, so `cap_drop: ALL` and a read-only rootfs break it; Node-RED must write `flows.json` into a bind mount, which is its deployment model; AtroCore installs itself into a bind mount at first run and Apache binds `:80` as root; the Alfresco JVM services write caches, logs and indexes inside their own filesystems.
 
 ### Documentation
 
