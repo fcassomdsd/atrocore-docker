@@ -74,10 +74,17 @@ die()  { printf '    FAIL %s\n' "$1" >&2; exit 1; }
 
 env_var() { [ -f "$1" ] && sed -n "s/^[[:space:]]*$2=//p" "$1" | tail -n1 | tr -d '"'"'"' \t'; }
 
-ATRO_USER="$(env_var "${REPO_DIR}/.env" POSTGRES_PIM_USER)"
-ATRO_DB="$(env_var "${REPO_DIR}/.env" POSTGRES_PIM_DB)"
-WEB_USER="$(env_var "${WORKSPACE}/compliance_web/.env" POSTGRES_USER)"
-WEB_DB="$(env_var "${WORKSPACE}/compliance_web/.env" POSTGRES_DB)"
+# Read from a file that must exist by now, and say which one if it does not.
+# `env_var` answers empty for a missing file and this script runs without
+# `set -e`, so an unresolved credential used to travel all the way to
+# `psql -U "" -d ""`, whose failure then looked like an empty database.
+require_env_var() { # require_env_var <file> <key> <what it is for>
+  local value
+  [ -f "$1" ] || die "$1 does not exist, so $3 cannot be resolved"
+  value="$(env_var "$1" "$2")"
+  [ -n "${value}" ] || die "$2 is not set in $1, so $3 cannot be resolved"
+  printf '%s' "${value}"
+}
 
 psql_at() { # psql_at <dir> <service> <user> <db> <sql>
   ( cd "$1" && docker compose exec -T "$2" psql -U "$3" -d "$4" -tAc "$5" ) 2>/dev/null | tr -d '[:space:]'
@@ -92,6 +99,23 @@ if [ "${ASSUME_POPULATED}" -eq 0 ]; then
 else
   step "1. Populate — skipped (--assume-populated)"
 fi
+
+# ---------------------------------------------------------------------------
+# Resolved HERE, not at the top of the script, and that ordering is the bug this
+# fixes. On a fresh runner `${WORKSPACE}/compliance_web` does not exist yet --
+# step 1 is what clones the sibling repositories and writes their .env files --
+# so reading the credentials before step 1 read a path that was not there. The
+# atrocore pair happened to work, because this project's own .env is written by
+# the pipeline's before_script, which is why only the compliance_web count came
+# back empty and the failure looked like a database problem.
+#
+# `|| exit 1` on every one of them: `die` inside `$( )` exits the SUBSHELL, so
+# without it the diagnosis would print and the script would carry on with the
+# empty value it was diagnosing -- the same silence, one layer down.
+ATRO_USER="$(require_env_var "${REPO_DIR}/.env" POSTGRES_PIM_USER "the AtroCore database user")" || exit 1
+ATRO_DB="$(require_env_var "${REPO_DIR}/.env" POSTGRES_PIM_DB "the AtroCore database name")" || exit 1
+WEB_USER="$(require_env_var "${WORKSPACE}/compliance_web/.env" POSTGRES_USER "the compliance_web database user")" || exit 1
+WEB_DB="$(require_env_var "${WORKSPACE}/compliance_web/.env" POSTGRES_DB "the compliance_web database name")" || exit 1
 
 # ---------------------------------------------------------------------------
 step "2. Record the before state"

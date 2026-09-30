@@ -90,6 +90,14 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **The restore drill read its database credentials before the repositories they live in had been cloned.** `restore:verify` ran for the first time ever this week and stopped at step 2 with `could not read the compliance_web table count ('')`. Nothing was wrong with that database.
+
+  The script resolved four credentials from `.env` files at the top of the file, and **step 1 is what clones the sibling repositories and writes those `.env` files**. On a fresh runner `../compliance_web` did not exist yet, so `POSTGRES_USER` and `POSTGRES_DB` came back empty and `psql -U "" -d ""` failed — and because the drill runs under `set -uo pipefail` with no `-e`, the empty values travelled silently from line 79 to a psql invocation 40 lines later. The AtroCore pair happened to work, because this project's own `.env` is written by the pipeline's `before_script`, which is why exactly one of the three counts was blank and the symptom pointed at the wrong service.
+
+  Credentials are now resolved **after** the populate step, through a `require_env_var` that names the missing file or the missing key instead of answering empty. Each call carries `|| exit 1`, because `die` inside `$( )` exits the subshell — without it the diagnosis would print and the run would continue with the very value it had just diagnosed.
+
+  **The guard added last week is what caught this**, and it is worth recording that it worked: step 6 compares the before and after counts, and an unreadable count is empty on both sides, so `matches pre-backup` would have passed having compared nothing to nothing. The drill failed loudly on its first real run instead of reporting a successful restore it had not verified.
+
 - **`local.sh`'s push reported failure having copied every byte correctly.** `[ -f "${SRC}/MANIFEST" ] && cp …` was the **last command in the branch**, so with no plaintext MANIFEST the test was false, the branch returned 1, and `backup-offsite.sh` died with "driver push failed" after a completely successful copy. Latent until encrypted sets — which have no plaintext MANIFEST — made it reachable; found on the first run of the new conformance test.
 
   The MANIFEST-last rule it was implementing is a real correctness property: a set carrying its completeness marker is treated as complete, so the marker must land last even where a copy is unlikely to fail. That rule now generalises to `ENCRYPTED` for encrypted sets, in all three drivers, so a partially pushed encrypted set cannot look finished.
