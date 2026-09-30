@@ -18,6 +18,7 @@ docker compose -f observability/docker-compose.yaml up -d
 | Grafana | http://127.0.0.1:3001 | `admin` / `GRAFANA_ADMIN_PASSWORD` |
 | Prometheus | http://127.0.0.1:9090 | none |
 | Alertmanager | http://127.0.0.1:9093 | none |
+| MailPit (alert sink) | http://127.0.0.1:8025 | none |
 
 All three bind to **loopback only** by default (`OBS_BIND_IP`). Prometheus has
 no authentication of any kind and Alertmanager can silence alerts, so neither
@@ -66,8 +67,10 @@ this stack's job, not theirs.
 ```
 
 It stops a container on purpose, waits for the alert to reach `firing`,
-confirms Alertmanager received it, restarts the container and waits for the
-alert to clear — failing if any step does not happen. A Prometheus that is
+confirms Alertmanager received it, **confirms the notification was actually
+delivered**, restarts the container, waits for the alert to clear, and
+confirms the recovery notice arrived too — failing if any step does not
+happen. A Prometheus that is
 running, a Grafana with a dashboard and alert rules that parse are all easy to
 mistake for monitoring, and none of them shows that anything would be
 *noticed*. Every failure this stack was built for is one where the system
@@ -75,8 +78,16 @@ looks fine, so "it looks fine" is the one piece of evidence that cannot be
 trusted here.
 
 ```
-=== PASS — a stopped container fired an alert, reached Alertmanager, and resolved on recovery.
+=== PASS — a stopped container fired an alert, reached Alertmanager, was DELIVERED, and both it and its recovery notice arrived.
 ```
+
+Until 2026-09-30 it stopped at "reached Alertmanager". That was the honest
+limit at the time — with no mail server there was nothing to assert delivery
+against — but it meant the drill passed while all 22 rules routed to a
+receiver that notified nobody. Detection is the harder half and it was
+working; the half that makes detection useful was missing and the drill could
+not see it. If MailPit is not running the script says so and reports
+`PASS (detection only)` rather than quietly narrowing what it proved.
 
 `--target <container>` picks a different victim; `--keep-broken` leaves it
 stopped so you can look at the alert by hand.
@@ -123,26 +134,60 @@ A count-based rule would have been red ever since, permanently.
 
 ---
 
-## Alert delivery is not configured out of the box
+## Alert delivery
 
-`alertmanager/alertmanager.yml` ships with a receiver that notifies nobody.
-Alerts are still received, grouped, inhibited and visible in the UI — which is
-also what the drill above asserts against, so alerting can be proven without a
-mail server existing.
+There are two Alertmanager configs and `ALERTMANAGER_CONFIG` selects which one
+is mounted:
 
-To turn on email, uncomment the block in that file. Note that **Alertmanager
-does not expand environment variables in its configuration**, which is why
-there are no `${...}` placeholders in it: a `${SMTP_HOST}` would be used as a
-literal hostname and the failure would surface as mail quietly not arriving.
-Use `auth_password_file` for the password — the file is tracked in git, and
-the platform's rule since P3.1 is that a credential in a repository is a
-published credential.
+| value | file | delivers to |
+|---|---|---|
+| *(default)* | `alertmanager/alertmanager.demo.yml` | the MailPit container in this project |
+| `alertmanager.yml` | `alertmanager/alertmanager.yml` | whatever you configure — nothing, until you do |
+
+**Why the demo one is the default.** The alternative default is what this
+platform actually had: 22 alert rules, every one of them routed to a receiver
+with no notifier. Alertmanager recorded and grouped them and the drill
+confirmed they arrived, and nothing was ever sent to a person. Shipping a
+default that delivers nowhere means the first time anyone finds out is during
+an incident.
+
+**MailPit is a test sink, not delivery.** It accepts any mail on port 1025,
+keeps it in memory, and exposes it at <http://127.0.0.1:8025> over a UI and a
+JSON API — which is what lets the drill *assert* delivery instead of asking
+someone to go and look in an inbox. It is in the same compose project as the
+thing it is monitoring, so it dies with the host it would be reporting on.
+That is fine for a demo and unacceptable in production, and
+`../scripts/preflight-secrets.sh --production` **fails** if this config is
+still selected — the same treatment as the shared demo API key.
+
+**For production**, set `ALERTMANAGER_CONFIG=alertmanager.yml` and fill that
+file in. Note that **Alertmanager does not expand environment variables in its
+configuration**, which is why there are no `${...}` placeholders in it: a
+`${SMTP_HOST}` would be used as a literal hostname and the failure would
+surface as mail quietly not arriving. Which *file* is mounted can be a
+variable — compose expands the volume path — but its contents cannot be.
+Use `auth_password_file` for the password: the file is tracked in git, and the
+platform's rule since P3.1 is that a credential in a repository is a published
+credential.
+
+The production preflight also fails if the selected file configures no
+notifier at all, so "I set the variable and forgot to fill the file in" is
+caught rather than discovered later.
+
+### A note on timing
+
+`group_interval` is 5 minutes, and a group is flushed at most once per
+interval — so a **resolved** notification cannot arrive sooner than that after
+the firing one, no matter how fast the alert clears. The drill reads that
+value from Alertmanager's own API rather than assuming it; the first version
+waited 180 seconds and failed every time against a path that was working
+perfectly.
 
 ---
 
 ## Cost, and the networks
 
-Roughly **1 GiB of RAM** across eleven containers, with per-container limits
+Roughly **1 GiB of RAM** across twelve containers (MailPit adds ~30 MB), with per-container limits
 in the compose file. `FOOTPRINT_AUDIT.md` puts the platform's own floor at 8 GB
 minimum / 16 GB recommended; on an 8 GB host this stack is what pushes it over.
 Run it on the 16 GB configuration, or accept that the demo host does not

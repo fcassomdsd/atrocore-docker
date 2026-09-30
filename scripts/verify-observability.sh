@@ -37,6 +37,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OBS_DIR="${ROOT_DIR}/observability"
 PROM="${PROM_URL:-http://127.0.0.1:9090}"
 ALERTMANAGER="${ALERTMANAGER_URL:-http://127.0.0.1:9093}"
+# The demo mail sink. Delivery is asserted when it is reachable and skipped
+# with a loud note when it is not -- see step 5b.
+MAILPIT="${MAILPIT_URL:-http://127.0.0.1:8025}"
+DELIVERY_ASSERTED=0
 # compliance-backend is the default because it has a fixed container_name, it
 # restarts in seconds, and nothing else depends on it being up. Stopping
 # Alfresco to test an alert would cost ten minutes to undo.
@@ -317,12 +321,57 @@ done
   || die "the alert is firing in Prometheus but never reached Alertmanager.
          Check the 'alerting:' block in observability/prometheus/prometheus.yml and that
          alertmanager is on the obs_net network."
-ok "Alertmanager holds the alert (it would notify, if a receiver were configured)"
+ok "Alertmanager holds the alert"
 
-# Whether a notification was actually SENT is deliberately not asserted: the
-# default configuration has no receiver, because a tracked config file is no
-# place for an SMTP password. Delivery is an operator's configuration step,
-# documented in observability/README.md; detection is what this drill proves.
+# ---------------------------------------------------------------------------
+step "5b. Confirm it was actually DELIVERED"
+# ---------------------------------------------------------------------------
+# Arriving at Alertmanager and being sent to somebody are two different
+# things, and until 2026-09-30 this drill stopped at the first. All 22 rules
+# routed to a receiver with no notifier, so the platform could detect every
+# failure it was built for and tell nobody about any of them -- and the drill
+# passed, because it only ever asked whether Alertmanager had the alert.
+#
+# It stopped there for a real reason: delivery could not be tested without a
+# mail server. MailPit is one that can be asserted against, so the excuse is
+# gone. Skipped, loudly, if it is not running -- a production config delivers
+# to a real smarthost this script has no business sending mail through.
+if ! curl -fsS -m 5 "${MAILPIT}/api/v1/info" >/dev/null 2>&1; then
+  info "no MailPit at ${MAILPIT} — delivery NOT asserted"
+  info "this drill then proves detection only. Start the demo sink with:"
+  info "  (cd observability && docker compose up -d mailpit)"
+  info "or, if this is a production configuration, verify delivery against your own smarthost."
+  DELIVERY_ASSERTED=0
+else
+  mailpit_count() { # mailpit_count <substring of subject>
+    curl -fsS -m 10 "${MAILPIT}/api/v1/messages?limit=200" \
+      | jget "import json,sys
+d=json.load(sys.stdin)
+print(sum(1 for m in d.get('messages', []) if '''$1''' in (m.get('Subject') or '')))
+" 2>/dev/null || echo 0
+  }
+
+  # group_wait is 10s for critical, and ServiceHealthProbeFailing is critical,
+  # so this should not be slow. Allowed 180s anyway: a deadline that is only
+  # just long enough turns an intermittently slow path into a flaky drill,
+  # and a flaky drill gets disabled.
+  deadline=$((SECONDS + 180))
+  sent=0
+  while (( SECONDS < deadline )); do
+    sent=$(mailpit_count "ServiceHealthProbeFailing")
+    (( sent > 0 )) && break
+    info "nothing delivered yet — waiting"
+    sleep 10
+  done
+  if (( sent == 0 )); then
+    docker logs obs-alertmanager 2>&1 | grep -iE 'notify|smtp|error' | tail -5 | sed 's/^/         /'
+    die "Alertmanager holds the alert but sent no mail in 180s.
+         Detection works and delivery does not, which is the state this platform
+         was in until the MailPit sink existed to catch it."
+  fi
+  ok "delivered: ${sent} notification(s) for ServiceHealthProbeFailing reached the mail sink"
+  DELIVERY_ASSERTED=1
+fi
 
 # ---------------------------------------------------------------------------
 step "6. Fix it — restart ${TARGET} and watch the alert clear"
@@ -352,4 +401,50 @@ done
          An alert that never resolves is as bad as one that never fires."
 ok "alert cleared after the service recovered"
 
-printf '\n=== PASS — a stopped container fired an alert, reached Alertmanager, and resolved on recovery.\n'
+# The recovery notice. send_resolved is on for both receivers, and an
+# alerting path that fires but never says "cleared" leaves people unsure
+# whether an incident is over -- which is how a stale red gets ignored.
+if (( DELIVERY_ASSERTED == 1 )); then
+  # The deadline comes from Alertmanager's own group_interval, not from a
+  # guess. A group is flushed at most once per group_interval, so a resolved
+  # notification CANNOT arrive sooner than that after the firing one -- the
+  # first version of this check waited 180s against a 5m interval and failed
+  # every time, on a path that was working. Measured: firing 01:11:31,
+  # resolved 01:16:31, exactly 5m apart.
+  GROUP_INTERVAL="$(curl -fsS -m 10 "${ALERTMANAGER}/api/v2/status" | jget "
+import json,re,sys
+cfg = json.load(sys.stdin)['config']['original']
+m = re.search(r'^\s*group_interval:\s*([0-9]+)([smh])\s*$', cfg, re.M)
+if not m: print(300); raise SystemExit
+n, unit = int(m.group(1)), m.group(2)
+print(n * {'s': 1, 'm': 60, 'h': 3600}[unit])
+" 2>/dev/null || echo 300)"
+  case "${GROUP_INTERVAL}" in ''|*[!0-9]*) GROUP_INTERVAL=300 ;; esac
+  info "group_interval is ${GROUP_INTERVAL}s, so the recovery notice cannot arrive before then"
+  deadline=$((SECONDS + GROUP_INTERVAL + 180))
+  resolved=0
+  while (( SECONDS < deadline )); do
+    resolved=$(curl -fsS -m 10 "${MAILPIT}/api/v1/messages?limit=200" \
+      | jget "import json,sys
+d=json.load(sys.stdin)
+print(sum(1 for m in d.get('messages', [])
+          if 'ServiceHealthProbeFailing' in (m.get('Subject') or '')
+          and 'RESOLVED' in (m.get('Subject') or '')))
+" 2>/dev/null || echo 0)
+    (( resolved > 0 )) && break
+    info "no recovery notice yet — waiting"
+    sleep 10
+  done
+  (( resolved > 0 )) \
+    || die "the alert cleared but no RESOLVED notification was sent within $((GROUP_INTERVAL + 180))s.
+         send_resolved is configured; a path that only ever reports failures
+         leaves an operator unable to tell a fixed incident from a forgotten one."
+  ok "recovery notice delivered"
+fi
+
+if (( DELIVERY_ASSERTED == 1 )); then
+  printf '\n=== PASS — a stopped container fired an alert, reached Alertmanager, was DELIVERED, and both it and its recovery notice arrived.\n'
+else
+  printf '\n=== PASS (detection only) — a stopped container fired an alert, reached Alertmanager, and resolved on recovery.\n'
+  printf '    Delivery was not asserted; see step 5b.\n'
+fi

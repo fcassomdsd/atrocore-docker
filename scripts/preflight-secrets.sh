@@ -282,6 +282,70 @@ if [ "$PROFILE" = "production" ]; then
   check_mode compliance_web    AUTH_NODE_ENV      production
   check_mode compliance_import APP_ENV            production
   check_mode compliance_web    AUTH_COOKIE_SECURE true
+
+  bold "Alerts must reach a person"
+  # The demo Alertmanager config delivers to a MailPit container inside the
+  # observability compose project. Shipping it would give a deployment
+  # alerting that looks configured, passes its own drill, and posts every
+  # notification into a test sink on the same host that dies with it. That is
+  # worse than no alerting because it reads as protection -- the same reason
+  # the shared API key is a failure here rather than a warning.
+  #
+  # An unset ALERTMANAGER_CONFIG means the demo file, since that is the
+  # compose default, so "not configured" and "configured wrongly" are the
+  # same answer here.
+  AM_DIR="${WORKSPACE}/atrocore-docker/observability/alertmanager"
+  AM_CONFIG="$(read_env_var "${WORKSPACE}/atrocore-docker/.env" ALERTMANAGER_CONFIG)"
+  AM_CONFIG="${AM_CONFIG:-alertmanager.demo.yml}"
+  if [ ! -d "$AM_DIR" ]; then
+    # No observability stack in this workspace at all. That is a deployment
+    # with no monitoring rather than one with broken monitoring -- visibly
+    # different, and not this script's call to make: the stack is opt-in by
+    # design (it costs ~1 GiB, see FOOTPRINT_AUDIT.md). Warn rather than fail,
+    # and say what is not being checked.
+    warn "no observability/alertmanager in this workspace — alert delivery not checked, and this deployment has no monitoring at all"
+  elif [ "$AM_CONFIG" = "alertmanager.demo.yml" ]; then
+    fail "ALERTMANAGER_CONFIG is '${AM_CONFIG}' — alerts would go to the MailPit test sink, not to anyone. Set ALERTMANAGER_CONFIG=alertmanager.yml and configure a real smarthost in observability/alertmanager/alertmanager.yml"
+  elif [ ! -f "${AM_DIR}/${AM_CONFIG}" ]; then
+    fail "observability/alertmanager/${AM_CONFIG} does not exist — Alertmanager would not start"
+  else
+    pass "ALERTMANAGER_CONFIG=${AM_CONFIG}"
+    # Per RECEIVER, not per file. "At least one notifier somewhere" passes a
+    # config where platform-critical is wired up and platform-default is not
+    # -- and platform-default is the one carrying every warning-severity
+    # alert, including DiskFillingUp, which is what fills a WAL archive and
+    # stops a database. Half-configured alerting is the failure this whole
+    # check exists to catch, so it has to look at each receiver.
+    #
+    # awk rather than a YAML parser: this script's contract is that it reads
+    # .env files with no daemon, no network and no dependencies, and the CI
+    # job that runs it installs only bash and git.
+    unconfigured="$(awk '
+      /^[a-zA-Z]/ { in_recv = ($0 ~ /^receivers:/) ? 1 : 0; next }
+      !in_recv { next }
+      # Strip comments, so the commented-out template in alertmanager.yml
+      # does not read as a configured notifier.
+      { line = $0; sub(/#.*/, "", line) }
+      line ~ /^[[:space:]]*-[[:space:]]*name:[[:space:]]*/ {
+        if (name != "" && !has) print name
+        name = line; sub(/^[[:space:]]*-[[:space:]]*name:[[:space:]]*/, "", name)
+        gsub(/^[[:space:]"'"'"']+|[[:space:]"'"'"']+$/, "", name)
+        has = 0; next
+      }
+      line ~ /^[[:space:]]*(email|webhook|webex|slack|msteams|msteamsv2|opsgenie|pagerduty|pushover|sns|telegram|victorops|wechat|discord|jira|rocketchat)_configs:/ { has = 1 }
+      END { if (name != "" && !has) print name }
+    ' "${AM_DIR}/${AM_CONFIG}")"
+    if [ -z "$unconfigured" ]; then
+      pass "${AM_CONFIG}: every receiver configures a notifier"
+    else
+      for r in $unconfigured; do
+        fail "${AM_CONFIG}: receiver '${r}' configures no notifier — alerts routed there are recorded and never sent"
+      done
+    fi
+    if grep -q 'obs-mailpit' "${AM_DIR}/${AM_CONFIG}"; then
+      fail "${AM_CONFIG} still points at the MailPit test sink (obs-mailpit)"
+    fi
+  fi
 fi
 
 # ---------------------------------------------------------------------------

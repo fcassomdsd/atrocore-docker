@@ -74,7 +74,19 @@ services:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # WHICH config is a compose variable, because Alertmanager cannot read
+      # one. It does not expand environment variables in its configuration
+      # file, so there is no way to make one file serve both the demo sink and
+      # a real smarthost -- but compose DOES expand this path, so the choice
+      # of file can be a variable even though the contents cannot.
+      #
+      # Default is the demo config, which delivers to the MailPit container
+      # below. That is deliberate: the alternative default is what this
+      # platform already had, 22 alert rules routed to a receiver that
+      # notified nobody. Production sets ALERTMANAGER_CONFIG=alertmanager.yml
+      # and fills it in; preflight-secrets.sh --production fails if it did
+      # not.
+      - ./alertmanager/${ALERTMANAGER_CONFIG:-alertmanager.demo.yml}:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
     # No SMTP_* environment here, deliberately: Alertmanager does not expand
     # environment variables in its configuration file, so passing them would
@@ -94,6 +106,50 @@ services:
         limits:
           cpus: "0.5"
           memory: 128M
+    networks: [obs_net]
+
+  # A test SMTP sink, so alert DELIVERY can be asserted rather than assumed.
+  #
+  # Detection was already drilled; delivery was not, because there was nothing
+  # to deliver to. Every rule routed to a receiver with no notifier, and no
+  # amount of care with the routing tree changes what that adds up to.
+  #
+  # MailPit rather than a real relay because it accepts anything, keeps it in
+  # memory, and exposes it over HTTP -- so "the alert was sent" becomes a
+  # scriptable assertion (scripts/verify-observability.sh step 6). MailPit
+  # rather than smtp4dev because it is a 30MB static binary against a .NET
+  # runtime, and FOOTPRINT_AUDIT.md's whole point is that this stack has no
+  # memory to spare.
+  #
+  # Nothing outside this compose project may reach it, and it stores nothing:
+  # it is a place for mail to go during a test, not a mailbox.
+  mailpit:
+    image: axllent/mailpit:v1.21@sha256:81370195cd4a0eab9604d17c2617a7525b0486f9365555253b6c5376c6350f1a
+    container_name: obs-mailpit
+    environment:
+      # In memory. A test sink that accumulates a disk file across runs is a
+      # test sink whose assertions start matching mail from last week.
+      MP_DATABASE: ""
+      MP_MAX_MESSAGES: "500"
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      # Loopback by default, like every other port in this stack. 8025 is the
+      # UI and API; 1025 is SMTP and is deliberately NOT published -- only
+      # Alertmanager needs it and it reaches it over obs_net.
+      - "${OBS_BIND_IP:-127.0.0.1}:8025:8025"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 96M
     networks: [obs_net]
 
   grafana:

@@ -80,7 +80,41 @@ EOF
 POSTGRES_PASSWORD=r3al-atrocore-root-password
 POSTGRES_PIM_USER=atrocore
 POSTGRES_PIM_PASSWORD=r3al-atrocore-pim-password
+ALERTMANAGER_CONFIG=alertmanager.yml
 EOF
+  # Alerts have somewhere to go. A production workspace without this is not
+  # production-ready: the platform ships no destination, and the default
+  # config delivers to a test sink.
+  make_alertmanager_config "$ws" both
+}
+
+# make_alertmanager_config <workspace> <both|critical-only|none>
+# Only as much Alertmanager config as the preflight check reads: the receiver
+# list and whether each one names a notifier.
+make_alertmanager_config() {
+  local ws="$1" which="$2"
+  mkdir -p "$ws/atrocore-docker/observability/alertmanager"
+  {
+    echo "route:"
+    echo "  receiver: platform-default"
+    echo "  routes:"
+    echo "    - matchers: [severity = \"critical\"]"
+    echo "      receiver: platform-critical"
+    echo "receivers:"
+    echo "  - name: platform-default"
+    if [ "$which" = "both" ]; then
+      echo "    webhook_configs:"
+      echo "      - url: https://tickets.internal.example/hooks/platform"
+      echo "        send_resolved: true"
+    fi
+    echo "  - name: platform-critical"
+    if [ "$which" = "both" ] || [ "$which" = "critical-only" ]; then
+      echo "    email_configs:"
+      echo "      - to: oncall@authority.example"
+      echo "        send_resolved: true"
+    fi
+    echo "inhibit_rules: []"
+  } > "$ws/atrocore-docker/observability/alertmanager/alertmanager.yml"
 }
 
 # A workspace configured the way the demo ships.
@@ -132,6 +166,51 @@ make_production_workspace "$PROD"
 OUT=$(run "$PROD" --profile production); RC=$?
 check "a fully configured production workspace passes" 0 "$RC"
 check_output "  ...and says so" "Production profile OK" "$OUT"
+
+# --- Alerts must reach a person ---------------------------------------------
+# The platform ships no destination on purpose -- a relay is the adopting
+# authority's infrastructure -- so the production gate has to be what stops a
+# deployment going out with alerts pointed at nothing, or at the test sink.
+
+AMDEMO="$WORK_DIR/am-demo"
+make_production_workspace "$AMDEMO"
+# Unset, which is what the compose file treats as "use the demo sink".
+sed -i '/^ALERTMANAGER_CONFIG=/d' "$AMDEMO/atrocore-docker/.env"
+OUT=$(run "$AMDEMO" --profile production); RC=$?
+check "the MailPit demo sink is refused in production" 1 "$RC"
+check_output "  ...naming it" "MailPit test sink" "$OUT"
+
+AMNONE="$WORK_DIR/am-none"
+make_production_workspace "$AMNONE"
+make_alertmanager_config "$AMNONE" none
+OUT=$(run "$AMNONE" --profile production); RC=$?
+check "a config with no notifier at all fails" 1 "$RC"
+check_output "  ...naming both receivers" "receiver 'platform-critical' configures no notifier" "$OUT"
+
+# The case a per-FILE check would have passed: critical wired up, the
+# warning-severity receiver left empty -- and that is the one carrying
+# DiskFillingUp, which is what fills a WAL archive and stops a database.
+AMHALF="$WORK_DIR/am-half"
+make_production_workspace "$AMHALF"
+make_alertmanager_config "$AMHALF" critical-only
+OUT=$(run "$AMHALF" --profile production); RC=$?
+check "a half-configured config fails" 1 "$RC"
+check_output "  ...naming the receiver that would go nowhere" "receiver 'platform-default' configures no notifier" "$OUT"
+
+AMGONE="$WORK_DIR/am-gone"
+make_production_workspace "$AMGONE"
+rm -f "$AMGONE/atrocore-docker/observability/alertmanager/alertmanager.yml"
+OUT=$(run "$AMGONE" --profile production); RC=$?
+check "a selected config file that does not exist fails" 1 "$RC"
+
+# No observability stack at all is a deployment without monitoring, which is
+# visible; it warns rather than blocking, and says what went unchecked.
+AMABSENT="$WORK_DIR/am-absent"
+make_production_workspace "$AMABSENT"
+rm -rf "$AMABSENT/atrocore-docker/observability"
+OUT=$(run "$AMABSENT" --profile production); RC=$?
+check "no observability stack warns but does not block" 0 "$RC"
+check_output "  ...saying what was not checked" "alert delivery not checked" "$OUT"
 
 # --- The demo must keep working, unchanged ----------------------------------
 DEMO="$WORK_DIR/demo"
