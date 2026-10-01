@@ -90,6 +90,10 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **`BACKUP_RETENTION_DAYS` configured the destination's retention and not this host's.** `deploy/systemd/backup.env.example` advertises the variable and the README presents it as *the* retention setting, but only `backup-offsite.sh` ever read it. `backup-platform.sh` hardcoded `RETENTION_DAYS=30`, and `backup-nightly.sh` calls it with `--yes` and nothing else — so a host that asked for one day of local sets got one day at the destination and **thirty on itself**.
+
+  Local retention is the more consequential of the two, because it is also what anchors WAL pruning: thirty days of retained sets pins thirty days of WAL no matter what the operator configured. On the machine where this was found that is the difference between roughly 4 GB and roughly 100 GB. `RETENTION_DAYS` now defaults from `BACKUP_RETENTION_DAYS`, with `--retention-days` still winning over both — verified across all four combinations, and end to end through the systemd unit, whose banner now reads `retention: 1 day(s)` where it read 30.
+
 - **The PITR drill got as far as "invalid tar magic" in CI, which reads as a corrupt backup and is not one.** `pitr:verify` ran for the first time ever this week. The first run failed because the WAL archive was not writable by the database; fixing that let the drill get further, and it then failed at the extraction with `tar: invalid tar magic` — against a base backup this host had just written and measured at 46M.
 
   The backup is fine. **`docker run -v ${BASE}:/base.tar` resolves `${BASE}` on the DAEMON's filesystem**, and the drill's default workdir is `/tmp/pitr-drill-*`, which exists only in the job container. Docker does not fail on a source path it cannot find — it creates an empty **directory** there and mounts that. tar is handed a directory, and says the thing that sounds like a damaged archive. This is the fifth appearance of one root cause: under docker-in-docker, a path the job container can see is not a path the daemon can see. `/builds` is shared with the dind service, which is why the WAL archive mount in the same drill worked.

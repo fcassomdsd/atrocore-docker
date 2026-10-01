@@ -54,7 +54,14 @@ set -uo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACE="$(cd "${REPO_DIR}/.." && pwd)"
 DEST="${BACKUP_DIR:-${WORKSPACE}/backups}"
-RETENTION_DAYS=30
+# BACKUP_RETENTION_DAYS, like BACKUP_DIR above, because that is how the systemd
+# units configure this: deploy/systemd/backup.env.example advertises the
+# variable, and until now only backup-offsite.sh read it -- so a host that set
+# it got the retention it asked for at the DESTINATION and a hardcoded 30 days
+# locally. Local retention is the more consequential of the two: it is also
+# what anchors WAL pruning, so 30 days of sets pins 30 days of WAL whatever the
+# operator configured. `--retention-days` still wins over both.
+RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
 ASSUME_YES=0
 
 while [ $# -gt 0 ]; do
