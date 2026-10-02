@@ -90,6 +90,12 @@ The format is inspired by Keep a Changelog and releases are dated — see CONTRI
 
 ### Fixed
 
+- **`install-backup-timers.sh --print` installed instead of previewing.** `--print`, `--user` and `--system` shared one `MODE` variable, so the last flag on the line silently won: `--print --user` wrote all six unit files. Found by asking for a preview and getting an install.
+
+  The second half is the more interesting one. Because `--print` *was* a mode, it could only ever render the **system** variant — so even used correctly it could not show what `--user` writes, which differs: a user unit has its `docker.service` ordering commented out, because that is a system unit the user manager cannot see and a user unit ordering itself after it refuses to start. A preview that does not match the thing it previews is worse than no preview.
+
+  `--print` is now a modifier on a mode. `--print --user` previews the user install including that rewrite, `--print` alone previews the system install as before, and order does not matter. The dry run also now names the target directory, reports a missing `EnvironmentFile`, and warns about any missing `ExecStart` script rather than staying silent about the two things that would make the real run fail.
+
 - **`BACKUP_RETENTION_DAYS` configured the destination's retention and not this host's.** `deploy/systemd/backup.env.example` advertises the variable and the README presents it as *the* retention setting, but only `backup-offsite.sh` ever read it. `backup-platform.sh` hardcoded `RETENTION_DAYS=30`, and `backup-nightly.sh` calls it with `--yes` and nothing else — so a host that asked for one day of local sets got one day at the destination and **thirty on itself**.
 
   Local retention is the more consequential of the two, because it is also what anchors WAL pruning: thirty days of retained sets pins thirty days of WAL no matter what the operator configured. On the machine where this was found that is the difference between roughly 4 GB and roughly 100 GB. `RETENTION_DAYS` now defaults from `BACKUP_RETENTION_DAYS`, with `--retention-days` still winning over both — verified across all four combinations, and end to end through the systemd unit, whose banner now reads `retention: 1 day(s)` where it read 30.
