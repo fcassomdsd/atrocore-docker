@@ -4,9 +4,17 @@
 #
 # Render and install the backup systemd units for this checkout.
 #
-#   scripts/install-backup-timers.sh --print          # show what would be written
+#   scripts/install-backup-timers.sh --print          # preview the --system install
+#   scripts/install-backup-timers.sh --print --user   # preview the --user install
 #   scripts/install-backup-timers.sh --user           # install as user units (testing)
 #   sudo scripts/install-backup-timers.sh --system    # install system-wide
+#
+# --print is a MODIFIER, not a third mode: it previews whichever install you
+# asked for and writes nothing. It used to be a mode sharing one variable with
+# the other two, so `--print --user` silently became an install -- and `--print`
+# could only ever show the --system rendering, which is not what `--user`
+# writes (see the docker.service note below). A preview that does not match
+# the thing it previews is worse than no preview.
 #
 #   --repo <dir>       default: this checkout
 #   --env-file <path>  default: /etc/compliance-platform/backup.env
@@ -26,6 +34,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${REPO_DIR}/deploy/systemd"
 MODE=""
+DRY_RUN=0
 REPO="${REPO_DIR}"
 ENVFILE=""
 PLACEHOLDER="/opt/compliance-platform/atrocore-docker"
@@ -36,7 +45,7 @@ die()   { printf '\033[31m%s\033[0m\n' "$1" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --print)    MODE=print; shift ;;
+    --print)    DRY_RUN=1; shift ;;
     --user)     MODE=user; shift ;;
     --system)   MODE=system; shift ;;
     --repo)     REPO="${2:?--repo needs a directory}"; shift 2 ;;
@@ -45,12 +54,16 @@ while [ $# -gt 0 ]; do
     *)          die "unknown argument: $1" ;;
   esac
 done
-[ -n "${MODE}" ] || die "one of --print, --user or --system is required"
+# --print on its own previews the --system install, because that is the real
+# deployment and it is what the bare flag used to show.
+if [ -z "${MODE}" ]; then
+  [ "${DRY_RUN}" -eq 1 ] || die "one of --print, --user or --system is required"
+  MODE=system
+fi
 
 case "${MODE}" in
   user)   TARGET="${HOME}/.config/systemd/user"; : "${ENVFILE:=${HOME}/.config/compliance-platform/backup.env}" ;;
   system) TARGET="/etc/systemd/system";          : "${ENVFILE:=${PLACEHOLDER_ENV}}" ;;
-  print)  TARGET="(not written)";                : "${ENVFILE:=${PLACEHOLDER_ENV}}" ;;
 esac
 
 UNITS=(
@@ -75,11 +88,17 @@ render() { # render <unit> -> rendered text on stdout
       fi
 }
 
-if [ "${MODE}" = "print" ]; then
+if [ "${DRY_RUN}" -eq 1 ]; then
+  printf 'DRY RUN — nothing is written. This is the %s install, into %s\n' "${MODE}" "${TARGET}"
+  [ -f "${ENVFILE}" ] || printf '\033[33m  !! %s does not exist yet — the units would fail until it does.\n     Start from deploy/systemd/backup.env.example\033[0m\n' "${ENVFILE}"
+  for s in with-backup-metrics.sh backup-nightly.sh ship-wal-archive.sh backup-offsite.sh; do
+    [ -x "${REPO}/scripts/${s}" ] || printf '\033[33m  !! %s/scripts/%s is missing or not executable — a real run would refuse\033[0m\n' "${REPO}" "${s}"
+  done
   for u in "${UNITS[@]}"; do
-    printf '\n----- %s -----\n' "${u}"
+    printf '\n----- %s/%s -----\n' "${TARGET}" "${u}"
     render "${u}"
   done
+  printf '\nDry run: %s file(s) would be written to %s. Re-run without --print to apply.\n' "${#UNITS[@]}" "${TARGET}"
   exit 0
 fi
 

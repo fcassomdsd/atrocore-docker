@@ -28,7 +28,11 @@ systemctl list-timers 'compliance-*'
 `install-backup-timers.sh` fills in the installation path, because systemd
 has no notion of "the directory this unit came from" and editing six files
 by hand is how one ends up pointing at the wrong checkout. `--print` shows
-what it would write without writing it.
+what it would write without writing it, and it is a **modifier, not a mode**:
+`--print --user` previews the user install, `--print` on its own previews the
+system one. That distinction matters because the two renderings differ — a
+user unit has its `docker.service` ordering commented out — so a preview that
+ignored which install you meant would be showing you the wrong file.
 
 Credentials live in the `EnvironmentFile`, never in the units: the units are
 tracked in git, and a credential in a tracked file is a published one.
